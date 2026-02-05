@@ -1,20 +1,13 @@
 ﻿import { DomainError } from '../exceptions/domain-error';
-import type { Rank } from './rank';
-import type { Suit } from './suit';
-import { assertRank } from './rank';
-import { assertSuit } from './suit';
+import { assertRank, type Rank } from './rank';
+import { assertSuit, type Suit } from './suit';
 
 export class InvalidCardError extends DomainError {
   constructor(card: string) {
-    super(`Invalid card: ${card}`);
+    super(`Invalid card: Invalid card: ${card}`);
   }
 }
 
-/**
- * Card format: "AS", "2S", "KH", "7D"
- * Rank: A,2,3,4,5,6,7,Q,J,K
- * Suit: S,H,D,C
- */
 export class Card {
   private readonly value: string;
 
@@ -25,7 +18,6 @@ export class Card {
       throw new InvalidCardError(value);
     }
 
-    // valida tipagem dos chars
     assertRank(normalized[0]!);
     assertSuit(normalized[1]!);
 
@@ -49,6 +41,7 @@ export class Card {
   }
 
   private static isValid(value: string): boolean {
-    return /^[A234567QJK][SHDC]$/.test(value);
+    // Agora valida: P,C,E,O
+    return /^[A234567QJK][PCEO]$/.test(value);
   }
 }

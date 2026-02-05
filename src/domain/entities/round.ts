@@ -34,7 +34,6 @@ export class Round {
 
     const c1 = this.plays.get('P1');
     const c2 = this.plays.get('P2');
-
     if (!c1 || !c2) throw new InvalidMoveError('Round missing plays.');
 
     const r = compareCards(c1, c2, this.viraRank);

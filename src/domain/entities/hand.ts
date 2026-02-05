@@ -1,7 +1,7 @@
 ﻿import type { PlayerId } from '../value-objects/player-id';
-import type { Card } from '../value-objects/card';
 import type { RoundResult } from '../value-objects/round-result';
 import type { Rank } from '../value-objects/rank';
+import type { Card } from '../value-objects/card';
 
 import { Round } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';

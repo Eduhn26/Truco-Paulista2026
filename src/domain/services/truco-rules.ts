@@ -1,15 +1,14 @@
 import type { Card } from '../value-objects/card';
-import type { Rank } from '../value-objects/rank';
+import { nextRank, rankStrength, type Rank } from '../value-objects/rank';
 import type { Suit } from '../value-objects/suit';
-import { nextRank, rankStrength } from '../value-objects/rank';
 
 export type CompareResult = 'A' | 'B' | 'TIE';
 
 const MANILHA_SUIT_STRENGTH: Record<Suit, number> = {
-  C: 0, // paus
-  H: 1, // copas
-  S: 2, // espadas
-  D: 3, // ouros
+  P: 3, // Paus - MAIS FORTE
+  C: 2, // Copas
+  E: 1, // Espadas
+  O: 0, // Ouros - MAIS FRACO
 };
 
 export function manilhaRankFromVira(vira: Rank): Rank {
@@ -25,7 +24,6 @@ export function compareCards(a: Card, b: Card, vira: Rank): CompareResult {
   if (aIsManilha && !bIsManilha) return 'A';
   if (!aIsManilha && bIsManilha) return 'B';
 
-  // ambos manilha: naipe decide
   if (aIsManilha && bIsManilha) {
     const sa = MANILHA_SUIT_STRENGTH[a.getSuit()];
     const sb = MANILHA_SUIT_STRENGTH[b.getSuit()];
@@ -34,10 +32,8 @@ export function compareCards(a: Card, b: Card, vira: Rank): CompareResult {
     return 'TIE';
   }
 
-  // nenhum manilha: ranking base
   const ra = rankStrength(a.getRank());
   const rb = rankStrength(b.getRank());
-
   if (ra > rb) return 'A';
   if (rb > ra) return 'B';
   return 'TIE';
