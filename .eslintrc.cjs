@@ -28,13 +28,4 @@ module.exports = {
     ],
     '@typescript-eslint/no-explicit-any': 'error',
   },
-  overrides: [
-    {
-      files: ['test/**/*.ts', 'src/**/*.spec.ts'],
-      parserOptions: {
-        project: ['./tsconfig.eslint.json'],
-        tsconfigRootDir: __dirname,
-      },
-    },
-  ],
 };

@@ -1,18 +1,21 @@
 ﻿import type { PlayerId } from '../value-objects/player-id';
 import type { Card } from '../value-objects/card';
 import type { RoundResult } from '../value-objects/round-result';
+import type { Rank } from '../value-objects/rank';
 
 import { Round } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
 
 export class Hand {
-  private readonly rounds: Round[] = [new Round()];
-  private finished: boolean = false;
+  private readonly rounds: Round[];
+  private finished = false;
+
+  constructor(private readonly viraRank: Rank) {
+    this.rounds = [new Round(this.viraRank)];
+  }
 
   play(player: PlayerId, card: Card): void {
-    if (this.finished) {
-      throw new InvalidMoveError('Hand is already finished.');
-    }
+    if (this.finished) throw new InvalidMoveError('Hand is already finished.');
 
     const currentRound = this.getCurrentRound();
     currentRound.play(player, card);
@@ -21,7 +24,7 @@ export class Hand {
       this.checkEnd();
 
       if (!this.finished && this.rounds.length < 3) {
-        this.rounds.push(new Round());
+        this.rounds.push(new Round(this.viraRank));
       }
     }
   }
