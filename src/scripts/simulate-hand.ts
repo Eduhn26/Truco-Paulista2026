@@ -1,7 +1,9 @@
 import { Card } from '../domain/value-objects/card';
-import { RANKS, type Rank, nextRank } from '../domain/value-objects/rank';
-import { SUITS, type Suit } from '../domain/value-objects/suit';
-import { Hand } from '../domain/entities/hand';
+import type { Rank } from '../domain/value-objects/rank';
+import type { Suit } from '../domain/value-objects/suit';
+
+import { manilhaRankFromVira } from '../domain/services/truco-rules';
+import { Match } from '../domain/entities/match';
 
 const SUIT_LABEL: Record<Suit, { name: string; symbol: string }> = {
   P: { name: 'Paus', symbol: '♣' },
@@ -10,24 +12,26 @@ const SUIT_LABEL: Record<Suit, { name: string; symbol: string }> = {
   O: { name: 'Ouros', symbol: '♦' },
 };
 
-function pretty(card: Card): string {
-  const suit = card.getSuit();
-  const rank = card.getRank();
-  const meta = SUIT_LABEL[suit];
-  return `${rank}${meta.symbol} (${meta.name})`;
+function cardPretty(card: Card): string {
+  const s = card.getSuit();
+  const suit = SUIT_LABEL[s];
+  return `${card.getRank()}${suit.symbol} (${suit.name})`;
 }
 
 function makeDeck(): Card[] {
+  const ranks: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+  const suits: Suit[] = ['P', 'C', 'E', 'O'];
+
   const deck: Card[] = [];
-  for (const r of RANKS) {
-    for (const s of SUITS) {
+  for (const r of ranks) {
+    for (const s of suits) {
       deck.push(Card.from(`${r}${s}`));
     }
   }
   return deck;
 }
 
-function shuffle<T>(arr: readonly T[]): T[] {
+function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -38,35 +42,54 @@ function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-function simulateHand(): void {
-  const deck = shuffle(makeDeck());
+function draw(deck: Card[]): Card {
+  const c = deck.shift();
+  if (!c) throw new Error('Deck is empty');
+  return c;
+}
 
-  const vira = deck.pop()!;
-  const viraRank: Rank = vira.getRank();
-  const manilha = nextRank(viraRank);
+function simulateMatch(): void {
+  const match = new Match(3);
 
   console.log('==============================');
-  console.log(`Vira: ${pretty(vira)}  → Manilha: ${manilha}`);
+  console.log('INICIANDO PARTIDA');
   console.log('==============================');
 
-  const hand = new Hand(viraRank);
+  while (match.getState() !== 'finished') {
+    const deck = shuffle(makeDeck());
 
-  while (!hand.isFinished()) {
-    const c1 = deck.pop()!;
-    const c2 = deck.pop()!;
+    const vira = draw(deck);
+    const viraRank = vira.getRank();
+    const manilha = manilhaRankFromVira(viraRank);
 
-    console.log(`P1 joga: ${pretty(c1)}`);
-    console.log(`P2 joga: ${pretty(c2)}`);
+    console.log('------------------------------');
+    console.log('Nova mão');
+    console.log(`Vira: ${cardPretty(vira)} → Manilha: ${manilha}`);
 
-    hand.play('P1', c1);
-    hand.play('P2', c2);
+    match.start(viraRank);
 
-    console.log('---');
+    // joga até a mão terminar (o Match vai voltar pra "waiting" ou "finished")
+    while (match.getState() === 'in_progress') {
+      const c1 = draw(deck);
+      console.log(`P1 joga: ${cardPretty(c1)}`);
+      match.play('P1', c1);
+
+      if (match.getState() !== 'in_progress') break;
+
+      const c2 = draw(deck);
+      console.log(`P2 joga: ${cardPretty(c2)}`);
+      match.play('P2', c2);
+    }
+
+    const score = match.getScore();
+    console.log(`Placar: P1: ${score.playerOne} | P2: ${score.playerTwo}`);
   }
 
-  console.log(`Rounds: ${hand.getRoundsCount()}`);
-  console.log(`Winner: ${hand.getWinner() ?? 'TIE/None'}`);
+  const final = match.getScore();
+  console.log('==============================');
+  console.log('PARTIDA FINALIZADA');
+  console.log(`Placar final: P1: ${final.playerOne} | P2: ${final.playerTwo}`);
   console.log('==============================');
 }
 
-simulateHand();
+simulateMatch();

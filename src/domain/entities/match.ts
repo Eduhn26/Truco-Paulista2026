@@ -1,74 +1,62 @@
-import { Score } from '../value-objects/score';
+import type { Card } from '../value-objects/card';
 import type { MatchState } from '../value-objects/match-state';
-import { DomainError } from '../exceptions/domain-error';
+import type { PlayerId } from '../value-objects/player-id';
+import type { Rank } from '../value-objects/rank';
 
-export class MatchAlreadyFinishedError extends DomainError {
-  constructor() {
-    super('Match is already finished.');
-  }
-}
-
-export class MatchCannotBeStartedError extends DomainError {
-  constructor() {
-    super('Match cannot be started from current state.');
-  }
-}
+import { InvalidMoveError } from '../exceptions/invalid-move-error';
+import { Score } from '../value-objects/score';
+import { Hand } from './hand';
 
 export class Match {
-  private state: MatchState;
-  private scorePlayerOne: Score;
-  private scorePlayerTwo: Score;
+  private state: MatchState = 'waiting';
+  private score: Score = Score.zero();
+  private currentHand: Hand | null = null;
 
-  private constructor() {
-    this.state = 'waiting';
-    this.scorePlayerOne = Score.zero();
-    this.scorePlayerTwo = Score.zero();
-  }
-
-  static create(): Match {
-    return new Match();
-  }
-
-  start(): void {
-    if (this.state !== 'waiting') {
-      throw new MatchCannotBeStartedError();
-    }
-
-    this.state = 'in_progress';
-  }
-
-  addPointsToPlayerOne(points: number): void {
-    this.ensureInProgress();
-    this.scorePlayerOne = this.scorePlayerOne.add(points);
-    this.checkEnd();
-  }
-
-  addPointsToPlayerTwo(points: number): void {
-    this.ensureInProgress();
-    this.scorePlayerTwo = this.scorePlayerTwo.add(points);
-    this.checkEnd();
-  }
+  constructor(private readonly pointsToWin: number) {}
 
   getState(): MatchState {
     return this.state;
   }
 
-  getScore(): { playerOne: number; playerTwo: number } {
-    return {
-      playerOne: this.scorePlayerOne.getValue(),
-      playerTwo: this.scorePlayerTwo.getValue(),
-    };
+  getScore(): Score {
+    return this.score;
   }
 
-  private ensureInProgress(): void {
-    if (this.state !== 'in_progress') {
-      throw new MatchAlreadyFinishedError();
+  start(viraRank: Rank): void {
+    if (this.state === 'finished') {
+      throw new InvalidMoveError('Match is already finished.');
     }
+
+    // Só pode iniciar uma nova mão quando estiver aguardando
+    if (this.state !== 'waiting') return;
+
+    this.currentHand = new Hand(viraRank);
+    this.state = 'in_progress';
   }
 
-  private checkEnd(): void {
-    if (this.scorePlayerOne.isWinning() || this.scorePlayerTwo.isWinning()) {
+  play(player: PlayerId, card: Card): void {
+    if (this.state !== 'in_progress' || !this.currentHand) {
+      throw new InvalidMoveError('Match is not in progress.');
+    }
+
+    this.currentHand.play(player, card);
+
+    if (!this.currentHand.isFinished()) return;
+
+    const winner = this.currentHand.getWinner();
+    if (winner) {
+      this.score = this.score.addPoint(winner);
+    }
+
+    const matchWinner = this.score.hasWinner(this.pointsToWin);
+
+    this.currentHand = null;
+
+    if (matchWinner) {
       this.state = 'finished';
+      return;
     }
+
+    this.state = 'waiting';
   }
 }

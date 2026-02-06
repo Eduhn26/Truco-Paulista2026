@@ -1,35 +1,23 @@
-import { DomainError } from '../exceptions/domain-error';
-
-export class InvalidScoreError extends DomainError {
-  constructor(score: number) {
-    super(`Invalid score: ${score}. Score must be between 0 and 12.`);
-  }
-}
+import type { PlayerId } from './player-id';
 
 export class Score {
-  private readonly value: number;
-
-  private constructor(value: number) {
-    if (value < 0 || value > 12) {
-      throw new InvalidScoreError(value);
-    }
-
-    this.value = value;
-  }
+  private constructor(
+    public readonly playerOne: number,
+    public readonly playerTwo: number,
+  ) {}
 
   static zero(): Score {
-    return new Score(0);
+    return new Score(0, 0);
   }
 
-  add(points: number): Score {
-    return new Score(this.value + points);
+  addPoint(player: PlayerId): Score {
+    if (player === 'P1') return new Score(this.playerOne + 1, this.playerTwo);
+    return new Score(this.playerOne, this.playerTwo + 1);
   }
 
-  getValue(): number {
-    return this.value;
-  }
-
-  isWinning(): boolean {
-    return this.value >= 12;
+  hasWinner(pointsToWin: number): PlayerId | null {
+    if (this.playerOne >= pointsToWin) return 'P1';
+    if (this.playerTwo >= pointsToWin) return 'P2';
+    return null;
   }
 }
