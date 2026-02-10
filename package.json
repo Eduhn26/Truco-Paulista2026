@@ -18,7 +18,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "simulate:hand": "ts-node src/scripts/simulate-hand.ts"
+    "simulate:hand": "ts-node -r tsconfig-paths/register src/scripts/simulate-hand.ts"
+
 
   },
   "dependencies": {
