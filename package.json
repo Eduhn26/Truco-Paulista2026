@@ -18,16 +18,17 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "simulate:hand": "ts-node -r tsconfig-paths/register src/scripts/simulate-hand.ts"
-
-
+    "simulate": "ts-node -r tsconfig-paths/register src/scripts/simulate-hand.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/platform-socket.io": "^10.4.22",
+    "@nestjs/websockets": "^10.4.22",
     "reflect-metadata": "^0.2.0",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
@@ -52,6 +53,4 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3"
   }
-
-  
 }
