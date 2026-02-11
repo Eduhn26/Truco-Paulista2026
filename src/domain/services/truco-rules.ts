@@ -5,10 +5,10 @@ import type { Suit } from '../value-objects/suit';
 export type CompareResult = 'A' | 'B' | 'TIE';
 
 const MANILHA_SUIT_STRENGTH: Record<Suit, number> = {
-  P: 3, // Paus - MAIS FORTE
+  P: 3, // Paus - mais forte
   C: 2, // Copas
   E: 1, // Espadas
-  O: 0, // Ouros - MAIS FRACO
+  O: 0, // Ouros - mais fraco
 };
 
 export function manilhaRankFromVira(vira: Rank): Rank {
@@ -27,6 +27,7 @@ export function compareCards(a: Card, b: Card, vira: Rank): CompareResult {
   if (aIsManilha && bIsManilha) {
     const sa = MANILHA_SUIT_STRENGTH[a.getSuit()];
     const sb = MANILHA_SUIT_STRENGTH[b.getSuit()];
+
     if (sa > sb) return 'A';
     if (sb > sa) return 'B';
     return 'TIE';
@@ -34,6 +35,7 @@ export function compareCards(a: Card, b: Card, vira: Rank): CompareResult {
 
   const ra = rankStrength(a.getRank());
   const rb = rankStrength(b.getRank());
+
   if (ra > rb) return 'A';
   if (rb > ra) return 'B';
   return 'TIE';
