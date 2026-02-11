@@ -16,6 +16,50 @@ const SUIT_LABEL: Record<Suit, { name: string; symbol: string }> = {
   O: { name: 'Ouros', symbol: '♦' },
 };
 
+const POINTS_TO_WIN = Number(process.env['POINTS_TO_WIN'] ?? '12');
+const PLAY_DELAY_MS = Number(process.env['PLAY_DELAY_MS'] ?? '350');
+const HAND_DELAY_MS = Number(process.env['HAND_DELAY_MS'] ?? '900');
+const SHOW_TS = (process.env['SHOW_TS'] ?? '0') === '1';
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function ts(): string {
+  return new Date().toISOString().slice(11, 19);
+}
+
+function prefix(): string {
+  return SHOW_TS ? `${ts()}  ` : '';
+}
+
+function hr(char = '-', width = 58): void {
+  // eslint-disable-next-line no-console
+  console.log(char.repeat(width));
+}
+
+function banner(title: string): void {
+  hr('=');
+  // eslint-disable-next-line no-console
+  console.log(`${prefix()}${title}`);
+  hr('=');
+}
+
+function arch(message: string): void {
+  // eslint-disable-next-line no-console
+  console.log(`${prefix()}[ARCH] ${message}`);
+}
+
+function out(message: string): void {
+  // eslint-disable-next-line no-console
+  console.log(`${prefix()}${message}`);
+}
+
+function indented(message: string): void {
+  // eslint-disable-next-line no-console
+  console.log(`          ${message}`);
+}
+
 function makeDeck(): string[] {
   const ranks: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
   const suits: Suit[] = ['P', 'C', 'E', 'O'];
@@ -46,19 +90,33 @@ function draw(deck: string[]): string {
   return c;
 }
 
-function prettyCard(code: string): string {
-  const rank = code.slice(0, 1) as Rank;
-  const suit = code.slice(1, 2) as Suit;
-  const meta = SUIT_LABEL[suit];
-  return `${rank}${meta.symbol} (${meta.name})`;
-}
-
 function rankFromCard(code: string): Rank {
   return code.slice(0, 1) as Rank;
 }
 
-function nextPlayer(p: PlayerId): PlayerId {
-  return p === 'P1' ? 'P2' : 'P1';
+function prettyCard(code: string): string {
+  const rank = code.slice(0, 1) as Rank;
+  const suit = code.slice(1, 2) as Suit;
+  const meta = SUIT_LABEL[suit];
+  return `${rank}${meta.symbol}`;
+}
+
+type Score = { playerOne: number; playerTwo: number };
+
+function handOutcome(before: Score, after: Score): 'P1' | 'P2' | 'TIE' {
+  if (after.playerOne > before.playerOne) return 'P1';
+  if (after.playerTwo > before.playerTwo) return 'P2';
+  return 'TIE';
+}
+
+function scoreLine(score: Score): string {
+  return `TENTOS: P1 ${score.playerOne}/${POINTS_TO_WIN}  |  P2 ${score.playerTwo}/${POINTS_TO_WIN}`;
+}
+
+function winnerFromScore(score: Score): 'P1' | 'P2' | 'TIE' {
+  if (score.playerOne > score.playerTwo) return 'P1';
+  if (score.playerTwo > score.playerOne) return 'P2';
+  return 'TIE';
 }
 
 async function simulateMatch(): Promise<void> {
@@ -68,56 +126,96 @@ async function simulateMatch(): Promise<void> {
   const playCard = new PlayCardUseCase(repo);
   const viewState = new ViewMatchStateUseCase(repo);
 
-  const created = await createMatch.execute({ pointsToWin: 3 });
+  banner('TRUCO PAULISTA — SIMULAÇÃO (FASE 2: APPLICATION LAYER)');
+  out('Modo jogo + rastreio arquitetural (Use Cases visíveis)');
+  out(
+    `Config: pointsToWin=${POINTS_TO_WIN} | playDelayMs=${PLAY_DELAY_MS} | handDelayMs=${HAND_DELAY_MS}`,
+  );
+  hr();
+
+  arch('CreateMatchUseCase.execute()');
+  const created = await createMatch.execute({ pointsToWin: POINTS_TO_WIN });
   const matchId = created.matchId;
 
-  console.log('==============================');
-  console.log('INICIANDO PARTIDA (via Use Cases)');
-  console.log('MatchId:', matchId);
-  console.log('==============================');
+  out(`matchId=${matchId}`);
+  await sleep(HAND_DELAY_MS);
+
+  let hands = 0;
+  let totalTurns = 0;
 
   for (;;) {
-    const state0 = await viewState.execute({ matchId });
-    if (state0.state === 'finished') break;
+    const state = await viewState.execute({ matchId });
+    if (state.state === 'finished') break;
+
+    hands += 1;
+
+    const before = await viewState.execute({ matchId });
+    const beforeScore = before.score;
 
     const deck = shuffle(makeDeck());
     const vira = draw(deck);
     const viraRank = rankFromCard(vira);
 
-    console.log('------------------------------');
-    console.log('Nova mão');
-    console.log(`Vira: ${prettyCard(vira)}`);
-
+    hr();
+    out(`🂠 MÃO #${hands}  (vale 1 tento)`);
+    out(`Vira: ${prettyCard(vira)}  →  Manilha: (depende do domínio)`);
+    arch('StartHandUseCase.execute()');
     await startHand.execute({ matchId, viraRank });
 
-    let currentPlayer: PlayerId = 'P1';
+    await sleep(HAND_DELAY_MS);
+
+    arch('PlayCardUseCase.execute() (rodando jogadas via Application)');
+    hr();
+
+    let turn = 0;
 
     for (;;) {
       const current = await viewState.execute({ matchId });
       if (current.state !== 'in_progress') break;
 
+      turn += 1;
+      totalTurns += 1;
+
+      const player: PlayerId = turn % 2 === 1 ? 'P1' : 'P2';
       const card = draw(deck);
 
-      console.log(`${currentPlayer} joga: ${prettyCard(card)}`);
+      out(`${player} joga: ${prettyCard(card)}`);
+      indented(`(turno ${turn})`);
 
       await playCard.execute({
         matchId,
-        playerId: currentPlayer,
+        playerId: player,
         card,
       });
 
-      currentPlayer = nextPlayer(currentPlayer);
+      await sleep(PLAY_DELAY_MS);
     }
 
-    const afterHand = await viewState.execute({ matchId });
-    console.log(`Placar: P1: ${afterHand.score.playerOne} | P2: ${afterHand.score.playerTwo}`);
+    const after = await viewState.execute({ matchId });
+    const afterScore = after.score;
+    const outcome = handOutcome(beforeScore, afterScore);
+
+    hr();
+    if (outcome === 'TIE') {
+      out('🤝 Resultado da mão: EMPATE (sem tento)');
+    } else {
+      out(`🏆 Resultado da mão: ${outcome} ganhou 1 tento`);
+    }
+    out(scoreLine(afterScore));
+
+    await sleep(HAND_DELAY_MS);
   }
 
   const final = await viewState.execute({ matchId });
-  console.log('==============================');
-  console.log('PARTIDA FINALIZADA');
-  console.log(`Placar final: P1: ${final.score.playerOne} | P2: ${final.score.playerTwo}`);
-  console.log('==============================');
+  const finalWinner = winnerFromScore(final.score);
+
+  hr();
+  banner('PARTIDA FINALIZADA');
+  out(`matchId=${matchId}`);
+  out(`PLACAR FINAL: P1 ${final.score.playerOne} x ${final.score.playerTwo} P2`);
+  out(`VENCEDOR: ${finalWinner === 'TIE' ? 'EMPATE' : finalWinner}`);
+  out(`RESUMO: mãos=${hands} | jogadas=${totalTurns}`);
+  hr('=');
 }
 
 simulateMatch().catch((err) => {
