@@ -25,6 +25,11 @@ import type { PlayCardResponseDto } from '@game/application/dtos/responses/play-
 
 type ErrorResponseDto = { message: string };
 
+type PlayerSession = {
+  matchId: string;
+  playerId: 'P1' | 'P2';
+};
+
 type CreateMatchPayload = {
   pointsToWin?: unknown;
 };
@@ -36,7 +41,6 @@ type StartHandPayload = {
 
 type PlayCardPayload = {
   matchId?: unknown;
-  playerId?: unknown;
   card?: {
     rank?: unknown;
     suit?: unknown;
@@ -47,12 +51,18 @@ type GetStatePayload = {
   matchId?: unknown;
 };
 
+type JoinMatchPayload = {
+  matchId?: unknown;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
 export class GameGateway {
   @WebSocketServer()
   private readonly server!: Server;
+
+  private readonly sessionsBySocketId = new Map<string, PlayerSession>();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -77,13 +87,21 @@ export class GameGateway {
         };
       }
 
-      const dto: CreateMatchRequestDto = {
-        pointsToWin,
-      };
-
+      const dto: CreateMatchRequestDto = { pointsToWin };
       const result = await this.createMatchUseCase.execute(dto);
 
       await socket.join(result.matchId);
+
+      // registra como P1
+      this.sessionsBySocketId.set(socket.id, {
+        matchId: result.matchId,
+        playerId: 'P1',
+      });
+
+      socket.emit('player-assigned', {
+        matchId: result.matchId,
+        playerId: 'P1',
+      });
 
       const state = await this.viewMatchStateUseCase.execute({
         matchId: result.matchId,
@@ -92,6 +110,41 @@ export class GameGateway {
       this.server.to(result.matchId).emit('match-state', state);
 
       return { event: 'match-created', data: result };
+    } catch (err: unknown) {
+      return { event: 'error', data: { message: this.toSafeMessage(err) } };
+    }
+  }
+
+  @SubscribeMessage('join-match')
+  async handleJoinMatch(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: JoinMatchPayload,
+  ): Promise<WsResponse<{ matchId: string; playerId: 'P2' }> | WsResponse<ErrorResponseDto>> {
+    try {
+      const matchIdRaw = payload?.matchId;
+
+      if (typeof matchIdRaw !== 'string' || matchIdRaw.trim().length === 0) {
+        return {
+          event: 'error',
+          data: { message: 'Invalid payload: matchId must be a non-empty string.' },
+        };
+      }
+
+      const matchId = matchIdRaw.trim();
+
+      await socket.join(matchId);
+
+      this.sessionsBySocketId.set(socket.id, {
+        matchId,
+        playerId: 'P2',
+      });
+
+      socket.emit('player-assigned', { matchId, playerId: 'P2' });
+
+      const state = await this.viewMatchStateUseCase.execute({ matchId });
+      this.server.to(matchId).emit('match-state', state);
+
+      return { event: 'match-joined', data: { matchId, playerId: 'P2' } };
     } catch (err: unknown) {
       return { event: 'error', data: { message: this.toSafeMessage(err) } };
     }
@@ -129,7 +182,6 @@ export class GameGateway {
       const result = await this.startHandUseCase.execute(dto);
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
-
       this.server.to(matchId).emit('match-state', state);
 
       return { event: 'hand-started', data: result };
@@ -171,8 +223,15 @@ export class GameGateway {
     @MessageBody() payload: PlayCardPayload,
   ): Promise<WsResponse<PlayCardResponseDto> | WsResponse<ErrorResponseDto>> {
     try {
+      const session = this.sessionsBySocketId.get(socket.id);
+      if (!session) {
+        return {
+          event: 'error',
+          data: { message: 'You are not assigned to a player. Join a match first.' },
+        };
+      }
+
       const matchIdRaw = payload?.matchId;
-      const playerIdRaw = payload?.playerId;
       const rankRaw = payload?.card?.rank;
       const suitRaw = payload?.card?.suit;
 
@@ -180,13 +239,6 @@ export class GameGateway {
         return {
           event: 'error',
           data: { message: 'Invalid payload: matchId must be a non-empty string.' },
-        };
-      }
-
-      if (typeof playerIdRaw !== 'string' || playerIdRaw.trim().length === 0) {
-        return {
-          event: 'error',
-          data: { message: 'Invalid payload: playerId must be a non-empty string.' },
         };
       }
 
@@ -205,14 +257,19 @@ export class GameGateway {
       }
 
       const matchId = matchIdRaw.trim();
-      const playerId = playerIdRaw.trim().toUpperCase();
+
+      if (session.matchId !== matchId) {
+        return {
+          event: 'error',
+          data: { message: 'Socket is not joined to this match.' },
+        };
+      }
+
+      const playerId = session.playerId;
 
       const rank = rankRaw.trim().toUpperCase();
       const suit = this.normalizeSuit(suitRaw.trim());
-
       const cardValue = `${rank}${suit}`;
-
-      await socket.join(matchId);
 
       const dto: PlayCardRequestDto = {
         matchId,
@@ -223,7 +280,6 @@ export class GameGateway {
       const result = await this.playCardUseCase.execute(dto);
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
-
       this.server.to(matchId).emit('match-state', state);
 
       return { event: 'card-played', data: result };
@@ -235,7 +291,6 @@ export class GameGateway {
   private normalizeSuit(value: string): string {
     const v = value.trim().toUpperCase();
 
-    // aceita tanto "C" quanto "♣" etc. (mantém simples e previsível pro Domain)
     if (v === 'C' || v === 'CLUBS' || v === '♣') return 'C';
     if (v === 'D' || v === 'DIAMONDS' || v === '♦') return 'D';
     if (v === 'H' || v === 'HEARTS' || v === '♥') return 'H';
