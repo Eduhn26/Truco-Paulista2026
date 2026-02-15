@@ -61,3 +61,5 @@ coverage
 
 *.tsbuildinfo
 
+
+/src/generated/prisma
