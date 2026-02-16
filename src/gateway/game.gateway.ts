@@ -87,7 +87,11 @@ export class GameGateway {
         };
       }
 
-      const dto: CreateMatchRequestDto = { pointsToWin };
+      // ✅ exactOptionalPropertyTypes: só inclui a key se vier número
+      const dto: CreateMatchRequestDto = {
+        ...(typeof pointsToWin === 'number' ? { pointsToWin } : {}),
+      };
+
       const result = await this.createMatchUseCase.execute(dto);
 
       await socket.join(result.matchId);
