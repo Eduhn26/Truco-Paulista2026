@@ -4,7 +4,7 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-  WsResponse,
+  type WsResponse,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 
@@ -87,11 +87,8 @@ export class GameGateway {
         };
       }
 
-      // ✅ exactOptionalPropertyTypes: só inclui a key se vier número
-      const dto: CreateMatchRequestDto = {
-        ...(typeof pointsToWin === 'number' ? { pointsToWin } : {}),
-      };
-
+      // ✅ exactOptionalPropertyTypes: não pode setar { pointsToWin: undefined }
+      const dto: CreateMatchRequestDto = pointsToWin === undefined ? {} : { pointsToWin };
       const result = await this.createMatchUseCase.execute(dto);
 
       await socket.join(result.matchId);
@@ -114,8 +111,9 @@ export class GameGateway {
       this.server.to(result.matchId).emit('match-state', state);
 
       return { event: 'match-created', data: result };
-    } catch (err: unknown) {
-      return { event: 'error', data: { message: this.toSafeMessage(err) } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
     }
   }
 
@@ -123,34 +121,40 @@ export class GameGateway {
   async handleJoinMatch(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinMatchPayload,
-  ): Promise<WsResponse<{ matchId: string; playerId: 'P2' }> | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
     try {
       const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
-      if (typeof matchIdRaw !== 'string' || matchIdRaw.trim().length === 0) {
+      if (!matchId) {
         return {
           event: 'error',
-          data: { message: 'Invalid payload: matchId must be a non-empty string.' },
+          data: { message: 'Invalid payload: matchId is required.' },
         };
       }
 
-      const matchId = matchIdRaw.trim();
-
       await socket.join(matchId);
 
+      // assign P2 se ainda não tem sessão
       this.sessionsBySocketId.set(socket.id, {
         matchId,
         playerId: 'P2',
       });
 
-      socket.emit('player-assigned', { matchId, playerId: 'P2' });
+      socket.emit('player-assigned', {
+        matchId,
+        playerId: 'P2',
+      });
 
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
+      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
+        matchId,
+      });
       this.server.to(matchId).emit('match-state', state);
 
-      return { event: 'match-joined', data: { matchId, playerId: 'P2' } };
-    } catch (err: unknown) {
-      return { event: 'error', data: { message: this.toSafeMessage(err) } };
+      return { event: 'joined', data: { ok: true } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
     }
   }
 
@@ -163,24 +167,22 @@ export class GameGateway {
       const matchIdRaw = payload?.matchId;
       const viraRankRaw = payload?.viraRank;
 
-      if (typeof matchIdRaw !== 'string' || matchIdRaw.trim().length === 0) {
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim().toUpperCase() : '';
+
+      if (!matchId) {
         return {
           event: 'error',
-          data: { message: 'Invalid payload: matchId must be a non-empty string.' },
+          data: { message: 'Invalid payload: matchId is required.' },
         };
       }
 
-      if (typeof viraRankRaw !== 'string' || viraRankRaw.trim().length === 0) {
+      if (!viraRank) {
         return {
           event: 'error',
-          data: { message: 'Invalid payload: viraRank must be a non-empty string.' },
+          data: { message: 'Invalid payload: viraRank is required.' },
         };
       }
-
-      const matchId = matchIdRaw.trim();
-      const viraRank = viraRankRaw.trim();
-
-      await socket.join(matchId);
 
       const dto: StartHandRequestDto = { matchId, viraRank };
       const result = await this.startHandUseCase.execute(dto);
@@ -189,35 +191,9 @@ export class GameGateway {
       this.server.to(matchId).emit('match-state', state);
 
       return { event: 'hand-started', data: result };
-    } catch (err: unknown) {
-      return { event: 'error', data: { message: this.toSafeMessage(err) } };
-    }
-  }
-
-  @SubscribeMessage('get-state')
-  async handleGetState(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() payload: GetStatePayload,
-  ): Promise<WsResponse<ViewMatchStateResponseDto> | WsResponse<ErrorResponseDto>> {
-    try {
-      const matchIdRaw = payload?.matchId;
-
-      if (typeof matchIdRaw !== 'string' || matchIdRaw.trim().length === 0) {
-        return {
-          event: 'error',
-          data: { message: 'Invalid payload: matchId must be a non-empty string.' },
-        };
-      }
-
-      const matchId = matchIdRaw.trim();
-
-      await socket.join(matchId);
-
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
-
-      return { event: 'match-state', data: state };
-    } catch (err: unknown) {
-      return { event: 'error', data: { message: this.toSafeMessage(err) } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
     }
   }
 
@@ -229,56 +205,38 @@ export class GameGateway {
     try {
       const session = this.sessionsBySocketId.get(socket.id);
       if (!session) {
-        return {
-          event: 'error',
-          data: { message: 'You are not assigned to a player. Join a match first.' },
-        };
+        return { event: 'error', data: { message: 'You must join a match first.' } };
       }
 
-      const matchIdRaw = payload?.matchId;
+      const matchId =
+        typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
+
       const rankRaw = payload?.card?.rank;
       const suitRaw = payload?.card?.suit;
 
-      if (typeof matchIdRaw !== 'string' || matchIdRaw.trim().length === 0) {
+      const rank = typeof rankRaw === 'string' ? rankRaw.trim().toUpperCase() : '';
+      const suit = typeof suitRaw === 'string' ? suitRaw.trim().toUpperCase() : '';
+
+      if (!matchId) {
         return {
           event: 'error',
-          data: { message: 'Invalid payload: matchId must be a non-empty string.' },
+          data: { message: 'Invalid payload: matchId is required.' },
         };
       }
 
-      if (typeof rankRaw !== 'string' || rankRaw.trim().length === 0) {
+      if (!rank || !suit) {
         return {
           event: 'error',
-          data: { message: 'Invalid payload: card.rank must be a non-empty string.' },
+          data: {
+            message: 'Invalid payload: card.rank and card.suit are required.',
+          },
         };
       }
-
-      if (typeof suitRaw !== 'string' || suitRaw.trim().length === 0) {
-        return {
-          event: 'error',
-          data: { message: 'Invalid payload: card.suit must be a non-empty string.' },
-        };
-      }
-
-      const matchId = matchIdRaw.trim();
-
-      if (session.matchId !== matchId) {
-        return {
-          event: 'error',
-          data: { message: 'Socket is not joined to this match.' },
-        };
-      }
-
-      const playerId = session.playerId;
-
-      const rank = rankRaw.trim().toUpperCase();
-      const suit = this.normalizeSuit(suitRaw.trim());
-      const cardValue = `${rank}${suit}`;
 
       const dto: PlayCardRequestDto = {
         matchId,
-        playerId,
-        card: cardValue,
+        playerId: session.playerId,
+        card: `${rank}${suit}`,
       };
 
       const result = await this.playCardUseCase.execute(dto);
@@ -287,24 +245,33 @@ export class GameGateway {
       this.server.to(matchId).emit('match-state', state);
 
       return { event: 'card-played', data: result };
-    } catch (err: unknown) {
-      return { event: 'error', data: { message: this.toSafeMessage(err) } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
     }
   }
 
-  private normalizeSuit(value: string): string {
-    const v = value.trim().toUpperCase();
+  @SubscribeMessage('get-state')
+  async handleGetState(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<ViewMatchStateResponseDto> | WsResponse<ErrorResponseDto>> {
+    try {
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
-    if (v === 'C' || v === 'CLUBS' || v === '♣') return 'C';
-    if (v === 'D' || v === 'DIAMONDS' || v === '♦') return 'D';
-    if (v === 'H' || v === 'HEARTS' || v === '♥') return 'H';
-    if (v === 'S' || v === 'SPADES' || v === '♠') return 'S';
+      if (!matchId) {
+        return {
+          event: 'error',
+          data: { message: 'Invalid payload: matchId is required.' },
+        };
+      }
 
-    return v;
-  }
-
-  private toSafeMessage(err: unknown): string {
-    if (err instanceof Error) return err.message;
-    return 'Unexpected error.';
+      const state = await this.viewMatchStateUseCase.execute({ matchId });
+      return { event: 'match-state', data: state };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
+    }
   }
 }
