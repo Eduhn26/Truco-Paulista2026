@@ -17,7 +17,7 @@ module.exports = {
     node: true,
     jest: true,
   },
-  ignorePatterns: ['dist/', 'node_modules/', '**/.gitkeep'],
+  ignorePatterns: ['dist/', 'node_modules/', 'src/generated/prisma/**', '**/.gitkeep'],
   rules: {
     'prettier/prettier': 'error',
     '@typescript-eslint/no-floating-promises': 'error',

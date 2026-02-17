@@ -6,16 +6,19 @@ import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-cas
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 
-import { InMemoryMatchRepository } from '@game/infrastructure/persistence/in-memory/in-memory-match.repository';
+import { PrismaService } from '@game/infrastructure/persistence/prisma/prisma.service';
+import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 
 import { MATCH_REPOSITORY } from './game.tokens';
 
 @Module({
   providers: [
+    PrismaService,
+
     // Port binding (Application Port -> Infrastructure Adapter)
     {
       provide: MATCH_REPOSITORY,
-      useClass: InMemoryMatchRepository,
+      useClass: PrismaMatchRepository,
     },
 
     // Use Cases (Application) - instantiated via factory to keep Application framework-agnostic
