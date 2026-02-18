@@ -1,16 +1,15 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Prisma schema
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
- 
+  // URL vem do prisma.config.ts (env('DATABASE_URL'))
+  // e/ou do ambiente em runtime (dotenv)
 }
-
 
 model Match {
   id          String   @id @default(cuid())
