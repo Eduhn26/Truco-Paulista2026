@@ -19,11 +19,9 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "simulate": "ts-node -r tsconfig-paths/register src/scripts/simulate-hand.ts",
-
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d",
-
     "prisma:status": "prisma migrate status",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:dev": "prisma migrate dev",
@@ -35,10 +33,13 @@
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/platform-socket.io": "^10.4.22",
     "@nestjs/websockets": "^10.4.22",
+    "@prisma/adapter-pg": "^7.4.0",
     "@prisma/client": "^7.4.0",
+    "pg": "^8.18.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",
