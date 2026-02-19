@@ -11,6 +11,8 @@ import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-st
 import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 
+import { RoomManager } from '@game/gateway/multiplayer/room-manager';
+
 import { MATCH_REPOSITORY } from './game.tokens';
 
 @Module({
@@ -18,6 +20,9 @@ import { MATCH_REPOSITORY } from './game.tokens';
   providers: [
     // Gateway (Transport)
     GameGateway,
+
+    // Multiplayer (ephemeral state)
+    RoomManager,
 
     // Port binding (Application Port -> Infrastructure Adapter)
     {
