@@ -19,6 +19,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "simulate": "ts-node -r tsconfig-paths/register src/scripts/simulate-hand.ts",
+    "ws:client": "ts-node -r tsconfig-paths/register src/scripts/ws-client.ts",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d",
