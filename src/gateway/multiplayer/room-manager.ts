@@ -13,6 +13,8 @@ export type PlayerSession = {
   seatId: SeatId;
   teamId: TeamId;
   domainPlayerId: 'P1' | 'P2';
+  playerToken: string;
+  socketId: string;
 };
 
 export type RoomStateDto = {
@@ -28,10 +30,16 @@ export type RoomStateDto = {
 
 const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A', 'T1B', 'T2B'];
 
+function tokenKey(matchId: string, playerToken: string): string {
+  return `${matchId}::${playerToken}`;
+}
+
 // NOTE: Presença/seat/ready/turn são efêmeros (transport-level). Persistir isso em DB vira estado “fantasma”.
 export class RoomManager {
   private readonly roomsByMatchId = new Map<string, RoomState>();
+
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
+  private readonly sessionsByTokenKey = new Map<string, PlayerSession>();
 
   ensureRoom(matchId: string): void {
     if (this.roomsByMatchId.has(matchId)) return;
@@ -44,27 +52,60 @@ export class RoomManager {
     });
   }
 
-  join(matchId: string, socketId: string): PlayerSession {
+  join(matchId: string, socketId: string, playerToken: string): PlayerSession {
     this.ensureRoom(matchId);
 
     const room = this.roomsByMatchId.get(matchId);
     if (!room) throw new Error('room not found');
 
-    const existing = this.sessionsBySocketId.get(socketId);
-    if (existing) return existing;
+    const existingSocket = this.sessionsBySocketId.get(socketId);
+    if (existingSocket) return existingSocket;
+
+    const key = tokenKey(matchId, playerToken);
+    const existingToken = this.sessionsByTokenKey.get(key);
+
+    // NOTE: Reconexão: token mantém o seat; só trocamos o socketId.
+    if (existingToken) {
+      const oldSocketId = existingToken.socketId;
+
+      room.socketsBySeat.set(existingToken.seatId, socketId);
+
+      this.sessionsBySocketId.delete(oldSocketId);
+
+      const reattached: PlayerSession = {
+        ...existingToken,
+        socketId,
+      };
+
+      this.sessionsByTokenKey.set(key, reattached);
+      this.sessionsBySocketId.set(socketId, reattached);
+
+      return reattached;
+    }
 
     const occupied = new Set<SeatId>(room.socketsBySeat.keys());
     const seatId = nextFreeSeat(occupied);
     if (!seatId) throw new Error('match is full');
 
     room.socketsBySeat.set(seatId, socketId);
+
+    // NOTE: Ready inicia falso apenas no primeiro join do token.
     room.readyBySeat.set(seatId, false);
 
     const teamId = teamFromSeat(seatId);
     const domainPlayerId: 'P1' | 'P2' = teamId === 'T1' ? 'P1' : 'P2';
 
-    const session: PlayerSession = { matchId, seatId, teamId, domainPlayerId };
+    const session: PlayerSession = {
+      matchId,
+      seatId,
+      teamId,
+      domainPlayerId,
+      playerToken,
+      socketId,
+    };
+
     this.sessionsBySocketId.set(socketId, session);
+    this.sessionsByTokenKey.set(key, session);
 
     return session;
   }
@@ -75,24 +116,22 @@ export class RoomManager {
 
     const room = this.roomsByMatchId.get(session.matchId);
     if (room) {
-      room.socketsBySeat.delete(session.seatId);
-      room.readyBySeat.delete(session.seatId);
-
-      // NOTE: Se quem saiu estava com o turno, avançamos pro próximo seat ocupado.
+      // NOTE: Mantemos o seat “reservado” pro token (reconnect). Só removemos o socketId antigo no map por socket.
+      // O socketsBySeat continua apontando pro socketId antigo até reconectar; não afeta o cálculo de sala cheia.
+      // A reconexão vai sobrescrever o socketId do seat com o novo socket.
+      //
+      // Se o jogador caiu no turno, avançamos (jogo não trava esperando um offline).
       if (room.currentTurnSeatId === session.seatId) {
         room.currentTurnSeatId = this.nextOccupiedSeat(room, session.seatId);
-      }
-
-      if (room.socketsBySeat.size === 0) {
-        this.roomsByMatchId.delete(session.matchId);
       }
     }
 
     this.sessionsBySocketId.delete(socketId);
+
     return { matchId: session.matchId };
   }
 
-  getSession(socketId: string): PlayerSession | null {
+  getSessionBySocketId(socketId: string): PlayerSession | null {
     return this.sessionsBySocketId.get(socketId) ?? null;
   }
 
@@ -104,7 +143,6 @@ export class RoomManager {
     if (!room) throw new Error('room not found');
 
     room.readyBySeat.set(session.seatId, ready);
-
     return this.getRoomState(session.matchId);
   }
 

@@ -18,10 +18,7 @@ import type { CreateMatchRequestDto } from '@game/application/dtos/requests/crea
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
-import type { StartHandResponseDto } from '@game/application/dtos/responses/start-hand.response.dto';
-
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
-import type { PlayCardResponseDto } from '@game/application/dtos/responses/play-card.response.dto';
 
 import { RoomManager } from './multiplayer/room-manager';
 
@@ -56,6 +53,16 @@ type SetReadyPayload = {
   ready?: unknown;
 };
 
+function getPlayerTokenFromHandshake(socket: Socket): string {
+  const raw = (socket.handshake as any)?.auth?.token;
+  const token = typeof raw === 'string' ? raw.trim() : '';
+
+  // NOTE: Token é identidade estável (reconnect/ranking). Sem token, socketId vira identidade e quebra o objetivo da fase.
+  if (!token) throw new Error('Missing playerToken: provide it in Socket.IO handshake auth.token');
+
+  return token;
+}
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -85,6 +92,8 @@ export class GameGateway {
     @MessageBody() payload: CreateMatchPayload,
   ): Promise<WsResponse<CreateMatchResponseDto> | WsResponse<ErrorResponseDto>> {
     try {
+      const playerToken = getPlayerTokenFromHandshake(socket);
+
       const pointsToWinRaw = payload?.pointsToWin;
       const pointsToWin = typeof pointsToWinRaw === 'number' ? pointsToWinRaw : undefined;
 
@@ -92,7 +101,6 @@ export class GameGateway {
         return { event: 'error', data: { message: 'Invalid payload: pointsToWin must be an integer.' } };
       }
 
-      // NOTE: exactOptionalPropertyTypes: evitar { pointsToWin: undefined }
       const dto: CreateMatchRequestDto = pointsToWin === undefined ? {} : { pointsToWin };
 
       const result = await this.createMatchUseCase.execute(dto);
@@ -100,13 +108,14 @@ export class GameGateway {
 
       await socket.join(matchId);
 
-      const session = this.roomManager.join(matchId, socket.id);
+      const session = this.roomManager.join(matchId, socket.id, playerToken);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
+        playerToken: session.playerToken,
       });
 
       this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
@@ -127,6 +136,8 @@ export class GameGateway {
     @MessageBody() payload: JoinMatchPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
     try {
+      const playerToken = getPlayerTokenFromHandshake(socket);
+
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
@@ -136,13 +147,14 @@ export class GameGateway {
 
       await socket.join(matchId);
 
-      const session = this.roomManager.join(matchId, socket.id);
+      const session = this.roomManager.join(matchId, socket.id, playerToken);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
+        playerToken: session.playerToken,
       });
 
       this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
@@ -168,14 +180,13 @@ export class GameGateway {
         return { event: 'error', data: { message: 'Invalid payload: ready must be boolean.' } };
       }
 
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
 
       const roomState = this.roomManager.setReady(socket.id, readyRaw);
 
-      // NOTE: Evento “observável” deve vir via emit, não depender do retorno do handler.
       this.server.to(session.matchId).emit('room-state', roomState);
       this.server.to(session.matchId).emit('ready-updated', {
         matchId: session.matchId,
@@ -196,7 +207,7 @@ export class GameGateway {
     @MessageBody() payload: StartHandPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
     try {
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
@@ -220,16 +231,13 @@ export class GameGateway {
       }
 
       const dto: StartHandRequestDto = { matchId, viraRank };
-      const result: StartHandResponseDto = await this.startHandUseCase.execute(dto);
+      await this.startHandUseCase.execute(dto);
 
       // NOTE: Turn-order é regra multiplayer (transport). Domain continua 1v1 por time (P1/P2).
       const roomState = this.roomManager.beginHand(matchId);
       this.server.to(matchId).emit('room-state', roomState);
 
-      this.server.to(matchId).emit('hand-started', {
-        matchId,
-        viraRank,
-      });
+      this.server.to(matchId).emit('hand-started', { matchId, viraRank });
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
@@ -247,7 +255,7 @@ export class GameGateway {
     @MessageBody() payload: PlayCardPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
     try {
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
@@ -279,9 +287,8 @@ export class GameGateway {
         card: `${rank}${suit}`,
       };
 
-      const result: PlayCardResponseDto = await this.playCardUseCase.execute(dto);
+      await this.playCardUseCase.execute(dto);
 
-      // NOTE: O client precisa de um “evento observável” pra depurar: quem jogou o quê e quando.
       this.server.to(matchId).emit('card-played', {
         matchId,
         seatId: session.seatId,

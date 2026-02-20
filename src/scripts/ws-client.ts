@@ -1,25 +1,11 @@
 import 'dotenv/config';
 import * as readline from 'node:readline';
+import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 
-type PlayerAssignedPayload = {
-  matchId: string;
-  seatId: string;
-  teamId: string;
-  playerId: string;
-};
-
-type CreatedPayload = {
-  matchId: string;
-};
-
-type JoinedPayload = {
-  ok: true;
-};
-
-type ErrorPayload = {
-  message: string;
-};
+type CreatedPayload = { matchId: string };
+type JoinedPayload = { ok: true };
+type ErrorPayload = { message: string };
 
 const port = process.env['PORT'] ?? '3000';
 const baseUrl = process.env['WS_URL'] ?? `http://localhost:${port}`;
@@ -48,24 +34,50 @@ function once<T>(socket: Socket, event: string, timeoutMs = TIMEOUT_MS): Promise
 }
 
 function logJson(label: string, data: unknown) {
-  // NOTE: JSON cru facilita comparar estado/eventos entre terminais.
   // eslint-disable-next-line no-console
   console.log(label, JSON.stringify(data, null, 2));
 }
 
 type Args =
   | { mode: 'help' }
-  | { mode: 'create' }
-  | { mode: 'join'; matchId: string };
+  | { mode: 'create'; token?: string }
+  | { mode: 'join'; matchId: string; token?: string };
 
 function parseArgs(argv: string[]): Args {
-  const [mode, a1] = argv;
+  const [mode, a1, a2] = argv;
 
   if (!mode) return { mode: 'help' };
-  if (mode === 'create') return { mode: 'create' };
-  if (mode === 'join') return { mode: 'join', matchId: (a1 ?? '').trim() };
+
+  if (mode === 'create') {
+    const token = typeof a1 === 'string' ? a1.trim() : '';
+    return token ? { mode: 'create', token } : { mode: 'create' };
+  }
+
+  if (mode === 'join') {
+    const matchId = typeof a1 === 'string' ? a1.trim() : '';
+    const token = typeof a2 === 'string' ? a2.trim() : '';
+    return token ? { mode: 'join', matchId, token } : { mode: 'join', matchId };
+  }
 
   return { mode: 'help' };
+}
+
+function printHelp() {
+  // eslint-disable-next-line no-console
+  console.log(`
+Uso:
+  npm run ws:client -- create [token]
+  npm run ws:client -- join <matchId> [token]
+
+Comandos:
+  ready            -> ready=true
+  unready          -> ready=false
+  start <viraRank> -> start-hand (ex: start 7)
+  play <card>      -> play-card (ex: play AP | play A P)
+  state            -> get-state
+  help             -> comandos
+  exit             -> sair
+`);
 }
 
 function normalizeSuit(raw: string): string {
@@ -91,30 +103,15 @@ function parsePlayArg(arg: string): { rank: string; suit: string } | null {
   return { rank: normalizeRank(rank), suit: normalizeSuit(suit) };
 }
 
-function printHelp() {
-  // eslint-disable-next-line no-console
-  console.log(`
-Uso:
-  npm run ws:client -- create
-  npm run ws:client -- join <matchId>
-
-Comandos:
-  ready            -> ready=true
-  unready          -> ready=false
-  start <viraRank> -> start-hand (ex: start 7)
-  play <card>      -> play-card (ex: play AP | play A P)
-  state            -> get-state
-  help             -> comandos
-  exit             -> sair
-`);
-}
-
-async function connect(): Promise<Socket> {
+async function connect(playerToken: string): Promise<Socket> {
   // eslint-disable-next-line no-console
   console.log(`[ws-client] Connecting to: ${baseUrl}`);
+  // eslint-disable-next-line no-console
+  console.log(`[ws-client] playerToken=${playerToken}`);
 
   const socket = io(baseUrl, {
     transports: ['websocket'],
+    auth: { token: playerToken },
   });
 
   await once<void>(socket, 'connect');
@@ -134,7 +131,7 @@ async function createMatch(socket: Socket): Promise<string> {
 }
 
 async function joinMatch(socket: Socket, matchId: string): Promise<void> {
-  if (!matchId) throw new Error('join precisa de matchId: npm run ws:client -- join <matchId>');
+  if (!matchId) throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token]');
   socket.emit('join-match', { matchId });
   await once<JoinedPayload>(socket, 'joined');
   // eslint-disable-next-line no-console
@@ -148,18 +145,16 @@ async function main() {
     process.exit(0);
   }
 
-  const socket = await connect();
+  const playerToken = args.token ?? process.env['WS_TOKEN'] ?? randomUUID();
+  const socket = await connect(playerToken);
 
   let matchId: string | null = null;
 
-  socket.on('player-assigned', (p: PlayerAssignedPayload) => {
-    matchId = p.matchId;
-    logJson('[event] player-assigned:', p);
-  });
-
+  socket.on('player-assigned', (p: unknown) => logJson('[event] player-assigned:', p));
   socket.on('room-state', (p: unknown) => logJson('[event] room-state:', p));
   socket.on('match-state', (p: unknown) => logJson('[event] match-state:', p));
   socket.on('ready-updated', (p: unknown) => logJson('[event] ready-updated:', p));
+  socket.on('hand-started', (p: unknown) => logJson('[event] hand-started:', p));
   socket.on('card-played', (p: unknown) => logJson('[event] card-played:', p));
   socket.on('error', (p: ErrorPayload) => logJson('[event] error:', p));
 
@@ -202,9 +197,8 @@ async function main() {
     }
 
     if (!matchId) {
-      // NOTE: se isso ocorrer, o fluxo player-assigned não chegou ainda.
       // eslint-disable-next-line no-console
-      console.log('[ws-client] matchId ainda não disponível. Aguarde player-assigned.');
+      console.log('[ws-client] matchId ainda não disponível.');
       rl.prompt();
       return;
     }
