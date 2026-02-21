@@ -7,8 +7,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // URL vem do prisma.config.ts (env('DATABASE_URL'))
-  // e/ou do ambiente em runtime (dotenv)
 }
 
 model Match {
@@ -18,4 +16,15 @@ model Match {
   data        Json
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model PlayerProfile {
+  id            String   @id @default(cuid())
+  playerToken   String   @unique
+  rating        Int      @default(1000)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  matchesPlayed Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
