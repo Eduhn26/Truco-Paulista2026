@@ -13,6 +13,8 @@ import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case'
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
+import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
+import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
@@ -55,6 +57,10 @@ type SetReadyPayload = {
   ready?: unknown;
 };
 
+type GetRankingPayload = {
+  limit?: unknown;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -68,6 +74,8 @@ export class GameGateway {
     private readonly playCardUseCase: PlayCardUseCase,
     private readonly viewMatchStateUseCase: ViewMatchStateUseCase,
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
+    private readonly updateRatingUseCase: UpdateRatingUseCase,
+    private readonly getRankingUseCase: GetRankingUseCase,
     private readonly roomManager: RoomManager,
   ) {}
 
@@ -113,7 +121,7 @@ export class GameGateway {
 
       await socket.join(matchId);
 
-      const session = this.roomManager.join(matchId, socket.id);
+      const session = this.roomManager.join(matchId, socket.id, playerToken);
 
       socket.emit('player-assigned', {
         matchId,
@@ -154,7 +162,7 @@ export class GameGateway {
 
       await socket.join(matchId);
 
-      const session = this.roomManager.join(matchId, socket.id);
+      const session = this.roomManager.join(matchId, socket.id, playerToken);
 
       socket.emit('player-assigned', {
         matchId,
@@ -188,7 +196,7 @@ export class GameGateway {
         return { event: 'error', data: { message: 'Invalid payload: ready must be boolean.' } };
       }
 
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
@@ -211,7 +219,7 @@ export class GameGateway {
     @MessageBody() payload: StartHandPayload,
   ): Promise<WsResponse<StartHandResponseDto> | WsResponse<ErrorResponseDto>> {
     try {
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
@@ -256,7 +264,7 @@ export class GameGateway {
     @MessageBody() payload: PlayCardPayload,
   ): Promise<WsResponse<PlayCardResponseDto> | WsResponse<ErrorResponseDto>> {
     try {
-      const session = this.roomManager.getSession(socket.id);
+      const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
@@ -295,7 +303,44 @@ export class GameGateway {
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
+      if (state.state === 'finished' && this.roomManager.tryMarkRatingApplied(matchId)) {
+        const score = state.score;
+
+        if (score.playerOne !== score.playerTwo) {
+          const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
+          const tokens = this.roomManager.getTeamTokens(matchId);
+
+          const winnerTokens = winnerTeamId === 'T1' ? tokens.T1 : tokens.T2;
+          const loserTokens = winnerTeamId === 'T1' ? tokens.T2 : tokens.T1;
+
+          // NOTE: Ranking é BC separado: o game não “vira” ranking; só dispara atualização após o resultado.
+          await this.updateRatingUseCase.execute({ winnerTokens, loserTokens });
+
+          this.server.to(matchId).emit('rating-updated', { ok: true });
+        }
+      }
+
       return { event: 'card-played', data: result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return { event: 'error', data: { message } };
+    }
+  }
+
+  @SubscribeMessage('get-ranking')
+  async handleGetRanking(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetRankingPayload,
+  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+    try {
+      const raw = payload?.limit;
+      const limit = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : 20;
+
+      const ranking = await this.getRankingUseCase.execute({ limit });
+
+      socket.emit('ranking', { ranking });
+
+      return { event: 'ranking', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return { event: 'error', data: { message } };

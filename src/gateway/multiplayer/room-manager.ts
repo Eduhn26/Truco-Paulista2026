@@ -6,6 +6,7 @@ type RoomState = {
   socketsBySeat: Map<SeatId, string>;
   readyBySeat: Map<SeatId, boolean>;
   currentTurnSeatId: SeatId | null;
+  ratingApplied: boolean;
 };
 
 export type PlayerSession = {
@@ -49,6 +50,7 @@ export class RoomManager {
       socketsBySeat: new Map(),
       readyBySeat: new Map(),
       currentTurnSeatId: null,
+      ratingApplied: false,
     });
   }
 
@@ -212,6 +214,30 @@ export class RoomManager {
       if (!room.readyBySeat.get(seatId)) return false;
     }
 
+    return true;
+  }
+
+  getTeamTokens(matchId: string): { T1: string[]; T2: string[] } {
+    const t1: string[] = [];
+    const t2: string[] = [];
+
+    for (const session of this.sessionsByTokenKey.values()) {
+      if (session.matchId !== matchId) continue;
+
+      if (session.teamId === 'T1') t1.push(session.playerToken);
+      if (session.teamId === 'T2') t2.push(session.playerToken);
+    }
+
+    return { T1: t1, T2: t2 };
+  }
+
+  tryMarkRatingApplied(matchId: string): boolean {
+    const room = this.roomsByMatchId.get(matchId);
+    if (!room) return false;
+
+    if (room.ratingApplied) return false;
+
+    room.ratingApplied = true;
     return true;
   }
 
