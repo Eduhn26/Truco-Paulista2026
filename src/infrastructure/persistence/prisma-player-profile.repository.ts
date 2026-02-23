@@ -38,4 +38,11 @@ export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
       },
     });
   }
+
+  async listTop(limit: number): Promise<PlayerProfileSnapshot[]> {
+    return this.prisma.playerProfile.findMany({
+      orderBy: { rating: 'desc' },
+      take: limit,
+    });
+  }
 }

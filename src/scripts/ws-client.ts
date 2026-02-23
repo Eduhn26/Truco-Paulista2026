@@ -40,8 +40,14 @@ function logJson(label: string, data: unknown) {
 
 type Args =
   | { mode: 'help' }
-  | { mode: 'create'; token?: string }
+  | { mode: 'create'; token?: string; pointsToWin?: number }
   | { mode: 'join'; matchId: string; token?: string };
+
+function parseIntArg(raw: string): number | null {
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return null;
+  return n;
+}
 
 function parseArgs(argv: string[]): Args {
   const [mode, a1, a2] = argv;
@@ -50,7 +56,18 @@ function parseArgs(argv: string[]): Args {
 
   if (mode === 'create') {
     const token = typeof a1 === 'string' ? a1.trim() : '';
-    return token ? { mode: 'create', token } : { mode: 'create' };
+    const pointsRaw = typeof a2 === 'string' ? a2.trim() : '';
+
+    if (!token && !pointsRaw) return { mode: 'create' };
+
+    if (token && !pointsRaw) return { mode: 'create', token };
+
+    if (token && pointsRaw) {
+      const parsed = parseIntArg(pointsRaw);
+      return parsed ? { mode: 'create', token, pointsToWin: parsed } : { mode: 'create', token };
+    }
+
+    return { mode: 'create' };
   }
 
   if (mode === 'join') {
@@ -66,8 +83,12 @@ function printHelp() {
   // eslint-disable-next-line no-console
   console.log(`
 Uso:
-  npm run ws:client -- create [token]
+  npm run ws:client -- create [token] [pointsToWin]
   npm run ws:client -- join <matchId> [token]
+
+Exemplos:
+  npm run ws:client -- create token-t1a 1
+  npm run ws:client -- join <matchId> token-t2a
 
 Comandos:
   ready            -> ready=true
@@ -122,8 +143,10 @@ async function connect(playerToken: string): Promise<Socket> {
   return socket;
 }
 
-async function createMatch(socket: Socket): Promise<string> {
-  socket.emit('create-match', {});
+async function createMatch(socket: Socket, pointsToWin?: number): Promise<string> {
+  const payload = typeof pointsToWin === 'number' ? { pointsToWin } : {};
+  socket.emit('create-match', payload);
+
   const created = await once<CreatedPayload>(socket, 'created');
   // eslint-disable-next-line no-console
   console.log(`[ws-client] created: matchId=${created.matchId}`);
@@ -156,10 +179,12 @@ async function main() {
   socket.on('ready-updated', (p: unknown) => logJson('[event] ready-updated:', p));
   socket.on('hand-started', (p: unknown) => logJson('[event] hand-started:', p));
   socket.on('card-played', (p: unknown) => logJson('[event] card-played:', p));
+  socket.on('rating-updated', (p: unknown) => logJson('[event] rating-updated:', p));
+  socket.on('ranking', (p: unknown) => logJson('[event] ranking:', p));
   socket.on('error', (p: ErrorPayload) => logJson('[event] error:', p));
 
   if (args.mode === 'create') {
-    matchId = await createMatch(socket);
+    matchId = await createMatch(socket, args.pointsToWin);
   } else {
     await joinMatch(socket, args.matchId);
     matchId = args.matchId;
@@ -245,6 +270,14 @@ async function main() {
 
     if (cmd === 'state') {
       socket.emit('get-state', { matchId });
+      rl.prompt();
+      return;
+    }
+
+    if (cmd === 'ranking') {
+      const n = arg ? parseIntArg(arg) : null;
+      const limit = n && n > 0 ? n : 20;
+      socket.emit('get-ranking', { limit });
       rl.prompt();
       return;
     }
