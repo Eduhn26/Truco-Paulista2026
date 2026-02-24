@@ -60,6 +60,9 @@ dist
 coverage
 
 *.tsbuildinfo
+*.zip
+*.txt
+gerar-txt.js
 
 
 /src/generated/prisma
