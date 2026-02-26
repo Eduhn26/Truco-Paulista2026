@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import type { 
-  PlayerProfileRepository, 
-  PlayerProfileSnapshot 
+import type {
+  PlayerProfileRepository,
+  PlayerProfileSnapshot,
 } from '@game/application/ports/player-profile.repository';
+import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
 export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
-  private readonly prisma = new PrismaClient();
+  constructor(private readonly prisma: PrismaService) {}
 
   async findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
     return this.prisma.playerProfile.findUnique({ where: { playerToken } });

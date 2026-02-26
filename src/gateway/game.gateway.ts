@@ -23,9 +23,7 @@ import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses
 import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
-import type { StartHandResponseDto } from '@game/application/dtos/responses/start-hand.response.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
-import type { PlayCardResponseDto } from '@game/application/dtos/responses/play-card.response.dto';
 
 import { RoomManager } from './multiplayer/room-manager';
 
@@ -104,7 +102,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    this.logger.log(`[Disconnect] Socket desconectado: ${socket.id} (saiu da partida ${left.matchId})`);
+    this.logger.log(
+      `[Disconnect] Socket desconectado: ${socket.id} (saiu da partida ${left.matchId})`,
+    );
     this.server.to(left.matchId).emit('room-state', this.roomManager.getRoomState(left.matchId));
   }
 
@@ -122,7 +122,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const pointsToWin = typeof pointsToWinRaw === 'number' ? pointsToWinRaw : undefined;
 
       if (pointsToWin !== undefined && !Number.isInteger(pointsToWin)) {
-        return { event: 'error', data: { message: 'Invalid payload: pointsToWin must be an integer.' } };
+        return {
+          event: 'error',
+          data: { message: 'Invalid payload: pointsToWin must be an integer.' },
+        };
       }
 
       // NOTE: exactOptionalPropertyTypes: evitar { pointsToWin: undefined }
@@ -145,7 +148,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
 
-      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({ matchId });
+      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
+        matchId,
+      });
       this.server.to(matchId).emit('match-state', state);
 
       this.logger.log(`[create-match] Partida criada: ${matchId} (Player: ${playerToken})`);
@@ -189,10 +194,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
 
-      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({ matchId });
+      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
+        matchId,
+      });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logger.log(`[join-match] Jogador ${playerToken} entrou na partida ${matchId} (Seat: ${session.seatId})`);
+      this.logger.log(
+        `[join-match] Jogador ${playerToken} entrou na partida ${matchId} (Seat: ${session.seatId})`,
+      );
       return { event: 'joined', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -202,10 +211,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('set-ready')
-  async handleSetReady(
+  handleSetReady(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SetReadyPayload,
-  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+  ): WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto> {
     try {
       const readyRaw = payload?.ready;
       if (typeof readyRaw !== 'boolean') {
@@ -222,7 +231,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(session.matchId).emit('room-state', roomState);
       socket.emit('ready-updated', { ok: true, ready: readyRaw });
 
-      this.logger.debug(`[set-ready] Match ${session.matchId} | Seat ${session.seatId} status ready=${readyRaw}`);
+      this.logger.debug(
+        `[set-ready] Match ${session.matchId} | Seat ${session.seatId} status ready=${readyRaw}`,
+      );
       return { event: 'ready-updated', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -243,7 +254,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
 
-      const matchId = typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
+      const matchId =
+        typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
       const viraRankRaw = payload?.viraRank;
       const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim().toUpperCase() : '';
 
@@ -256,7 +268,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       if (!this.roomManager.canStart(matchId)) {
-        return { event: 'error', data: { message: 'Match cannot start: need 4 players and all ready.' } };
+        return {
+          event: 'error',
+          data: { message: 'Match cannot start: need 4 players and all ready.' },
+        };
       }
 
       const dto: StartHandRequestDto = { matchId, viraRank };
@@ -270,7 +285,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(matchId).emit('match-state', state);
 
       this.logger.log(`[start-hand] Match ${matchId} | Mão iniciada (Vira: ${viraRank})`);
-      
+
       // 🔥 CORREÇÃO: Broadcast para toda a sala para gerar as mãos e incluir o viraRank para sincronia de seeds
       this.server.to(matchId).emit('hand-started', { ...result, matchId, viraRank });
     } catch (err) {
@@ -291,7 +306,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { event: 'error', data: { message: 'You must join a match first.' } };
       }
 
-      const matchId = typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
+      const matchId =
+        typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
       const rankRaw = payload?.card?.rank;
       const suitRaw = payload?.card?.suit;
 
@@ -303,7 +319,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       if (!rank || !suit) {
-        return { event: 'error', data: { message: 'Invalid payload: card.rank and card.suit are required.' } };
+        return {
+          event: 'error',
+          data: { message: 'Invalid payload: card.rank and card.suit are required.' },
+        };
       }
 
       if (!this.roomManager.isPlayersTurn(socket.id, matchId)) {
@@ -338,7 +357,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           // NOTE: Ranking é BC separado: o game não “vira” ranking; só dispara atualização após o resultado.
           await this.updateRatingUseCase.execute({ winnerTokens, loserTokens });
 
-          this.logger.log(`[match-finished] Match ${matchId} | Vitória do Time ${winnerTeamId}. Ranking atualizado.`);
+          this.logger.log(
+            `[match-finished] Match ${matchId} | Vitória do Time ${winnerTeamId}. Ranking atualizado.`,
+          );
           this.server.to(matchId).emit('rating-updated', { ok: true });
         }
       }
@@ -388,7 +409,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       socket.emit('match-state', state);
-      
+
       this.logger.debug(`[get-state] Socket ${socket.id} requisitou estado da match ${matchId}`);
       return { event: 'state', data: state };
     } catch (err) {

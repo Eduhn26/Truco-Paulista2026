@@ -8,12 +8,17 @@ import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 
+import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
 
+import type { MatchRepository } from '@game/application/ports/match.repository';
+import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
+
 @Module({
+  imports: [PrismaModule],
   providers: [
     GameGateway,
     RoomManager,
@@ -25,38 +30,38 @@ import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
     // Use Cases
     {
       provide: CreateMatchUseCase,
-      useFactory: (repo: PrismaMatchRepository) => new CreateMatchUseCase(repo),
-      inject: [PrismaMatchRepository],
+      useFactory: (repo: MatchRepository) => new CreateMatchUseCase(repo),
+      inject: [MATCH_REPOSITORY],
     },
     {
       provide: StartHandUseCase,
-      useFactory: (repo: PrismaMatchRepository) => new StartHandUseCase(repo),
-      inject: [PrismaMatchRepository],
+      useFactory: (repo: MatchRepository) => new StartHandUseCase(repo),
+      inject: [MATCH_REPOSITORY],
     },
     {
       provide: PlayCardUseCase,
-      useFactory: (repo: PrismaMatchRepository) => new PlayCardUseCase(repo),
-      inject: [PrismaMatchRepository],
+      useFactory: (repo: MatchRepository) => new PlayCardUseCase(repo),
+      inject: [MATCH_REPOSITORY],
     },
     {
       provide: ViewMatchStateUseCase,
-      useFactory: (repo: PrismaMatchRepository) => new ViewMatchStateUseCase(repo),
-      inject: [PrismaMatchRepository],
+      useFactory: (repo: MatchRepository) => new ViewMatchStateUseCase(repo),
+      inject: [MATCH_REPOSITORY],
     },
     {
       provide: GetOrCreatePlayerProfileUseCase,
-      useFactory: (repo: PrismaPlayerProfileRepository) => new GetOrCreatePlayerProfileUseCase(repo),
-      inject: [PrismaPlayerProfileRepository],
+      useFactory: (repo: PlayerProfileRepository) => new GetOrCreatePlayerProfileUseCase(repo),
+      inject: [PLAYER_PROFILE_REPOSITORY],
     },
     {
       provide: UpdateRatingUseCase,
-      useFactory: (repo: PrismaPlayerProfileRepository) => new UpdateRatingUseCase(repo),
-      inject: [PrismaPlayerProfileRepository],
+      useFactory: (repo: PlayerProfileRepository) => new UpdateRatingUseCase(repo),
+      inject: [PLAYER_PROFILE_REPOSITORY],
     },
     {
       provide: GetRankingUseCase,
-      useFactory: (repo: PrismaPlayerProfileRepository) => new GetRankingUseCase(repo),
-      inject: [PrismaPlayerProfileRepository],
+      useFactory: (repo: PlayerProfileRepository) => new GetRankingUseCase(repo),
+      inject: [PLAYER_PROFILE_REPOSITORY],
     },
   ],
 })
