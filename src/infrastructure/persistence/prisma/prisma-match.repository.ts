@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { PrismaClient } from '@prisma/client';
 
 import type { MatchRepository } from '@game/application/ports/match.repository';
 
@@ -8,195 +10,176 @@ import { Round } from '@game/domain/entities/round';
 import { Card } from '@game/domain/value-objects/card';
 import { Score } from '@game/domain/value-objects/score';
 import type { PlayerId } from '@game/domain/value-objects/player-id';
-import type { MatchState } from '@game/domain/value-objects/match-state';
-import type { Rank } from '@game/domain/value-objects/rank';
 
-import { PrismaService } from './prisma.service';
-
-type RoundSnapshot = {
+type PersistedRound = {
   plays: Partial<Record<PlayerId, string>>;
-  finished: boolean;
 };
 
-type HandSnapshot = {
-  viraRank: Rank;
-  finished: boolean;
-  rounds: RoundSnapshot[];
+type PersistedHand = {
+  viraRank: string;
+  currentRoundIndex: number;
+  rounds: PersistedRound[];
 };
 
-type MatchSnapshot = {
-  state: MatchState;
-  pointsToWin: number;
-  score: {
-    playerOne: number;
-    playerTwo: number;
-  };
-  currentHand: HandSnapshot | null;
+type PersistedData = {
+  currentHand?: PersistedHand | null;
 };
 
-// Tipo auxiliar para representar o retorno cru do Prisma (onde Json é unknown/any)
-type PrismaMatchRow = {
-  id: string;
-  pointsToWin: number;
-  state: string;
-  data: unknown;
-  createdAt: Date;
-  updatedAt: Date;
+type PersistedScore = {
+  playerOne: number;
+  playerTwo: number;
 };
 
 @Injectable()
 export class PrismaMatchRepository implements MatchRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  // HACK: Instanciação direta do PrismaClient contorna a injeção do NestJS.
+  // Garante isolamento total e impede o erro "Cannot read properties of undefined" no ambiente atual.
+  private readonly prisma = new PrismaClient();
+
+  constructor() {}
 
   async create(match: Match): Promise<string> {
+    const matchId = `match_${randomUUID().replace(/-/g, '')}`;
+
+    // NOTE: Infra é responsável por “materializar” o Domain em persistência.
     const snapshot = this.toSnapshot(match);
 
-    // Casting para { id: string } pois o Prisma retorna tipos complexos gerados
-    const created = (await this.prisma.match.create({
+    await this.prisma.matchSnapshot.create({
       data: {
+        matchId,
         pointsToWin: snapshot.pointsToWin,
         state: snapshot.state,
-        data: snapshot as unknown as object, // Prisma Json exige input object/array
+        score: snapshot.score,
+        data: snapshot.data,
       },
-      select: { id: true },
-    })) as { id: string };
+    });
 
-    return created.id;
-  }
-
-  async getById(id: string): Promise<Match | null> {
-    // Casting do retorno do findUnique
-    const row = (await this.prisma.match.findUnique({
-      where: { id },
-    })) as PrismaMatchRow | null;
-
-    if (!row) return null;
-
-    // Converte o campo Json para o nosso tipo MatchSnapshot
-    const snapshot = row.data as MatchSnapshot;
-    return this.fromSnapshot(snapshot);
+    return matchId;
   }
 
   async save(id: string, match: Match): Promise<void> {
     const snapshot = this.toSnapshot(match);
 
-    await this.prisma.match.update({
-      where: { id },
+    await this.prisma.matchSnapshot.update({
+      where: { matchId: id },
       data: {
         pointsToWin: snapshot.pointsToWin,
         state: snapshot.state,
-        data: snapshot as unknown as object,
+        score: snapshot.score,
+        data: snapshot.data,
       },
     });
   }
 
-  // ---------------------------
-  // Snapshot (Domain -> JSON)
-  // ---------------------------
+  async getById(id: string): Promise<Match | null> {
+    const row = await this.prisma.matchSnapshot.findUnique({
+      where: { matchId: id },
+    });
 
-  private toSnapshot(match: Match): MatchSnapshot {
-    const anyMatch = match as unknown as {
-      state: MatchState;
+    if (!row) return null;
+
+    const score = row.score as unknown as PersistedScore | null;
+    const data = row.data as unknown as PersistedData | null;
+
+    const match = new Match(row.pointsToWin) as unknown as {
+      state: string;
       score: Score;
       currentHand: Hand | null;
+    };
+
+    // NOTE: COMPAT — Domain não expõe rehydrate().
+    // A Infra reidrata preenchendo internals (isolado aqui).
+    match.state = row.state;
+
+    if (score) {
+      // HACK: Bypass no construtor privado do Score apenas para reidratação da Infra.
+      match.score = new (Score as any)(score.playerOne ?? 0, score.playerTwo ?? 0);
+    }
+
+    const currentHand = data?.currentHand ? this.hydrateHand(data.currentHand) : null;
+    match.currentHand = currentHand;
+
+    return match as unknown as Match;
+  }
+
+  private toSnapshot(match: Match): {
+    pointsToWin: number;
+    state: string;
+    score: PersistedScore;
+    data: PersistedData;
+  } {
+    const m = match as unknown as {
       pointsToWin: number;
+      state: string;
+      score: Score;
+      currentHand: Hand | null;
     };
 
-    const score = anyMatch.score;
+    const s = m.score as unknown as { playerOne: number; playerTwo: number };
 
     return {
-      state: anyMatch.state,
-      pointsToWin: anyMatch.pointsToWin,
-      score: {
-        playerOne: score.playerOne,
-        playerTwo: score.playerTwo,
+      pointsToWin: m.pointsToWin,
+      state: m.state,
+      score: { playerOne: s.playerOne, playerTwo: s.playerTwo },
+      data: {
+        currentHand: m.currentHand ? this.handToPersisted(m.currentHand) : null,
       },
-      currentHand: anyMatch.currentHand ? this.handToSnapshot(anyMatch.currentHand) : null,
     };
   }
 
-  private handToSnapshot(hand: Hand): HandSnapshot {
-    const anyHand = hand as unknown as {
-      viraRank: Rank;
-      finished: boolean;
+  private handToPersisted(hand: Hand): PersistedHand {
+    const h = hand as unknown as {
+      viraRank: unknown;
       rounds: Round[];
+      currentRoundIndex: number;
     };
 
     return {
-      viraRank: anyHand.viraRank,
-      finished: anyHand.finished,
-      rounds: anyHand.rounds.map((r) => this.roundToSnapshot(r)),
+      viraRank: String(h.viraRank),
+      currentRoundIndex: h.currentRoundIndex,
+      rounds: h.rounds.map((r) => this.roundToPersisted(r)),
     };
   }
 
-  private roundToSnapshot(round: Round): RoundSnapshot {
-    const anyRound = round as unknown as {
-      plays: Map<PlayerId, Card>;
-      finished: boolean;
-    };
+  private roundToPersisted(round: Round): PersistedRound {
+    const r = round as unknown as { plays: Map<PlayerId, Card> };
 
     const plays: Partial<Record<PlayerId, string>> = {};
-    for (const [player, card] of anyRound.plays.entries()) {
-      plays[player] = card.toString();
+    for (const [playerId, card] of r.plays.entries()) {
+      plays[playerId] = card.toString();
     }
 
-    return {
-      plays,
-      finished: anyRound.finished,
+    return { plays };
+  }
+
+  private hydrateHand(snapshot: PersistedHand): Hand {
+    const hand = new Hand(snapshot.viraRank as never) as unknown as {
+      viraRank: unknown;
+      rounds: Round[];
+      currentRoundIndex: number;
     };
+
+    hand.viraRank = snapshot.viraRank;
+    hand.currentRoundIndex = snapshot.currentRoundIndex ?? 0;
+    hand.rounds = (snapshot.rounds ?? []).map((r) => this.hydrateRound(snapshot.viraRank, r));
+
+    return hand as unknown as Hand;
   }
 
-  // ---------------------------
-  // Hydration (JSON -> Domain)
-  // ---------------------------
+  private hydrateRound(viraRank: string, snapshot: PersistedRound): Round {
+    const round = new Round(viraRank as never) as unknown as { plays: Map<PlayerId, Card> };
 
-  private fromSnapshot(snapshot: MatchSnapshot): Match {
-    const match = new Match(snapshot.pointsToWin);
+    const plays = snapshot.plays ?? {};
+    const map = new Map<PlayerId, Card>();
 
-    // state
-    (match as unknown as { state: MatchState }).state = snapshot.state;
+    const p1 = plays.P1;
+    if (typeof p1 === 'string' && p1.length > 0) map.set('P1', Card.from(p1));
 
-    // score (reconstrói sem violar ctor privado)
-    let score = Score.zero();
-    for (let i = 0; i < snapshot.score.playerOne; i += 1) score = score.addPoint('P1');
-    for (let i = 0; i < snapshot.score.playerTwo; i += 1) score = score.addPoint('P2');
-    (match as unknown as { score: Score }).score = score;
+    const p2 = plays.P2;
+    if (typeof p2 === 'string' && p2.length > 0) map.set('P2', Card.from(p2));
 
-    // currentHand
-    if (snapshot.currentHand) {
-      (match as unknown as { currentHand: Hand | null }).currentHand = this.handFromSnapshot(
-        snapshot.currentHand,
-      );
-    } else {
-      (match as unknown as { currentHand: Hand | null }).currentHand = null;
-    }
+    round.plays = map;
 
-    return match;
-  }
-
-  private handFromSnapshot(snapshot: HandSnapshot): Hand {
-    const hand = new Hand(snapshot.viraRank);
-
-    const rounds = snapshot.rounds.map((rs) => this.roundFromSnapshot(rs, snapshot.viraRank));
-
-    // sobrescreve estado interno
-    (hand as unknown as { rounds: Round[] }).rounds = rounds;
-    (hand as unknown as { finished: boolean }).finished = snapshot.finished;
-
-    return hand;
-  }
-
-  private roundFromSnapshot(snapshot: RoundSnapshot, viraRank: Rank): Round {
-    const round = new Round(viraRank);
-
-    // rehidrata plays
-    const plays = new Map<PlayerId, Card>();
-    if (snapshot.plays.P1) plays.set('P1', Card.from(snapshot.plays.P1));
-    if (snapshot.plays.P2) plays.set('P2', Card.from(snapshot.plays.P2));
-
-    (round as unknown as { plays: Map<PlayerId, Card> }).plays = plays;
-    (round as unknown as { finished: boolean }).finished = snapshot.finished;
-
-    return round;
+    return round as unknown as Round;
   }
 }

@@ -1,5 +1,5 @@
 import type { SeatId, TeamId } from './seat-id';
-import { nextFreeSeat, teamFromSeat } from './seat-id';
+import { teamFromSeat } from './seat-id';
 
 type RoomState = {
   matchId: string;
@@ -29,16 +29,17 @@ export type RoomStateDto = {
   currentTurnSeatId: SeatId | null;
 };
 
-const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A', 'T1B', 'T2B'];
+// HACK: Modo 1v1 temporário para teste e gravação de vídeo. Ignora os assentos "B".
+const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A'];
 
 function tokenKey(matchId: string, playerToken: string): string {
   return `${matchId}::${playerToken}`;
 }
 
-// NOTE: Presença/seat/ready/turn são efêmeros (transport-level). Persistir isso em DB vira estado “fantasma”.
+// NOTE: Presença/seat/ready/turn são efêmeros (transport-level).
+// Persistir isso em DB vira estado “fantasma”.
 export class RoomManager {
   private readonly roomsByMatchId = new Map<string, RoomState>();
-
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
   private readonly sessionsByTokenKey = new Map<string, PlayerSession>();
 
@@ -86,8 +87,17 @@ export class RoomManager {
     }
 
     const occupied = new Set<SeatId>(room.socketsBySeat.keys());
-    const seatId = nextFreeSeat(occupied);
-    if (!seatId) throw new Error('match is full');
+    
+    // 🔥 CORREÇÃO 1v1 AQUI: Forçar a entrega apenas das cadeiras de Oponentes (T1A e T2A)
+    // Ignoramos a função nextFreeSeat antiga que entregava a T1B para o P2.
+    let seatId: SeatId;
+    if (!occupied.has('T1A')) {
+      seatId = 'T1A';
+    } else if (!occupied.has('T2A')) {
+      seatId = 'T2A';
+    } else {
+      throw new Error('match is full (1v1 mode)');
+    }
 
     room.socketsBySeat.set(seatId, socketId);
 
@@ -118,11 +128,6 @@ export class RoomManager {
 
     const room = this.roomsByMatchId.get(session.matchId);
     if (room) {
-      // NOTE: Mantemos o seat “reservado” pro token (reconnect). Só removemos o socketId antigo no map por socket.
-      // O socketsBySeat continua apontando pro socketId antigo até reconectar; não afeta o cálculo de sala cheia.
-      // A reconexão vai sobrescrever o socketId do seat com o novo socket.
-      //
-      // Se o jogador caiu no turno, avançamos (jogo não trava esperando um offline).
       if (room.currentTurnSeatId === session.seatId) {
         room.currentTurnSeatId = this.nextOccupiedSeat(room, session.seatId);
       }
@@ -181,6 +186,7 @@ export class RoomManager {
 
   getRoomState(matchId: string): RoomStateDto {
     const room = this.roomsByMatchId.get(matchId);
+
     if (!room) {
       return { matchId, players: [], canStart: false, currentTurnSeatId: null };
     }
@@ -193,7 +199,8 @@ export class RoomManager {
       players.push({ seatId, teamId, ready });
     }
 
-    const isFull = players.length === 4;
+    // HACK: Modo 1v1 temporário para teste (muda exigência de 4 para 2)
+    const isFull = players.length === 2;
     const allReady = isFull && players.every((p) => p.ready);
 
     return {
@@ -208,7 +215,8 @@ export class RoomManager {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) return false;
 
-    if (room.socketsBySeat.size !== 4) return false;
+    // HACK: Modo 1v1 temporário para teste
+    if (room.socketsBySeat.size !== 2) return false;
 
     for (const seatId of room.socketsBySeat.keys()) {
       if (!room.readyBySeat.get(seatId)) return false;
@@ -245,10 +253,12 @@ export class RoomManager {
     if (room.socketsBySeat.size === 0) return null;
 
     const idx = TURN_ORDER.indexOf(from);
+
     if (idx === -1) return null;
 
     for (let step = 1; step <= TURN_ORDER.length; step += 1) {
       const next = TURN_ORDER[(idx + step) % TURN_ORDER.length]!;
+
       if (room.socketsBySeat.has(next)) return next;
     }
 
