@@ -1,30 +1,30 @@
-// Prisma schema
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model Match {
-  id          String   @id @default(cuid())
+model MatchSnapshot {
+  id         String   @id @default(cuid())
+  matchId    String   @unique
   pointsToWin Int
-  state       String
-  data        Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  state      String
+  score      Json
+  data       Json     // <-- ADICIONADO: campo vital para salvar o estado da mão/rodadas
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model PlayerProfile {
-  id            String   @id @default(cuid())
-  playerToken   String   @unique
-  rating        Int      @default(1000)
-  wins          Int      @default(0)
-  losses        Int      @default(0)
-  matchesPlayed Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(cuid())
+  playerToken String   @unique
+  rating      Int      @default(1000)
+  wins        Int      @default(0)
+  losses      Int      @default(0)
+  matchesPlayed Int    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

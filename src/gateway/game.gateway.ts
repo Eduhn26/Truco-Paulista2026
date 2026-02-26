@@ -1,11 +1,14 @@
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
   type WsResponse,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import type { Server, Socket } from 'socket.io';
 
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
@@ -64,9 +67,11 @@ type GetRankingPayload = {
 @WebSocketGateway({
   cors: { origin: '*' },
 })
-export class GameGateway {
+export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   private readonly server!: Server;
+
+  private readonly logger = new Logger(GameGateway.name);
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -81,19 +86,25 @@ export class GameGateway {
 
   private extractPlayerToken(socket: Socket): string {
     const raw = (socket.handshake as unknown as { auth?: { token?: unknown } })?.auth?.token;
-
     if (typeof raw !== 'string' || raw.trim().length === 0) {
       throw new Error('Missing player token. Provide it via Socket.IO handshake auth.token.');
     }
-
     return raw.trim();
+  }
+
+  handleConnection(socket: Socket): void {
+    this.logger.debug(`[Connection] Socket conectado: ${socket.id}`);
   }
 
   // NOTE: Sem cleanup, seat/ready/turn “vaza” e a sala fica travada como se ainda estivesse ocupada.
   handleDisconnect(socket: Socket): void {
     const left = this.roomManager.leave(socket.id);
-    if (!left) return;
+    if (!left) {
+      this.logger.debug(`[Disconnect] Socket desconectado: ${socket.id} (sem partida ativa)`);
+      return;
+    }
 
+    this.logger.log(`[Disconnect] Socket desconectado: ${socket.id} (saiu da partida ${left.matchId})`);
     this.server.to(left.matchId).emit('room-state', this.roomManager.getRoomState(left.matchId));
   }
 
@@ -102,6 +113,7 @@ export class GameGateway {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: CreateMatchPayload,
   ): Promise<WsResponse<CreateMatchResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logger.debug(`[create-match] Acionado por socket=${socket.id}`);
     try {
       const playerToken = this.extractPlayerToken(socket);
       const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
@@ -120,7 +132,6 @@ export class GameGateway {
       const matchId = result.matchId;
 
       await socket.join(matchId);
-
       const session = this.roomManager.join(matchId, socket.id, playerToken);
 
       socket.emit('player-assigned', {
@@ -137,9 +148,11 @@ export class GameGateway {
       const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
+      this.logger.log(`[create-match] Partida criada: ${matchId} (Player: ${playerToken})`);
       return { event: 'created', data: result };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[create-match] Recusado: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -149,6 +162,7 @@ export class GameGateway {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinMatchPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+    this.logger.debug(`[join-match] Acionado por socket=${socket.id}`);
     try {
       const playerToken = this.extractPlayerToken(socket);
       const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
@@ -178,9 +192,11 @@ export class GameGateway {
       const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
+      this.logger.log(`[join-match] Jogador ${playerToken} entrou na partida ${matchId} (Seat: ${session.seatId})`);
       return { event: 'joined', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[join-match] Recusado: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -206,9 +222,11 @@ export class GameGateway {
       this.server.to(session.matchId).emit('room-state', roomState);
       socket.emit('ready-updated', { ok: true, ready: readyRaw });
 
+      this.logger.debug(`[set-ready] Match ${session.matchId} | Seat ${session.seatId} status ready=${readyRaw}`);
       return { event: 'ready-updated', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[set-ready] Recusado: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -217,7 +235,8 @@ export class GameGateway {
   async handleStartHand(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: StartHandPayload,
-  ): Promise<WsResponse<StartHandResponseDto> | WsResponse<ErrorResponseDto>> {
+  ): Promise<void | WsResponse<ErrorResponseDto>> {
+    this.logger.debug(`[start-hand] Acionado por socket=${socket.id}`);
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
@@ -225,7 +244,6 @@ export class GameGateway {
       }
 
       const matchId = typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
-
       const viraRankRaw = payload?.viraRank;
       const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim().toUpperCase() : '';
 
@@ -251,9 +269,13 @@ export class GameGateway {
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
-      return { event: 'hand-started', data: result };
+      this.logger.log(`[start-hand] Match ${matchId} | Mão iniciada (Vira: ${viraRank})`);
+      
+      // 🔥 CORREÇÃO: Broadcast para toda a sala para gerar as mãos e incluir o viraRank para sincronia de seeds
+      this.server.to(matchId).emit('hand-started', { ...result, matchId, viraRank });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[start-hand] Recusado: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -262,7 +284,7 @@ export class GameGateway {
   async handlePlayCard(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: PlayCardPayload,
-  ): Promise<WsResponse<PlayCardResponseDto> | WsResponse<ErrorResponseDto>> {
+  ): Promise<void | WsResponse<ErrorResponseDto>> {
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
@@ -270,7 +292,6 @@ export class GameGateway {
       }
 
       const matchId = typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
-
       const rankRaw = payload?.card?.rank;
       const suitRaw = payload?.card?.suit;
 
@@ -303,9 +324,10 @@ export class GameGateway {
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
+      this.logger.log(`[play-card] Match ${matchId} | Seat ${session.seatId} jogou ${rank}${suit}`);
+
       if (state.state === 'finished' && this.roomManager.tryMarkRatingApplied(matchId)) {
         const score = state.score;
-
         if (score.playerOne !== score.playerTwo) {
           const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
           const tokens = this.roomManager.getTeamTokens(matchId);
@@ -316,13 +338,16 @@ export class GameGateway {
           // NOTE: Ranking é BC separado: o game não “vira” ranking; só dispara atualização após o resultado.
           await this.updateRatingUseCase.execute({ winnerTokens, loserTokens });
 
+          this.logger.log(`[match-finished] Match ${matchId} | Vitória do Time ${winnerTeamId}. Ranking atualizado.`);
           this.server.to(matchId).emit('rating-updated', { ok: true });
         }
       }
 
-      return { event: 'card-played', data: result };
+      // 🔥 CORREÇÃO: Broadcast para toda a sala saber que a carta foi jogada (logs uniformes)
+      this.server.to(matchId).emit('card-played', result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[play-card] Recusado: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -339,10 +364,11 @@ export class GameGateway {
       const ranking = await this.getRankingUseCase.execute({ limit });
 
       socket.emit('ranking', { ranking });
-
+      this.logger.debug(`[get-ranking] Socket ${socket.id} requisitou ranking`);
       return { event: 'ranking', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[get-ranking] Erro: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
@@ -362,10 +388,12 @@ export class GameGateway {
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       socket.emit('match-state', state);
-
+      
+      this.logger.debug(`[get-state] Socket ${socket.id} requisitou estado da match ${matchId}`);
       return { event: 'state', data: state };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.warn(`[get-state] Erro: ${message}`);
       return { event: 'error', data: { message } };
     }
   }
