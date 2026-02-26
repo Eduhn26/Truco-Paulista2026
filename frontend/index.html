@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Truco Paulista — Browser UI</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+
+  <body>
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand__title">Truco Paulista</div>
+        <div class="brand__sub">Browser UI (Socket.IO)</div>
+      </div>
+
+      <div class="topbar__status">
+        <span class="pill">Backend <span id="backendUrlLabel">http://localhost:3000</span></span>
+        <span class="pill">
+          Socket <span id="connStatus" class="pill__dot pill--off">OFF</span>
+        </span>
+      </div>
+
+      <div class="hud">
+        <span class="hud__item">Match <span id="hudMatchId" class="hud__mono">-</span></span>
+        <span class="hud__item">Estado <span id="hudMatchState" class="badge badge--muted">-</span></span>
+        <span class="hud__item">Vez <span id="hudTurn" class="hud__mono">-</span></span>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <aside class="panel">
+        <h3>Conexão</h3>
+        <div class="field">
+          <label for="backendUrl">Backend URL</label>
+          <input id="backendUrl" type="text" value="http://localhost:3000" />
+        </div>
+        <div class="field">
+          <label for="playerToken">Player Token</label>
+          <input id="playerToken" type="text" value="p1" />
+          <div class="hint">NOTE: o backend exige token no handshake.</div>
+        </div>
+        <div class="row">
+          <button id="btnConnect" class="btn">Conectar</button>
+          <button id="btnDisconnect" class="btn btn--ghost" disabled>Desconectar</button>
+        </div>
+
+        <hr />
+
+        <h3>Partida</h3>
+        <div class="field">
+          <label for="matchId">Match ID</label>
+          <input id="matchId" type="text" placeholder="cmm..." />
+        </div>
+        <div class="row">
+          <button id="btnCreateMatch" class="btn" disabled>Criar match</button>
+          <button id="btnJoinMatch" class="btn btn--ghost" disabled>Entrar</button>
+        </div>
+        <div class="row">
+          <button id="btnReady" class="btn btn--ghost" disabled>Ready: -</button>
+          <button id="btnGetState" class="btn btn--ghost" disabled>Get state</button>
+        </div>
+
+        <hr />
+
+        <h3>Iniciar mão</h3>
+        <div class="field">
+          <label for="viraRank">Vira (rank)</label>
+          <select id="viraRank">
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="Q">Q</option>
+            <option value="J">J</option>
+            <option value="K">K</option>
+            <option value="A">A</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <button id="btnStartHand" class="btn" disabled>Start next hand</button>
+        <div id="handHint" class="callout hidden">
+          Mão encerrada: match voltou para <b>waiting</b>. Clique <b>Start next hand</b>.
+        </div>
+
+        <hr />
+
+        <h3>Identidade</h3>
+        <div class="kv">
+          <div class="kv__k">seatId</div><div id="seatId" class="kv__v">-</div>
+          <div class="kv__k">teamId</div><div id="teamId" class="kv__v">-</div>
+          <div class="kv__k">domainPlayerId</div><div id="domainPlayerId" class="kv__v">-</div>
+          <div class="kv__k">profileId</div><div id="profileId" class="kv__v">-</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section class="scorebar">
+          <div class="scorebox">
+            <div class="scorebox__label">T1 (P1)</div>
+            <div id="scoreT1" class="scorebox__value">0</div>
+          </div>
+          <div class="scorebox">
+            <div class="scorebox__label">T2 (P2)</div>
+            <div id="scoreT2" class="scorebox__value">0</div>
+          </div>
+          <div class="scorebar__right">
+            <span id="canStartBadge" class="badge badge--muted">canStart: false</span>
+          </div>
+        </section>
+
+        <section class="tablewrap">
+          <div class="table">
+            <div class="seat seat--top" id="seat_T1A">
+              <div class="seat__head"><div class="seat__name">T1A</div><div class="seat__team">T1</div></div>
+              <div id="ready_T1A" class="seat__meta">ready: -</div>
+              <div class="seat__cards">
+                <div id="handCount_T1A" class="cardsback">🂠 x0</div>
+                <div id="played_T1A" class="played">—</div>
+              </div>
+            </div>
+
+            <div class="seat seat--right hidden" id="seat_T1B">
+              <div class="seat__head"><div class="seat__name">T1B</div><div class="seat__team">T1</div></div>
+              <div id="ready_T1B" class="seat__meta">ready: -</div>
+              <div class="seat__cards"><div id="handCount_T1B" class="cardsback">🂠 x0</div><div id="played_T1B" class="played">—</div></div>
+            </div>
+
+            <div class="seat seat--left hidden" id="seat_T2B">
+              <div class="seat__head"><div class="seat__name">T2B</div><div class="seat__team">T2</div></div>
+              <div id="ready_T2B" class="seat__meta">ready: -</div>
+              <div class="seat__cards"><div id="handCount_T2B" class="cardsback">🂠 x0</div><div id="played_T2B" class="played">—</div></div>
+            </div>
+
+            <div class="seat seat--bottom" id="seat_T2A">
+              <div class="seat__head"><div class="seat__name">T2A</div><div class="seat__team">T2</div></div>
+              <div id="ready_T2A" class="seat__meta">ready: -</div>
+              <div class="seat__cards">
+                <div id="handCount_T2A" class="cardsback">🂠 x0</div>
+                <div id="played_T2A" class="played">—</div>
+              </div>
+            </div>
+
+            <div class="center">
+              <div class="center__title">Mesa</div>
+              <div class="vira">
+                <div class="vira__label">VIRA</div>
+                <div id="viraCard" class="card card--big card--empty">—</div>
+                <div id="viraHint" class="vira__hint muted">Aguardando Start next hand...</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="playpanel">
+          <div class="playpanel__head">
+            <h3>Minha mão</h3>
+            <div class="muted">Clique numa carta para jogar (só na sua vez).</div>
+          </div>
+          <div id="myHand" class="myhand">—</div>
+          <div class="row row--tight" style="margin-top: 10px;">
+            <button id="btnPlayCard" class="btn btn--ghost" disabled>Play card</button>
+            <button id="btnGetRanking" class="btn btn--ghost" disabled>Atualizar ranking</button>
+            <span class="muted" style="margin-left:auto;">Ranking (Top <span id="rankingLimitLabel">20</span>)</span>
+            <span id="rankingStatus" class="badge badge--muted">-</span>
+          </div>
+
+          <div class="hidden">
+            <select id="cardRank"><option value="4">4</option></select>
+            <select id="cardSuit"><option value="C">C</option></select>
+          </div>
+
+          <div class="ranking" style="margin-top: 12px;">
+            <table>
+              <thead>
+                <tr><th>#</th><th>Player</th><th class="num">Rating</th><th class="num">W</th><th class="num">L</th><th class="num">Matches</th></tr>
+              </thead>
+              <tbody id="rankingBody">
+                <tr><td colspan="6" class="muted">Sem dados.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <aside class="events-panel">
+        <div class="events__head">
+          <h3>Eventos em Tempo Real</h3>
+          <button id="btnClearLog" class="btn btn--ghost">Limpar</button>
+        </div>
+        <pre id="eventLog">-</pre>
+      </aside>
+    </div>
+
+    <div id="toast" class="toast hidden">
+      <div id="toastTitle" class="toast__title">-</div>
+      <div id="toastMsg" class="toast__msg">-</div>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
