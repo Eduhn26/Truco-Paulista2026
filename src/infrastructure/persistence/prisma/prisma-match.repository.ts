@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 
 import type { MatchRepository } from '@game/application/ports/match.repository';
 
@@ -10,6 +9,8 @@ import { Round } from '@game/domain/entities/round';
 import { Card } from '@game/domain/value-objects/card';
 import { Score } from '@game/domain/value-objects/score';
 import type { PlayerId } from '@game/domain/value-objects/player-id';
+
+import { PrismaService } from './prisma.service';
 
 type PersistedRound = {
   plays: Partial<Record<PlayerId, string>>;
@@ -32,16 +33,11 @@ type PersistedScore = {
 
 @Injectable()
 export class PrismaMatchRepository implements MatchRepository {
-  // HACK: Instanciação direta do PrismaClient contorna a injeção do NestJS.
-  // Garante isolamento total e impede o erro "Cannot read properties of undefined" no ambiente atual.
-  private readonly prisma = new PrismaClient();
-
-  constructor() {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async create(match: Match): Promise<string> {
     const matchId = `match_${randomUUID().replace(/-/g, '')}`;
 
-    // NOTE: Infra é responsável por “materializar” o Domain em persistência.
     const snapshot = this.toSnapshot(match);
 
     await this.prisma.matchSnapshot.create({
@@ -87,13 +83,17 @@ export class PrismaMatchRepository implements MatchRepository {
       currentHand: Hand | null;
     };
 
-    // NOTE: COMPAT — Domain não expõe rehydrate().
-    // A Infra reidrata preenchendo internals (isolado aqui).
+    // COMPAT: Domain não expõe rehydrate(). A Infra reidrata preenchendo internals.
     match.state = row.state;
 
     if (score) {
-      // HACK: Bypass no construtor privado do Score apenas para reidratação da Infra.
-      match.score = new (Score as any)(score.playerOne ?? 0, score.playerTwo ?? 0);
+      // HACK: Bypass type-safe no construtor privado para reidratação
+      const restoredScore = Object.create(Score.prototype) as Score;
+      Object.assign(restoredScore, {
+        playerOne: score.playerOne ?? 0,
+        playerTwo: score.playerTwo ?? 0,
+      });
+      match.score = restoredScore;
     }
 
     const currentHand = data?.currentHand ? this.hydrateHand(data.currentHand) : null;

@@ -87,7 +87,7 @@ export class RoomManager {
     }
 
     const occupied = new Set<SeatId>(room.socketsBySeat.keys());
-    
+
     // 🔥 CORREÇÃO 1v1 AQUI: Forçar a entrega apenas das cadeiras de Oponentes (T1A e T2A)
     // Ignoramos a função nextFreeSeat antiga que entregava a T1B para o P2.
     let seatId: SeatId;

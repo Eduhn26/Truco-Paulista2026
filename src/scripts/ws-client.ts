@@ -115,7 +115,8 @@ function parsePlayArg(arg: string): { rank: string; suit: string } | null {
   const trimmed = arg.trim().toUpperCase();
   if (!trimmed) return null;
 
-  const cleaned = trimmed.replace(/[ ,\-]/g, '');
+  // COMPAT: Regex literal de traço. Removido escape desnecessário.
+  const cleaned = trimmed.replace(/[ ,-]/g, '');
   if (cleaned.length < 2) return null;
 
   const rank = cleaned.slice(0, cleaned.length - 1);
@@ -154,7 +155,8 @@ async function createMatch(socket: Socket, pointsToWin?: number): Promise<string
 }
 
 async function joinMatch(socket: Socket, matchId: string): Promise<void> {
-  if (!matchId) throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token]');
+  if (!matchId)
+    throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token]');
   socket.emit('join-match', { matchId });
   await once<JoinedPayload>(socket, 'joined');
   // eslint-disable-next-line no-console
