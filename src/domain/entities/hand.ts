@@ -3,8 +3,14 @@ import type { RoundResult } from '../value-objects/round-result';
 import type { Rank } from '../value-objects/rank';
 import type { Card } from '../value-objects/card';
 
-import { Round } from './round';
+import { Round, type RoundSnapshot } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
+
+export type HandSnapshot = {
+  viraRank: Rank;
+  rounds: RoundSnapshot[];
+  finished: boolean;
+};
 
 export class Hand {
   private readonly rounds: Round[];
@@ -12,6 +18,16 @@ export class Hand {
 
   constructor(private readonly viraRank: Rank) {
     this.rounds = [new Round(this.viraRank)];
+  }
+
+  static fromSnapshot(snapshot: HandSnapshot): Hand {
+    const hand = new Hand(snapshot.viraRank);
+
+    const restoredRounds = snapshot.rounds.map((round) => Round.fromSnapshot(round));
+    hand.rounds.splice(0, hand.rounds.length, ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]));
+    hand.finished = snapshot.finished;
+
+    return hand;
   }
 
   play(player: PlayerId, card: Card): void {
@@ -42,6 +58,14 @@ export class Hand {
     return this.resolveWinner();
   }
 
+  toSnapshot(): HandSnapshot {
+    return {
+      viraRank: this.viraRank,
+      rounds: this.rounds.map((round) => round.toSnapshot()),
+      finished: this.finished,
+    };
+  }
+
   private getCurrentRound(): Round {
     return this.rounds[this.rounds.length - 1]!;
   }
@@ -69,20 +93,14 @@ export class Hand {
 
     if (!r1 || !r2) return null;
 
-    // Truco Paulista (tie-break):
-    // 1) Se a 2ª rodada empata, vence quem ganhou a 1ª.
     if (r1 !== 'TIE' && r2 === 'TIE') return r1;
-
-    // 2) Se a 1ª empata, vence quem ganhar a 2ª.
     if (r1 === 'TIE' && r2 !== 'TIE') return r2;
 
-    // 3) Se as duas primeiras empatarem, a 3ª decide.
     if (r1 === 'TIE' && r2 === 'TIE') {
       if (r3 && r3 !== 'TIE') return r3;
       return null;
     }
 
-    // 4) Se 1ª e 2ª tiverem vencedores diferentes, a 3ª decide.
     if (r1 !== 'TIE' && r2 !== 'TIE' && r1 !== r2) {
       if (r3 && r3 !== 'TIE') return r3;
       return null;
@@ -95,6 +113,7 @@ export class Hand {
     const round = this.rounds[index];
     if (!round) return null;
     if (!round.isFinished()) return null;
+
     return round.getResult();
   }
 

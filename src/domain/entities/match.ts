@@ -5,7 +5,17 @@ import type { Rank } from '../value-objects/rank';
 
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
 import { Score } from '../value-objects/score';
-import { Hand } from './hand';
+import { Hand, type HandSnapshot } from './hand';
+
+export type MatchSnapshot = {
+  pointsToWin: number;
+  state: MatchState;
+  score: {
+    playerOne: number;
+    playerTwo: number;
+  };
+  currentHand: HandSnapshot | null;
+};
 
 export class Match {
   private state: MatchState = 'waiting';
@@ -13,6 +23,26 @@ export class Match {
   private currentHand: Hand | null = null;
 
   constructor(private readonly pointsToWin: number) {}
+
+  static fromSnapshot(snapshot: MatchSnapshot): Match {
+    const match = new Match(snapshot.pointsToWin);
+
+    let restoredScore = Score.zero();
+
+    for (let index = 0; index < snapshot.score.playerOne; index += 1) {
+      restoredScore = restoredScore.addPoint('P1');
+    }
+
+    for (let index = 0; index < snapshot.score.playerTwo; index += 1) {
+      restoredScore = restoredScore.addPoint('P2');
+    }
+
+    match.state = snapshot.state;
+    match.score = restoredScore;
+    match.currentHand = snapshot.currentHand ? Hand.fromSnapshot(snapshot.currentHand) : null;
+
+    return match;
+  }
 
   getState(): MatchState {
     return this.state;
@@ -27,7 +57,6 @@ export class Match {
       throw new InvalidMoveError('Match is already finished.');
     }
 
-    // Só pode iniciar uma nova mão quando estiver aguardando
     if (this.state !== 'waiting') return;
 
     this.currentHand = new Hand(viraRank);
@@ -58,5 +87,19 @@ export class Match {
     }
 
     this.state = 'waiting';
+  }
+
+  toSnapshot(): MatchSnapshot {
+    const score = this.getScore();
+
+    return {
+      pointsToWin: this.pointsToWin,
+      state: this.state,
+      score: {
+        playerOne: score.playerOne,
+        playerTwo: score.playerTwo,
+      },
+      currentHand: this.currentHand ? this.currentHand.toSnapshot() : null,
+    };
   }
 }
