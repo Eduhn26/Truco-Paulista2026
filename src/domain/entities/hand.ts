@@ -24,7 +24,11 @@ export class Hand {
     const hand = new Hand(snapshot.viraRank);
 
     const restoredRounds = snapshot.rounds.map((round) => Round.fromSnapshot(round));
-    hand.rounds.splice(0, hand.rounds.length, ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]));
+    hand.rounds.splice(
+      0,
+      hand.rounds.length,
+      ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]),
+    );
     hand.finished = snapshot.finished;
 
     return hand;

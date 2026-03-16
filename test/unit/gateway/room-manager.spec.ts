@@ -23,9 +23,9 @@ describe('RoomManager (2v2)', () => {
     roomManager.join('match-1', 'socket-3', 'token-3');
     roomManager.join('match-1', 'socket-4', 'token-4');
 
-    expect(() =>
-      roomManager.join('match-1', 'socket-5', 'token-5')
-    ).toThrow('match is full (2v2 mode)');
+    expect(() => roomManager.join('match-1', 'socket-5', 'token-5')).toThrow(
+      'match is full (2v2 mode)',
+    );
   });
 
   it('reattaches the same token to the same seat on reconnect', () => {
@@ -144,7 +144,7 @@ describe('RoomManager (2v2)', () => {
     const roomManager = new RoomManager();
 
     expect(() => roomManager.setReady('missing-socket', true)).toThrow(
-      'you must join a match first'
+      'you must join a match first',
     );
   });
 });
