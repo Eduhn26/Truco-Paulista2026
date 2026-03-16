@@ -1,5 +1,3 @@
-/* global io */
-
 const el = (id) => document.getElementById(id);
 
 const ui = {
@@ -32,12 +30,20 @@ const ui = {
   canStartBadge: el('canStartBadge'),
   ready_T1A: el('ready_T1A'),
   ready_T2A: el('ready_T2A'),
+  ready_T1B: el('ready_T1B'),
+  ready_T2B: el('ready_T2B'),
   seat_T1A: el('seat_T1A'),
   seat_T2A: el('seat_T2A'),
+  seat_T1B: el('seat_T1B'),
+  seat_T2B: el('seat_T2B'),
   handCount_T1A: el('handCount_T1A'),
   handCount_T2A: el('handCount_T2A'),
+  handCount_T1B: el('handCount_T1B'),
+  handCount_T2B: el('handCount_T2B'),
   played_T1A: el('played_T1A'),
   played_T2A: el('played_T2A'),
+  played_T1B: el('played_T1B'),
+  played_T2B: el('played_T2B'),
   viraCard: el('viraCard'),
   viraHint: el('viraHint'),
   myHand: el('myHand'),
@@ -52,7 +58,8 @@ const ui = {
   toastMsg: el('toastMsg'),
 };
 
-const SEATS = ['T1A', 'T2A'];
+// NOTE: This must mirror the current 2v2 seat order used by RoomManager.
+const SEATS = ['T1A', 'T2A', 'T1B', 'T2B'];
 const SUITS = ['C', 'O', 'P', 'E'];
 const RANKS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 
@@ -83,7 +90,7 @@ const state = {
     localGame: null,
     selectedCardKey: null,
     lastTurnSeatId: null,
-    clearingRound: false, // 🔥 NOVO: Controle de animação da rodada
+    clearingRound: false,
   },
 };
 
@@ -108,7 +115,7 @@ function nowTs() {
   return `${hh}:${mm}:${ss}`;
 }
 
-// NOTE: O log sempre insere as linhas no TOPO (prepend). Não precisa de barra de rolagem!
+// NOTE: The event log prepends new lines on top, so manual scrolling is not required.
 function logEvent(name, payload) {
   const line = `[${nowTs()}] ${name}\n${payload ? JSON.stringify(payload, null, 2) : ''}\n`;
   if (ui.eventLog.textContent.trim() === '-') ui.eventLog.textContent = line;
@@ -400,7 +407,7 @@ function tryLoadLocalHandFromStorage(matchId) {
     handNo: saved.handNo,
     vira: saved.vira,
     hands: saved.hands,
-    played: saved.played ?? { T1A: null, T2A: null },
+    played: saved.played ?? { T1A: null, T2A: null, T1B: null, T2B: null },
     viraRankChosen: saved.viraRankChosen ?? saved.vira?.rank ?? '4',
   };
 
@@ -432,13 +439,23 @@ function startLocalHand(matchId, viraRankChosen) {
   const deck = buildDeck();
   shuffleInPlace(deck, rand);
 
-  const hands = { T1A: [], T2A: [] };
-  for (let i = 0; i < 3; i += 1) for (const seatId of SEATS) hands[seatId].push(deck.pop());
+  const hands = { T1A: [], T2A: [], T1B: [], T2B: [] };
+  for (let i = 0; i < 3; i += 1) for (const seatId of SEATS) {
+    const nextCard = deck.pop();
+    if (nextCard) hands[seatId].push(nextCard);
+  }
 
   const suit = SUITS[Math.floor(rand() * SUITS.length)];
   const vira = { rank: viraRankChosen, suit };
 
-  state.sim.localGame = { matchId, handNo, vira, hands, played: { T1A: null, T2A: null }, viraRankChosen };
+  state.sim.localGame = {
+    matchId,
+    handNo,
+    vira,
+    hands,
+    played: { T1A: null, T2A: null, T1B: null, T2B: null },
+    viraRankChosen,
+  };
   state.sim.handNoByMatch.set(matchId, Math.max(state.sim.handNoByMatch.get(matchId) ?? 0, handNo));
   state.sim.selectedCardKey = null;
 
@@ -477,34 +494,34 @@ function renderSim() {
     if(handCountEl(seatId)) handCountEl(seatId).textContent = `🂠 x${count}`;
 
     const played = g.played?.[seatId] ?? null;
-    if (!played) { 
-        if(playedEl(seatId)) playedEl(seatId).textContent = '—';
+    if (!played) {
+      if(playedEl(seatId)) playedEl(seatId).textContent = '—';
     } else if (played.kind === 'card') {
-        if(playedEl(seatId)) playedEl(seatId).textContent = `${played.card.rank}${suitSymbol(played.card.suit)}`;
+      if(playedEl(seatId)) playedEl(seatId).textContent = `${played.card.rank}${suitSymbol(played.card.suit)}`;
     } else {
-        if(playedEl(seatId)) playedEl(seatId).textContent = '🂠';
+      if(playedEl(seatId)) playedEl(seatId).textContent = '🂠';
     }
   }
 
-  // 🔥 LÓGICA DE VÍDEO: Apagar as cartas da mesa quando a rodada termina (ambos jogaram)
-  const p1Card = g.played?.['T1A'];
-  const p2Card = g.played?.['T2A'];
+  // NOTE: The local UI clears played cards only after all four seats have visibly played.
+  const roundCompleted = SEATS.every((seatId) => g.played?.[seatId]?.kind === 'card');
 
-  if (p1Card?.kind === 'card' && p2Card?.kind === 'card') {
+  if (roundCompleted) {
     if (!state.sim.clearingRound) {
       state.sim.clearingRound = true;
-      logEvent('🏁 SIMULAÇÃO', { info: 'Rodada concluída. Backend está avaliando o vencedor e pontuação...' });
-      
-      // Espera 2.5s para o usuário ver as cartas e ler o log, depois limpa a mesa
+      logEvent('simulation:round-complete', {
+        info: 'Round completed. Waiting before clearing played cards from the table.',
+      });
+
       setTimeout(() => {
         const currentG = state.sim.localGame;
-        // Garantimos que a mão ainda é a mesma antes de limpar
         if (currentG && currentG.handNo === g.handNo) {
-          currentG.played['T1A'] = null;
-          currentG.played['T2A'] = null;
+          for (const seatId of SEATS) {
+            currentG.played[seatId] = null;
+          }
           persistLocalHandToStorage(currentG);
           state.sim.clearingRound = false;
-          renderAll(); // Atualiza a tela limpando as cartas
+          renderAll();
         }
       }, 2500);
     }

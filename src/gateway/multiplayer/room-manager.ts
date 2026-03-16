@@ -1,5 +1,4 @@
-import type { SeatId, TeamId } from './seat-id';
-import { teamFromSeat } from './seat-id';
+import { teamFromSeat, type SeatId, type TeamId } from './seat-id';
 
 type RoomState = {
   matchId: string;
@@ -29,15 +28,15 @@ export type RoomStateDto = {
   currentTurnSeatId: SeatId | null;
 };
 
-// HACK: Modo 1v1 temporário para teste e gravação de vídeo. Ignora os assentos "B".
-const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A'];
+const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A', 'T1B', 'T2B'];
 
 function tokenKey(matchId: string, playerToken: string): string {
   return `${matchId}::${playerToken}`;
 }
 
-// NOTE: Presença/seat/ready/turn são efêmeros (transport-level).
-// Persistir isso em DB vira estado “fantasma”.
+// NOTE:
+// Presence, seat ownership, ready flags, and turn orchestration remain transport-level state.
+// Persisting this into the database would create ghost state that outlives the actual socket lifecycle.
 export class RoomManager {
   private readonly roomsByMatchId = new Map<string, RoomState>();
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
@@ -67,12 +66,13 @@ export class RoomManager {
     const key = tokenKey(matchId, playerToken);
     const existingToken = this.sessionsByTokenKey.get(key);
 
-    // NOTE: Reconexão: token mantém o seat; só trocamos o socketId.
+    // NOTE:
+    // Reconnection is token-based, not socket-based.
+    // The seat must remain stable so transient connection loss does not rewrite multiplayer identity.
     if (existingToken) {
       const oldSocketId = existingToken.socketId;
 
       room.socketsBySeat.set(existingToken.seatId, socketId);
-
       this.sessionsBySocketId.delete(oldSocketId);
 
       const reattached: PlayerSession = {
@@ -86,22 +86,12 @@ export class RoomManager {
       return reattached;
     }
 
-    const occupied = new Set<SeatId>(room.socketsBySeat.keys());
-
-    // 🔥 CORREÇÃO 1v1 AQUI: Forçar a entrega apenas das cadeiras de Oponentes (T1A e T2A)
-    // Ignoramos a função nextFreeSeat antiga que entregava a T1B para o P2.
-    let seatId: SeatId;
-    if (!occupied.has('T1A')) {
-      seatId = 'T1A';
-    } else if (!occupied.has('T2A')) {
-      seatId = 'T2A';
-    } else {
-      throw new Error('match is full (1v1 mode)');
+    const seatId = this.nextFreeSeat(room);
+    if (!seatId) {
+      throw new Error('match is full (2v2 mode)');
     }
 
     room.socketsBySeat.set(seatId, socketId);
-
-    // NOTE: Ready inicia falso apenas no primeiro join do token.
     room.readyBySeat.set(seatId, false);
 
     const teamId = teamFromSeat(seatId);
@@ -127,10 +117,8 @@ export class RoomManager {
     if (!session) return null;
 
     const room = this.roomsByMatchId.get(session.matchId);
-    if (room) {
-      if (room.currentTurnSeatId === session.seatId) {
-        room.currentTurnSeatId = this.nextOccupiedSeat(room, session.seatId);
-      }
+    if (room && room.currentTurnSeatId === session.seatId) {
+      room.currentTurnSeatId = this.nextOccupiedSeat(room, session.seatId);
     }
 
     this.sessionsBySocketId.delete(socketId);
@@ -150,25 +138,38 @@ export class RoomManager {
     if (!room) throw new Error('room not found');
 
     room.readyBySeat.set(session.seatId, ready);
-    return this.getRoomState(session.matchId);
+
+    return this.toDto(room);
+  }
+
+  canStart(matchId: string): boolean {
+    const room = this.roomsByMatchId.get(matchId);
+    if (!room) return false;
+
+    return TURN_ORDER.every((seatId) => {
+      const hasSeat = room.socketsBySeat.has(seatId);
+      const isReady = room.readyBySeat.get(seatId) === true;
+      return hasSeat && isReady;
+    });
+  }
+
+  getState(matchId: string): RoomStateDto {
+    const room = this.roomsByMatchId.get(matchId);
+    if (!room) throw new Error('room not found');
+
+    return this.toDto(room);
   }
 
   beginHand(matchId: string): RoomStateDto {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) throw new Error('room not found');
+    if (!this.canStart(matchId)) {
+      throw new Error('all 4 players must be ready before starting the hand');
+    }
 
-    room.currentTurnSeatId = 'T1A';
-    return this.getRoomState(matchId);
-  }
+    room.currentTurnSeatId = TURN_ORDER[0]!;
 
-  isPlayersTurn(socketId: string, matchId: string): boolean {
-    const session = this.sessionsBySocketId.get(socketId);
-    if (!session) return false;
-
-    const room = this.roomsByMatchId.get(matchId);
-    if (!room) return false;
-
-    return room.currentTurnSeatId === session.seatId;
+    return this.toDto(room);
   }
 
   advanceTurn(matchId: string): RoomStateDto {
@@ -176,90 +177,99 @@ export class RoomManager {
     if (!room) throw new Error('room not found');
 
     if (!room.currentTurnSeatId) {
-      room.currentTurnSeatId = 'T1A';
-      return this.getRoomState(matchId);
+      room.currentTurnSeatId = this.firstOccupiedSeat(room);
+      return this.toDto(room);
     }
 
     room.currentTurnSeatId = this.nextOccupiedSeat(room, room.currentTurnSeatId);
-    return this.getRoomState(matchId);
+
+    return this.toDto(room);
   }
 
-  getRoomState(matchId: string): RoomStateDto {
-    const room = this.roomsByMatchId.get(matchId);
+  isPlayersTurn(socketId: string, matchId: string): boolean {
+    const session = this.sessionsBySocketId.get(socketId);
+    if (!session) return false;
+    if (session.matchId !== matchId) return false;
 
-    if (!room) {
-      return { matchId, players: [], canStart: false, currentTurnSeatId: null };
-    }
-
-    const players: RoomStateDto['players'] = [];
-
-    for (const [seatId] of room.socketsBySeat.entries()) {
-      const teamId = teamFromSeat(seatId);
-      const ready = room.readyBySeat.get(seatId) ?? false;
-      players.push({ seatId, teamId, ready });
-    }
-
-    // HACK: Modo 1v1 temporário para teste (muda exigência de 4 para 2)
-    const isFull = players.length === 2;
-    const allReady = isFull && players.every((p) => p.ready);
-
-    return {
-      matchId,
-      players,
-      canStart: allReady,
-      currentTurnSeatId: room.currentTurnSeatId,
-    };
-  }
-
-  canStart(matchId: string): boolean {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) return false;
 
-    // HACK: Modo 1v1 temporário para teste
-    if (room.socketsBySeat.size !== 2) return false;
-
-    for (const seatId of room.socketsBySeat.keys()) {
-      if (!room.readyBySeat.get(seatId)) return false;
-    }
-
-    return true;
+    return room.currentTurnSeatId === session.seatId;
   }
 
   getTeamTokens(matchId: string): { T1: string[]; T2: string[] } {
-    const t1: string[] = [];
-    const t2: string[] = [];
+    const teamTokens = {
+      T1: [] as string[],
+      T2: [] as string[],
+    };
 
     for (const session of this.sessionsByTokenKey.values()) {
       if (session.matchId !== matchId) continue;
 
-      if (session.teamId === 'T1') t1.push(session.playerToken);
-      if (session.teamId === 'T2') t2.push(session.playerToken);
+      if (session.teamId === 'T1') {
+        teamTokens.T1.push(session.playerToken);
+      } else {
+        teamTokens.T2.push(session.playerToken);
+      }
     }
 
-    return { T1: t1, T2: t2 };
+    return teamTokens;
   }
 
   tryMarkRatingApplied(matchId: string): boolean {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) return false;
-
     if (room.ratingApplied) return false;
 
     room.ratingApplied = true;
     return true;
   }
 
-  private nextOccupiedSeat(room: RoomState, from: SeatId): SeatId | null {
-    if (room.socketsBySeat.size === 0) return null;
+  private toDto(room: RoomState): RoomStateDto {
+    const players = TURN_ORDER.filter((seatId) => room.socketsBySeat.has(seatId)).map((seatId) => ({
+      seatId,
+      teamId: teamFromSeat(seatId),
+      ready: room.readyBySeat.get(seatId) === true,
+    }));
 
-    const idx = TURN_ORDER.indexOf(from);
+    return {
+      matchId: room.matchId,
+      players,
+      canStart: this.canStart(room.matchId),
+      currentTurnSeatId: room.currentTurnSeatId,
+    };
+  }
 
-    if (idx === -1) return null;
+  private nextFreeSeat(room: RoomState): SeatId | null {
+    for (const seatId of TURN_ORDER) {
+      if (!room.socketsBySeat.has(seatId)) {
+        return seatId;
+      }
+    }
 
-    for (let step = 1; step <= TURN_ORDER.length; step += 1) {
-      const next = TURN_ORDER[(idx + step) % TURN_ORDER.length]!;
+    return null;
+  }
 
-      if (room.socketsBySeat.has(next)) return next;
+  private firstOccupiedSeat(room: RoomState): SeatId | null {
+    for (const seatId of TURN_ORDER) {
+      if (room.socketsBySeat.has(seatId)) {
+        return seatId;
+      }
+    }
+
+    return null;
+  }
+
+  private nextOccupiedSeat(room: RoomState, currentSeatId: SeatId): SeatId | null {
+    const currentIndex = TURN_ORDER.indexOf(currentSeatId);
+    if (currentIndex < 0) return this.firstOccupiedSeat(room);
+
+    for (let offset = 1; offset <= TURN_ORDER.length; offset += 1) {
+      const index = (currentIndex + offset) % TURN_ORDER.length;
+      const candidate = TURN_ORDER[index];
+      if (candidate && room.socketsBySeat.has(candidate)) {
+        return candidate;
+      }
     }
 
     return null;

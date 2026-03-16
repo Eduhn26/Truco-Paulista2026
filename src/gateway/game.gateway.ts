@@ -105,7 +105,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(
       `[Disconnect] Socket desconectado: ${socket.id} (saiu da partida ${left.matchId})`,
     );
-    this.server.to(left.matchId).emit('room-state', this.roomManager.getRoomState(left.matchId));
+    this.server.to(left.matchId).emit('room-state', this.roomManager.getState(left.matchId));
   }
 
   @SubscribeMessage('create-match')
@@ -146,7 +146,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         profileId: profile.id,
       });
 
-      this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
+      this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
 
       const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
         matchId,
@@ -192,7 +192,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         profileId: profile.id,
       });
 
-      this.server.to(matchId).emit('room-state', this.roomManager.getRoomState(matchId));
+      this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
 
       const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
         matchId,
