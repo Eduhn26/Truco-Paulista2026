@@ -62,6 +62,49 @@ type GetRankingPayload = {
   limit?: unknown;
 };
 
+type GatewayLogContext = {
+  layer: 'gateway';
+  event:
+    | 'socket_connected'
+    | 'socket_disconnected'
+    | 'socket_disconnected_without_match'
+    | 'create_match_requested'
+    | 'create_match_succeeded'
+    | 'create_match_rejected'
+    | 'join_match_requested'
+    | 'join_match_succeeded'
+    | 'join_match_rejected'
+    | 'set_ready_requested'
+    | 'set_ready_succeeded'
+    | 'set_ready_rejected'
+    | 'start_hand_requested'
+    | 'start_hand_succeeded'
+    | 'start_hand_rejected'
+    | 'play_card_requested'
+    | 'play_card_succeeded'
+    | 'play_card_rejected'
+    | 'match_finished'
+    | 'get_ranking_requested'
+    | 'get_ranking_succeeded'
+    | 'get_ranking_rejected'
+    | 'get_state_requested'
+    | 'get_state_succeeded'
+    | 'get_state_rejected';
+  status: 'started' | 'succeeded' | 'rejected' | 'connected' | 'disconnected';
+  socketId?: string;
+  matchId?: string;
+  seatId?: string;
+  teamId?: string;
+  playerId?: string;
+  playerTokenSuffix?: string;
+  pointsToWin?: number;
+  viraRank?: string;
+  card?: string;
+  limit?: number;
+  errorType?: 'validation_error' | 'transport_error' | 'unexpected_error';
+  errorMessage?: string;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -82,6 +125,51 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly roomManager: RoomManager,
   ) {}
 
+  private formatGatewayLog(context: GatewayLogContext): string {
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      ...context,
+    });
+  }
+
+  private logGateway(level: 'debug' | 'log' | 'warn', context: GatewayLogContext): void {
+    const message = this.formatGatewayLog(context);
+
+    if (level === 'debug') {
+      this.logger.debug(message);
+      return;
+    }
+
+    if (level === 'warn') {
+      this.logger.warn(message);
+      return;
+    }
+
+    this.logger.log(message);
+  }
+
+  private maskPlayerToken(playerToken: string): string {
+    return playerToken.length <= 6 ? playerToken : playerToken.slice(-6);
+  }
+
+  private reject(
+    event: GatewayLogContext['event'],
+    message: string,
+    context: Omit<GatewayLogContext, 'layer' | 'event' | 'status' | 'errorMessage' | 'errorType'>,
+    errorType: Exclude<GatewayLogContext['errorType'], undefined>,
+  ): WsResponse<ErrorResponseDto> {
+    this.logGateway('warn', {
+      layer: 'gateway',
+      event,
+      status: 'rejected',
+      errorType,
+      errorMessage: message,
+      ...context,
+    });
+
+    return { event: 'error', data: { message } };
+  }
+
   private extractPlayerToken(socket: Socket): string {
     const raw = (socket.handshake as unknown as { auth?: { token?: unknown } })?.auth?.token;
     if (typeof raw !== 'string' || raw.trim().length === 0) {
@@ -91,20 +179,35 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleConnection(socket: Socket): void {
-    this.logger.debug(`[Connection] Socket conectado: ${socket.id}`);
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'socket_connected',
+      status: 'connected',
+      socketId: socket.id,
+    });
   }
 
-  // NOTE: Sem cleanup, seat/ready/turn “vaza” e a sala fica travada como se ainda estivesse ocupada.
+  // NOTE: Transport state must be released on disconnect so seat ownership does not outlive the socket lifecycle.
   handleDisconnect(socket: Socket): void {
     const left = this.roomManager.leave(socket.id);
     if (!left) {
-      this.logger.debug(`[Disconnect] Socket desconectado: ${socket.id} (sem partida ativa)`);
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'socket_disconnected_without_match',
+        status: 'disconnected',
+        socketId: socket.id,
+      });
       return;
     }
 
-    this.logger.log(
-      `[Disconnect] Socket desconectado: ${socket.id} (saiu da partida ${left.matchId})`,
-    );
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'socket_disconnected',
+      status: 'disconnected',
+      socketId: socket.id,
+      matchId: left.matchId,
+    });
+
     this.server.to(left.matchId).emit('room-state', this.roomManager.getState(left.matchId));
   }
 
@@ -113,7 +216,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: CreateMatchPayload,
   ): Promise<WsResponse<CreateMatchResponseDto> | WsResponse<ErrorResponseDto>> {
-    this.logger.debug(`[create-match] Acionado por socket=${socket.id}`);
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'create_match_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const playerToken = this.extractPlayerToken(socket);
       const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
@@ -122,13 +231,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const pointsToWin = typeof pointsToWinRaw === 'number' ? pointsToWinRaw : undefined;
 
       if (pointsToWin !== undefined && !Number.isInteger(pointsToWin)) {
-        return {
-          event: 'error',
-          data: { message: 'Invalid payload: pointsToWin must be an integer.' },
-        };
+        return this.reject(
+          'create_match_rejected',
+          'Invalid payload: pointsToWin must be an integer.',
+          {
+            socketId: socket.id,
+            playerTokenSuffix: this.maskPlayerToken(playerToken),
+          },
+          'validation_error',
+        );
       }
 
-      // NOTE: exactOptionalPropertyTypes: evitar { pointsToWin: undefined }
+      // NOTE: exactOptionalPropertyTypes requires omitting optional fields instead of assigning undefined.
       const dto: CreateMatchRequestDto = pointsToWin === undefined ? {} : { pointsToWin };
 
       const result = await this.createMatchUseCase.execute(dto);
@@ -153,12 +267,29 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logger.log(`[create-match] Partida criada: ${matchId} (Player: ${playerToken})`);
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'create_match_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerTokenSuffix: this.maskPlayerToken(playerToken),
+        ...(pointsToWin === undefined ? {} : { pointsToWin }),
+      });
+
       return { event: 'created', data: result };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[create-match] Recusado: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'create_match_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -167,7 +298,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinMatchPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
-    this.logger.debug(`[join-match] Acionado por socket=${socket.id}`);
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'join_match_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const playerToken = this.extractPlayerToken(socket);
       const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
@@ -176,7 +313,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
       if (!matchId) {
-        return { event: 'error', data: { message: 'Invalid payload: matchId is required.' } };
+        return this.reject(
+          'join_match_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            playerTokenSuffix: this.maskPlayerToken(playerToken),
+          },
+          'validation_error',
+        );
       }
 
       await socket.join(matchId);
@@ -199,14 +344,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logger.log(
-        `[join-match] Jogador ${playerToken} entrou na partida ${matchId} (Seat: ${session.seatId})`,
-      );
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'join_match_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerTokenSuffix: this.maskPlayerToken(playerToken),
+      });
+
       return { event: 'joined', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[join-match] Recusado: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'join_match_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -215,15 +374,32 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SetReadyPayload,
   ): WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'set_ready_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const readyRaw = payload?.ready;
       if (typeof readyRaw !== 'boolean') {
-        return { event: 'error', data: { message: 'Invalid payload: ready must be boolean.' } };
+        return this.reject(
+          'set_ready_rejected',
+          'Invalid payload: ready must be boolean.',
+          { socketId: socket.id },
+          'validation_error',
+        );
       }
 
       const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
-        return { event: 'error', data: { message: 'You must join a match first.' } };
+        return this.reject(
+          'set_ready_rejected',
+          'You must join a match first.',
+          { socketId: socket.id },
+          'transport_error',
+        );
       }
 
       const roomState = this.roomManager.setReady(socket.id, readyRaw);
@@ -231,14 +407,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(session.matchId).emit('room-state', roomState);
       socket.emit('ready-updated', { ok: true, ready: readyRaw });
 
-      this.logger.debug(
-        `[set-ready] Match ${session.matchId} | Seat ${session.seatId} status ready=${readyRaw}`,
-      );
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'set_ready_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId: session.matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
+      });
+
       return { event: 'ready-updated', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[set-ready] Recusado: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'set_ready_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -247,11 +437,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: StartHandPayload,
   ): Promise<void | WsResponse<ErrorResponseDto>> {
-    this.logger.debug(`[start-hand] Acionado por socket=${socket.id}`);
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'start_hand_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
-        return { event: 'error', data: { message: 'You must join a match first.' } };
+        return this.reject(
+          'start_hand_rejected',
+          'You must join a match first.',
+          { socketId: socket.id },
+          'transport_error',
+        );
       }
 
       const matchId =
@@ -260,38 +461,77 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim().toUpperCase() : '';
 
       if (!matchId) {
-        return { event: 'error', data: { message: 'Invalid payload: matchId is required.' } };
+        return this.reject(
+          'start_hand_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            seatId: session.seatId,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
       }
 
       if (!viraRank) {
-        return { event: 'error', data: { message: 'Invalid payload: viraRank is required.' } };
+        return this.reject(
+          'start_hand_rejected',
+          'Invalid payload: viraRank is required.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+          },
+          'validation_error',
+        );
       }
 
       if (!this.roomManager.canStart(matchId)) {
-        return {
-          event: 'error',
-          data: { message: 'Match cannot start: need 4 players and all ready.' },
-        };
+        return this.reject(
+          'start_hand_rejected',
+          'Match cannot start: need 4 players and all ready.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+          },
+          'transport_error',
+        );
       }
 
       const dto: StartHandRequestDto = { matchId, viraRank };
       const result = await this.startHandUseCase.execute(dto);
 
-      // NOTE: Turn-order é regra multiplayer (transport). Domain continua 1v1 por time (P1/P2).
+      // NOTE: Turn order stays in transport because the domain still models teams, not individual sockets.
       const roomState = this.roomManager.beginHand(matchId);
       this.server.to(matchId).emit('room-state', roomState);
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logger.log(`[start-hand] Match ${matchId} | Mão iniciada (Vira: ${viraRank})`);
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'start_hand_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
+        viraRank,
+      });
 
-      // 🔥 CORREÇÃO: Broadcast para toda a sala para gerar as mãos e incluir o viraRank para sincronia de seeds
       this.server.to(matchId).emit('hand-started', { ...result, matchId, viraRank });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[start-hand] Recusado: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'start_hand_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -300,10 +540,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: PlayCardPayload,
   ): Promise<void | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'play_card_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
       if (!session) {
-        return { event: 'error', data: { message: 'You must join a match first.' } };
+        return this.reject(
+          'play_card_rejected',
+          'You must join a match first.',
+          { socketId: socket.id },
+          'transport_error',
+        );
       }
 
       const matchId =
@@ -315,18 +567,42 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const suit = typeof suitRaw === 'string' ? suitRaw.trim().toUpperCase() : '';
 
       if (!matchId) {
-        return { event: 'error', data: { message: 'Invalid payload: matchId is required.' } };
+        return this.reject(
+          'play_card_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            seatId: session.seatId,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
       }
 
       if (!rank || !suit) {
-        return {
-          event: 'error',
-          data: { message: 'Invalid payload: card.rank and card.suit are required.' },
-        };
+        return this.reject(
+          'play_card_rejected',
+          'Invalid payload: card.rank and card.suit are required.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+          },
+          'validation_error',
+        );
       }
 
       if (!this.roomManager.isPlayersTurn(socket.id, matchId)) {
-        return { event: 'error', data: { message: 'Not your turn.' } };
+        return this.reject(
+          'play_card_rejected',
+          'Not your turn.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+          },
+          'transport_error',
+        );
       }
 
       const dto: PlayCardRequestDto = {
@@ -343,7 +619,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logger.log(`[play-card] Match ${matchId} | Seat ${session.seatId} jogou ${rank}${suit}`);
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'play_card_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
+        card: `${rank}${suit}`,
+      });
 
       if (state.state === 'finished' && this.roomManager.tryMarkRatingApplied(matchId)) {
         const score = state.score;
@@ -354,22 +641,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const winnerTokens = winnerTeamId === 'T1' ? tokens.T1 : tokens.T2;
           const loserTokens = winnerTeamId === 'T1' ? tokens.T2 : tokens.T1;
 
-          // NOTE: Ranking é BC separado: o game não “vira” ranking; só dispara atualização após o resultado.
+          // NOTE: Ranking remains a separate bounded context and is triggered only after the match result is final.
           await this.updateRatingUseCase.execute({ winnerTokens, loserTokens });
 
-          this.logger.log(
-            `[match-finished] Match ${matchId} | Vitória do Time ${winnerTeamId}. Ranking atualizado.`,
-          );
+          this.logGateway('log', {
+            layer: 'gateway',
+            event: 'match_finished',
+            status: 'succeeded',
+            matchId,
+            teamId: winnerTeamId,
+          });
+
           this.server.to(matchId).emit('rating-updated', { ok: true });
         }
       }
 
-      // 🔥 CORREÇÃO: Broadcast para toda a sala saber que a carta foi jogada (logs uniformes)
       this.server.to(matchId).emit('card-played', result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[play-card] Recusado: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'play_card_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -378,6 +674,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: GetRankingPayload,
   ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_ranking_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const raw = payload?.limit;
       const limit = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : 20;
@@ -385,12 +688,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const ranking = await this.getRankingUseCase.execute({ limit });
 
       socket.emit('ranking', { ranking });
-      this.logger.debug(`[get-ranking] Socket ${socket.id} requisitou ranking`);
+
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_ranking_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        limit,
+      });
+
       return { event: 'ranking', data: { ok: true } };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[get-ranking] Erro: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'get_ranking_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 
@@ -399,23 +715,47 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: GetStatePayload,
   ): Promise<WsResponse<ViewMatchStateResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_state_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
     try {
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
       if (!matchId) {
-        return { event: 'error', data: { message: 'Invalid payload: matchId is required.' } };
+        return this.reject(
+          'get_state_rejected',
+          'Invalid payload: matchId is required.',
+          { socketId: socket.id },
+          'validation_error',
+        );
       }
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       socket.emit('match-state', state);
 
-      this.logger.debug(`[get-state] Socket ${socket.id} requisitou estado da match ${matchId}`);
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_state_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+      });
+
       return { event: 'state', data: state };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      this.logger.warn(`[get-state] Erro: ${message}`);
-      return { event: 'error', data: { message } };
+
+      return this.reject(
+        'get_state_rejected',
+        message,
+        { socketId: socket.id },
+        'unexpected_error',
+      );
     }
   }
 }
