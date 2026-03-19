@@ -24,6 +24,7 @@ import type { CreateMatchRequestDto } from '@game/application/dtos/requests/crea
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import { DomainError } from '@game/domain/exceptions/domain-error';
 
 import { RoomManager } from './multiplayer/room-manager';
 
@@ -61,6 +62,12 @@ type SetReadyPayload = {
 type GetRankingPayload = {
   limit?: unknown;
 };
+
+type GatewayErrorType =
+  | 'validation_error'
+  | 'transport_error'
+  | 'domain_error'
+  | 'unexpected_error';
 
 type GatewayLogContext = {
   layer: 'gateway';
@@ -101,9 +108,14 @@ type GatewayLogContext = {
   viraRank?: string;
   card?: string;
   limit?: number;
-  errorType?: 'validation_error' | 'transport_error' | 'unexpected_error';
+  errorType?: GatewayErrorType;
   errorMessage?: string;
 };
+
+type RejectContext = Omit<
+  GatewayLogContext,
+  'layer' | 'event' | 'status' | 'errorMessage' | 'errorType'
+>;
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -155,8 +167,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private reject(
     event: GatewayLogContext['event'],
     message: string,
-    context: Omit<GatewayLogContext, 'layer' | 'event' | 'status' | 'errorMessage' | 'errorType'>,
-    errorType: Exclude<GatewayLogContext['errorType'], undefined>,
+    context: RejectContext,
+    errorType: GatewayErrorType,
   ): WsResponse<ErrorResponseDto> {
     this.logGateway('warn', {
       layer: 'gateway',
@@ -168,6 +180,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     return { event: 'error', data: { message } };
+  }
+
+  private rejectFromError(
+    event: GatewayLogContext['event'],
+    error: unknown,
+    context: RejectContext,
+  ): WsResponse<ErrorResponseDto> {
+    if (error instanceof DomainError) {
+      return this.reject(event, error.message, context, 'domain_error');
+    }
+
+    const message = error instanceof Error ? error.message : 'Unknown error';
+
+    return this.reject(event, message, context, 'unexpected_error');
   }
 
   private extractPlayerToken(socket: Socket): string {
@@ -281,15 +307,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       return { event: 'created', data: result };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'create_match_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('create_match_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -357,15 +376,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       return { event: 'joined', data: { ok: true } };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'join_match_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('join_match_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -420,15 +432,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       return { event: 'ready-updated', data: { ok: true } };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'set_ready_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('set_ready_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -523,15 +528,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       this.server.to(matchId).emit('hand-started', { ...result, matchId, viraRank });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'start_hand_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('start_hand_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -657,15 +655,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       this.server.to(matchId).emit('card-played', result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'play_card_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('play_card_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -698,15 +689,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       return { event: 'ranking', data: { ok: true } };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'get_ranking_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('get_ranking_rejected', error, { socketId: socket.id });
     }
   }
 
@@ -747,15 +731,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       return { event: 'state', data: state };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-
-      return this.reject(
-        'get_state_rejected',
-        message,
-        { socketId: socket.id },
-        'unexpected_error',
-      );
+    } catch (error) {
+      return this.rejectFromError('get_state_rejected', error, { socketId: socket.id });
     }
   }
 }
