@@ -11,11 +11,11 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
     this.store.set(profile.playerToken, profile);
   }
 
-  async findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
-    return this.store.get(playerToken) ?? null;
+  findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
+    return Promise.resolve(this.store.get(playerToken) ?? null);
   }
 
-  async create(playerToken: string): Promise<PlayerProfileSnapshot> {
+  create(playerToken: string): Promise<PlayerProfileSnapshot> {
     const created: PlayerProfileSnapshot = {
       id: `profile-${playerToken}`,
       playerToken,
@@ -26,15 +26,18 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
     };
 
     this.store.set(playerToken, created);
-    return created;
+
+    return Promise.resolve(created);
   }
 
-  async save(profile: PlayerProfileSnapshot): Promise<void> {
+  save(profile: PlayerProfileSnapshot): Promise<void> {
     this.store.set(profile.playerToken, profile);
+
+    return Promise.resolve();
   }
 
-  async listTop(limit: number): Promise<PlayerProfileSnapshot[]> {
-    return Array.from(this.store.values()).slice(0, limit);
+  listTop(limit: number): Promise<PlayerProfileSnapshot[]> {
+    return Promise.resolve(Array.from(this.store.values()).slice(0, limit));
   }
 
   getByToken(playerToken: string): PlayerProfileSnapshot | null {
