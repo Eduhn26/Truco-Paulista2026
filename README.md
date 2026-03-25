@@ -1,6 +1,8 @@
-# Truco Paulista — Backend (NestJS)
+# Truco Paulista — Backend
 
-Authoritative backend for the **Truco Paulista** card game, built with **NestJS**, **TypeScript (strict)**, **DDD**, and **Clean Architecture**.
+> Authoritative backend for the **Truco Paulista** card game, built with **NestJS**, **TypeScript (strict)**, **DDD**, and **Clean Architecture**.
+>
+> The focus of this project is **scalable architecture**, **pure domain modeling**, and **real operational discipline** — not just feature delivery.
 
 The focus of this project is **scalable architecture**, **pure domain modeling**, **real testability**, and now also **runtime observability** — not just functionality.
 
@@ -10,11 +12,11 @@ The focus of this project is **scalable architecture**, **pure domain modeling**
 
 This project was created as a practical, incremental study to:
 
-- Apply **Domain-Driven Design** in practice
-- Use **TypeScript as a design tool**, not just for type-checking
-- Build a truly **authoritative real-time backend**
-- Ensure infrastructure changes **never affect the domain**
-- Produce code that is defensible in technical interviews and portfolio reviews
+- apply **Domain-Driven Design** in a real project
+- use **TypeScript as a design tool**, not just for type-checking
+- build a truly **authoritative real-time backend**
+- ensure infrastructure changes **never affect the Domain**
+- produce code that is defensible in technical interviews and portfolio reviews
 
 ---
 
@@ -113,15 +115,15 @@ backend/
 │   ├── styles.css
 │   └── app.js
 ├── prisma/
-│   ├── schema.prisma          # MatchSnapshot + PlayerProfile
+│   ├── schema.prisma              # MatchSnapshot + PlayerProfile
 │   └── migrations/
 ├── src/
-│   ├── domain/                # Pure business rules — DO NOT TOUCH
-│   │   ├── entities/          # Match (Aggregate Root), Hand, Round
-│   │   ├── value-objects/     # Card, PlayerId, Score, MatchState...
-│   │   ├── services/          # TrucoRules
-│   │   └── exceptions/        # DomainError, InvalidMoveError
-│   ├── application/           # Use Cases, DTOs, and Ports
+│   ├── domain/                    # Pure business rules — framework-free
+│   │   ├── entities/              # Match, Hand, Round
+│   │   ├── value-objects/         # Card, PlayerId, Score, MatchState...
+│   │   ├── services/              # TrucoRules
+│   │   └── exceptions/            # DomainError, InvalidMoveError
+│   ├── application/               # Use Cases, DTOs, Ports, Mappers
 │   │   ├── use-cases/
 │   │   ├── dtos/
 │   │   ├── ports/
@@ -213,20 +215,25 @@ rating-updated	Server → Client	Ranking updated after match
 error	Server → Client	Validation, transport, domain, or unexpected error
 🗃️ Database Schema
 model MatchSnapshot {
-  id        String   @id
-  state     Json     // full Match aggregate snapshot
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  matchId     String   @unique
+  pointsToWin Int
+  state       String
+  score       Json
+  data        Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model PlayerProfile {
-  id             String   @id  // playerToken
-  rating         Int      @default(1000)
-  wins           Int      @default(0)
-  losses         Int      @default(0)
-  matchesPlayed  Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(cuid())
+  playerToken   String   @unique
+  rating        Int      @default(1000)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  matchesPlayed Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 📐 Recorded Architectural Decisions
 ID	Decision
