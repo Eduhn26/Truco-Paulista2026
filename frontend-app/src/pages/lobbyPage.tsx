@@ -2,7 +2,11 @@ import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
-import { GameSocketClient, type MatchStatePayload, type RoomStatePayload } from '../services/socket/gameSocketClient';
+import {
+  GameSocketClient,
+  type MatchStatePayload,
+  type RoomStatePayload,
+} from '../services/socket/gameSocketClient';
 
 export function LobbyPage() {
   const { session } = useAuth();
@@ -16,11 +20,12 @@ export function LobbyPage() {
   const [eventLog, setEventLog] = useState<string[]>([]);
 
   const canConnect = Boolean(session?.backendUrl && session?.authToken);
-
   const derivedMatchId = matchState?.matchId ?? roomState?.matchId ?? matchId;
 
   function appendLog(line: string): void {
-    setEventLog((current) => [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30));
+    setEventLog((current) =>
+      [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30),
+    );
   }
 
   function handleConnect(): void {
@@ -76,18 +81,21 @@ export function LobbyPage() {
   }
 
   function handleJoinMatch(): void {
-    if (!matchId.trim()) {
+    const normalizedMatchId = matchId.trim();
+
+    if (!normalizedMatchId) {
       appendLog('Match ID is required to join.');
       return;
     }
 
-    clientRef.current?.emitJoinMatch(matchId.trim());
-    appendLog(`Emitted join-match (${matchId.trim()}).`);
+    clientRef.current?.emitJoinMatch(normalizedMatchId);
+    appendLog(`Emitted join-match (${normalizedMatchId}).`);
   }
 
   function handleReady(): void {
     const meSeatId = roomState?.players?.find((player) => player?.seatId)?.seatId;
-    const currentReady = roomState?.players?.find((player) => player?.seatId === meSeatId)?.ready ?? false;
+    const currentReady =
+      roomState?.players?.find((player) => player?.seatId === meSeatId)?.ready ?? false;
 
     clientRef.current?.emitSetReady(!currentReady);
     appendLog(`Emitted set-ready (${String(!currentReady)}).`);
@@ -114,12 +122,42 @@ export function LobbyPage() {
         </p>
 
         <div className="mt-6 grid gap-4">
+          <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/5 p-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-emerald-300">
+              Authenticated user
+            </div>
+            <div className="mt-2 text-sm font-bold text-slate-100">
+              {session?.user?.displayName ?? session?.user?.email ?? 'Unknown user'}
+            </div>
+            <div className="mt-1 text-xs text-slate-400">
+              provider: {session?.user?.provider ?? '-'}
+            </div>
+            <div className="mt-1 break-all text-xs text-slate-400">
+              userId: {session?.user?.id ?? '-'}
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
             <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
               Backend URL
             </div>
             <div className="mt-2 break-all font-mono text-sm text-slate-100">
               {session?.backendUrl || '-'}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+              Session auth
+            </div>
+            <div
+              className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-bold ${
+                session?.authToken
+                  ? 'bg-emerald-500/15 text-emerald-300'
+                  : 'bg-rose-500/15 text-rose-300'
+              }`}
+            >
+              {session?.authToken ? 'available' : 'missing'}
             </div>
           </div>
 
@@ -144,7 +182,7 @@ export function LobbyPage() {
               value={matchId}
               onChange={(event) => setMatchId(event.target.value)}
               className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400/40"
-              placeholder="Cole o matchId aqui"
+              placeholder="Paste a matchId to join an existing room"
             />
           </label>
 
@@ -224,7 +262,9 @@ export function LobbyPage() {
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">currentTurnSeatId</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                currentTurnSeatId
+              </div>
               <div className="mt-2 font-mono text-sm">{roomState?.currentTurnSeatId ?? '-'}</div>
             </div>
 

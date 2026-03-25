@@ -23,7 +23,9 @@ export function AppShell() {
               to="/"
               className={({ isActive }) =>
                 `rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                  isActive ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-300 hover:bg-white/5'
+                  isActive
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'text-slate-300 hover:bg-white/5'
                 }`
               }
             >
@@ -34,7 +36,9 @@ export function AppShell() {
               to="/lobby"
               className={({ isActive }) =>
                 `rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                  isActive ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-300 hover:bg-white/5'
+                  isActive
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'text-slate-300 hover:bg-white/5'
                 }`
               }
             >
@@ -45,8 +49,11 @@ export function AppShell() {
           <div className="flex items-center gap-3">
             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm">
               <div className="text-slate-400">Session</div>
-              <div className="font-mono text-xs text-slate-200">
-                {session.authToken ? 'authToken loaded' : 'no authToken'}
+              <div className="text-xs text-slate-200">
+                {session?.user?.displayName ?? session?.user?.email ?? 'anonymous'}
+              </div>
+              <div className="font-mono text-[11px] text-slate-400">
+                {session?.authToken ? 'authenticated' : 'no authToken'}
               </div>
             </div>
 
