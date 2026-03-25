@@ -18,12 +18,14 @@ import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-st
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
+import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
 import { RoomManager } from './multiplayer/room-manager';
@@ -117,6 +119,11 @@ type RejectContext = Omit<
   'layer' | 'event' | 'status' | 'errorMessage' | 'errorType'
 >;
 
+type ResolvedHandshakeIdentity = {
+  userId: string;
+  playerToken: string;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -134,6 +141,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
     private readonly getRankingUseCase: GetRankingUseCase,
+    private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
+    private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
   ) {}
 
@@ -196,27 +205,98 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.reject(event, message, context, 'unexpected_error');
   }
 
+  private readHandshakeAuthValue(socket: Socket, key: 'token' | 'authToken'): string | undefined {
+    const rawValue = (socket.handshake as { auth?: Record<string, unknown> })?.auth?.[key];
+
+    if (typeof rawValue !== 'string') {
+      return undefined;
+    }
+
+    const normalizedValue = rawValue.trim();
+
+    return normalizedValue || undefined;
+  }
+
   private extractPlayerToken(socket: Socket): string {
-    const raw = (socket.handshake as unknown as { auth?: { token?: unknown } })?.auth?.token;
-    if (typeof raw !== 'string' || raw.trim().length === 0) {
+    const playerToken = this.readHandshakeAuthValue(socket, 'token');
+
+    if (!playerToken) {
       throw new Error('Missing player token. Provide it via Socket.IO handshake auth.token.');
     }
-    return raw.trim();
+
+    return playerToken;
+  }
+
+  private resolveAuthenticatedUserId(authToken: string): string {
+    const payload = this.authTokenService.verifyToken(authToken);
+
+    return payload.sub;
+  }
+
+  private async resolveLegacyUserId(playerToken: string): Promise<string> {
+    const result = await this.getOrCreateUserUseCase.execute({
+      provider: 'legacy-socket',
+      providerUserId: playerToken,
+      displayName: `Legacy ${playerToken}`,
+    });
+
+    return result.user.id;
+  }
+
+  private async resolveHandshakeIdentity(socket: Socket): Promise<ResolvedHandshakeIdentity> {
+    const authToken = this.readHandshakeAuthValue(socket, 'authToken');
+
+    if (authToken) {
+      const userId = this.resolveAuthenticatedUserId(authToken);
+
+      return {
+        userId,
+        playerToken: `auth:${userId}`,
+      };
+    }
+
+    const playerToken = this.extractPlayerToken(socket);
+    const userId = await this.resolveLegacyUserId(playerToken);
+
+    return {
+      userId,
+      playerToken,
+    };
   }
 
   handleConnection(socket: Socket): void {
-    this.logGateway('debug', {
-      layer: 'gateway',
-      event: 'socket_connected',
-      status: 'connected',
-      socketId: socket.id,
-    });
+    this.resolveHandshakeIdentity(socket)
+      .then((identity) => {
+        this.logGateway('log', {
+          layer: 'gateway',
+          event: 'socket_connected',
+          status: 'connected',
+          socketId: socket.id,
+          playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+        });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'Invalid socket handshake';
+
+        this.logGateway('warn', {
+          layer: 'gateway',
+          event: 'socket_connected',
+          status: 'rejected',
+          socketId: socket.id,
+          errorType: 'transport_error',
+          errorMessage: message,
+        });
+
+        socket.emit('error', { message });
+        socket.disconnect(true);
+      });
   }
 
-  // NOTE: Transport state must be released on disconnect so seat ownership does not outlive the socket lifecycle.
   handleDisconnect(socket: Socket): void {
-    const left = this.roomManager.leave(socket.id);
-    if (!left) {
+    const existingSession = this.roomManager.getSessionBySocketId(socket.id);
+    const result = this.roomManager.leave(socket.id);
+
+    if (!result) {
       this.logGateway('debug', {
         layer: 'gateway',
         event: 'socket_disconnected_without_match',
@@ -226,15 +306,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    this.logGateway('log', {
+    const logContext: GatewayLogContext = {
       layer: 'gateway',
       event: 'socket_disconnected',
       status: 'disconnected',
       socketId: socket.id,
-      matchId: left.matchId,
-    });
+      matchId: result.matchId,
+    };
 
-    this.server.to(left.matchId).emit('room-state', this.roomManager.getState(left.matchId));
+    if (existingSession) {
+      logContext.seatId = existingSession.seatId;
+      logContext.teamId = existingSession.teamId;
+      logContext.playerId = existingSession.domainPlayerId;
+      logContext.playerTokenSuffix = this.maskPlayerToken(existingSession.playerToken);
+    }
+
+    this.logGateway('log', logContext);
+    this.server.to(result.matchId).emit('room-state', this.roomManager.getState(result.matchId));
   }
 
   @SubscribeMessage('create-match')
@@ -250,8 +338,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const playerToken = this.extractPlayerToken(socket);
-      const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
+      const identity = await this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
 
       const pointsToWinRaw = payload?.pointsToWin;
       const pointsToWin = typeof pointsToWinRaw === 'number' ? pointsToWinRaw : undefined;
@@ -262,28 +352,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'Invalid payload: pointsToWin must be an integer.',
           {
             socketId: socket.id,
-            playerTokenSuffix: this.maskPlayerToken(playerToken),
+            playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
           },
           'validation_error',
         );
       }
 
-      // NOTE: exactOptionalPropertyTypes requires omitting optional fields instead of assigning undefined.
       const dto: CreateMatchRequestDto = pointsToWin === undefined ? {} : { pointsToWin };
-
       const result = await this.createMatchUseCase.execute(dto);
       const matchId = result.matchId;
 
       await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerToken,
-        profileId: profile.id,
+        playerToken: identity.playerToken,
+        profileId: profileResult.profile.id,
       });
 
       this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
@@ -293,7 +381,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
       this.server.to(matchId).emit('match-state', state);
 
-      this.logGateway('log', {
+      const successLog: GatewayLogContext = {
         layer: 'gateway',
         event: 'create_match_succeeded',
         status: 'succeeded',
@@ -302,9 +390,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(playerToken),
-        ...(pointsToWin === undefined ? {} : { pointsToWin }),
-      });
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+      };
+
+      if (dto.pointsToWin !== undefined) {
+        successLog.pointsToWin = dto.pointsToWin;
+      }
+
+      this.logGateway('log', successLog);
 
       return { event: 'created', data: result };
     } catch (error) {
@@ -316,7 +409,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleJoinMatch(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinMatchPayload,
-  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'join_match_requested',
@@ -325,8 +418,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const playerToken = this.extractPlayerToken(socket);
-      const profile = await this.getOrCreatePlayerProfileUseCase.execute({ playerToken });
+      const identity = await this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
 
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
@@ -337,23 +432,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'Invalid payload: matchId is required.',
           {
             socketId: socket.id,
-            playerTokenSuffix: this.maskPlayerToken(playerToken),
+            playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
           },
           'validation_error',
         );
       }
 
       await socket.join(matchId);
-
-      const session = this.roomManager.join(matchId, socket.id, playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerToken,
-        profileId: profile.id,
+        playerToken: identity.playerToken,
+        profileId: profileResult.profile.id,
       });
 
       this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
@@ -372,10 +466,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(playerToken),
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       });
 
-      return { event: 'joined', data: { ok: true } };
+      return { event: 'joined', data: { matchId } };
     } catch (error) {
       return this.rejectFromError('join_match_rejected', error, { socketId: socket.id });
     }
@@ -385,7 +479,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleSetReady(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: SetReadyPayload,
-  ): WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto> {
+  ): WsResponse<{ ready: boolean }> | WsResponse<ErrorResponseDto> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'set_ready_requested',
@@ -395,10 +489,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const readyRaw = payload?.ready;
+
       if (typeof readyRaw !== 'boolean') {
         return this.reject(
           'set_ready_rejected',
-          'Invalid payload: ready must be boolean.',
+          'Invalid payload: ready must be a boolean.',
           { socketId: socket.id },
           'validation_error',
         );
@@ -408,7 +503,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!session) {
         return this.reject(
           'set_ready_rejected',
-          'You must join a match first.',
+          'Player is not assigned to any room.',
           { socketId: socket.id },
           'transport_error',
         );
@@ -417,7 +512,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const roomState = this.roomManager.setReady(socket.id, readyRaw);
 
       this.server.to(session.matchId).emit('room-state', roomState);
-      socket.emit('ready-updated', { ok: true, ready: readyRaw });
+      socket.emit('ready-updated', { ready: readyRaw });
 
       this.logGateway('debug', {
         layer: 'gateway',
@@ -428,10 +523,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
       });
 
-      return { event: 'ready-updated', data: { ok: true } };
+      return { event: 'ready-updated', data: { ready: readyRaw } };
     } catch (error) {
       return this.rejectFromError('set_ready_rejected', error, { socketId: socket.id });
     }
@@ -441,7 +535,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleStartHand(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: StartHandPayload,
-  ): Promise<void | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'start_hand_requested',
@@ -451,65 +545,56 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
+
       if (!session) {
         return this.reject(
           'start_hand_rejected',
-          'You must join a match first.',
+          'Player is not assigned to any room.',
           { socketId: socket.id },
           'transport_error',
         );
       }
 
-      const matchId =
-        typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
-      const viraRankRaw = payload?.viraRank;
-      const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim().toUpperCase() : '';
-
-      if (!matchId) {
+      if (!this.roomManager.canStart(session.matchId)) {
         return this.reject(
           'start_hand_rejected',
-          'Invalid payload: matchId is required.',
+          'All players must be ready before starting the hand.',
           {
             socketId: socket.id,
-            seatId: session.seatId,
+            matchId: session.matchId,
+          },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const viraRankRaw = payload?.viraRank;
+
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim() : '';
+
+      if (!matchId || !viraRank) {
+        return this.reject(
+          'start_hand_rejected',
+          'Invalid payload: matchId and viraRank are required.',
+          {
+            socketId: socket.id,
             matchId: session.matchId,
           },
           'validation_error',
         );
       }
 
-      if (!viraRank) {
-        return this.reject(
-          'start_hand_rejected',
-          'Invalid payload: viraRank is required.',
-          {
-            socketId: socket.id,
-            matchId,
-            seatId: session.seatId,
-          },
-          'validation_error',
-        );
-      }
-
-      if (!this.roomManager.canStart(matchId)) {
-        return this.reject(
-          'start_hand_rejected',
-          'Match cannot start: need 4 players and all ready.',
-          {
-            socketId: socket.id,
-            matchId,
-            seatId: session.seatId,
-          },
-          'transport_error',
-        );
-      }
-
       const dto: StartHandRequestDto = { matchId, viraRank };
       const result = await this.startHandUseCase.execute(dto);
 
-      // NOTE: Turn order stays in transport because the domain still models teams, not individual sockets.
       const roomState = this.roomManager.beginHand(matchId);
-      this.server.to(matchId).emit('room-state', roomState);
+
+      this.server.to(matchId).emit('hand-started', {
+        matchId,
+        viraRank,
+        currentTurnSeatId: roomState.currentTurnSeatId,
+      });
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
@@ -520,14 +605,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'succeeded',
         socketId: socket.id,
         matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
         viraRank,
       });
 
-      this.server.to(matchId).emit('hand-started', { ...result, matchId, viraRank });
+      return { event: 'hand-started', data: result };
     } catch (error) {
       return this.rejectFromError('start_hand_rejected', error, { socketId: socket.id });
     }
@@ -537,7 +618,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handlePlayCard(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: PlayCardPayload,
-  ): Promise<void | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'play_card_requested',
@@ -547,44 +628,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const session = this.roomManager.getSessionBySocketId(socket.id);
+
       if (!session) {
         return this.reject(
           'play_card_rejected',
-          'You must join a match first.',
+          'Player is not assigned to any room.',
           { socketId: socket.id },
           'transport_error',
         );
       }
 
-      const matchId =
-        typeof payload?.matchId === 'string' ? payload.matchId.trim() : session.matchId;
+      const matchIdRaw = payload?.matchId;
       const rankRaw = payload?.card?.rank;
       const suitRaw = payload?.card?.suit;
 
-      const rank = typeof rankRaw === 'string' ? rankRaw.trim().toUpperCase() : '';
-      const suit = typeof suitRaw === 'string' ? suitRaw.trim().toUpperCase() : '';
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const rank = typeof rankRaw === 'string' ? rankRaw.trim() : '';
+      const suit = typeof suitRaw === 'string' ? suitRaw.trim() : '';
 
-      if (!matchId) {
+      if (!matchId || !rank || !suit) {
         return this.reject(
           'play_card_rejected',
-          'Invalid payload: matchId is required.',
+          'Invalid payload: matchId, card.rank and card.suit are required.',
           {
             socketId: socket.id,
-            seatId: session.seatId,
             matchId: session.matchId,
-          },
-          'validation_error',
-        );
-      }
-
-      if (!rank || !suit) {
-        return this.reject(
-          'play_card_rejected',
-          'Invalid payload: card.rank and card.suit are required.',
-          {
-            socketId: socket.id,
-            matchId,
-            seatId: session.seatId,
           },
           'validation_error',
         );
@@ -593,26 +661,39 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!this.roomManager.isPlayersTurn(socket.id, matchId)) {
         return this.reject(
           'play_card_rejected',
-          'Not your turn.',
+          'It is not this player turn.',
           {
             socketId: socket.id,
             matchId,
             seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
           },
           'transport_error',
         );
       }
 
+      const card = `${rank}${suit}`;
+
       const dto: PlayCardRequestDto = {
         matchId,
         playerId: session.domainPlayerId,
-        card: `${rank}${suit}`,
+        card,
       };
 
       const result = await this.playCardUseCase.execute(dto);
 
       const roomState = this.roomManager.advanceTurn(matchId);
       this.server.to(matchId).emit('room-state', roomState);
+
+      this.server.to(matchId).emit('card-played', {
+        matchId,
+        playerId: session.domainPlayerId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        card,
+        currentTurnSeatId: roomState.currentTurnSeatId,
+      });
 
       const state = await this.viewMatchStateUseCase.execute({ matchId });
       this.server.to(matchId).emit('match-state', state);
@@ -626,21 +707,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(session.playerToken),
-        card: `${rank}${suit}`,
+        card,
       });
 
       if (state.state === 'finished' && this.roomManager.tryMarkRatingApplied(matchId)) {
         const score = state.score;
+
         if (score.playerOne !== score.playerTwo) {
           const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
-          const tokens = this.roomManager.getTeamTokens(matchId);
+          const teamUserIds = this.roomManager.getTeamUserIds(matchId);
 
-          const winnerTokens = winnerTeamId === 'T1' ? tokens.T1 : tokens.T2;
-          const loserTokens = winnerTeamId === 'T1' ? tokens.T2 : tokens.T1;
+          const winnerUserIds = winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2;
+          const loserUserIds = winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1;
 
-          // NOTE: Ranking remains a separate bounded context and is triggered only after the match result is final.
-          await this.updateRatingUseCase.execute({ winnerTokens, loserTokens });
+          await this.updateRatingUseCase.execute({
+            winnerUserIds,
+            loserUserIds,
+          });
 
           this.logGateway('log', {
             layer: 'gateway',
@@ -650,11 +733,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
             teamId: winnerTeamId,
           });
 
-          this.server.to(matchId).emit('rating-updated', { ok: true });
+          const ranking = await this.getRankingUseCase.execute({ limit: 20 });
+          this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
         }
       }
 
-      this.server.to(matchId).emit('card-played', result);
+      return { event: 'card-played', data: { matchId: result.matchId } };
     } catch (error) {
       return this.rejectFromError('play_card_rejected', error, { socketId: socket.id });
     }
@@ -678,7 +762,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const ranking = await this.getRankingUseCase.execute({ limit });
 
-      socket.emit('ranking', { ranking });
+      socket.emit('ranking', { ranking: ranking.ranking });
 
       this.logGateway('debug', {
         layer: 'gateway',

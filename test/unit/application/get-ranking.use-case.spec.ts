@@ -9,30 +9,30 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
   public lastListTopLimit: number | null = null;
 
   seed(profile: PlayerProfileSnapshot): void {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
   }
 
-  findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
-    return Promise.resolve(this.store.get(playerToken) ?? null);
+  findByUserId(userId: string): Promise<PlayerProfileSnapshot | null> {
+    return Promise.resolve(this.store.get(userId) ?? null);
   }
 
-  create(playerToken: string): Promise<PlayerProfileSnapshot> {
+  createForUser(userId: string): Promise<PlayerProfileSnapshot> {
     const created: PlayerProfileSnapshot = {
-      id: `profile-${playerToken}`,
-      playerToken,
+      id: `profile-${userId}`,
+      userId,
       rating: 1000,
       wins: 0,
       losses: 0,
       matchesPlayed: 0,
     };
 
-    this.store.set(playerToken, created);
+    this.store.set(userId, created);
 
     return Promise.resolve(created);
   }
 
   save(profile: PlayerProfileSnapshot): Promise<void> {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
 
     return Promise.resolve();
   }
@@ -49,14 +49,14 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
 }
 
 describe('GetRankingUseCase', () => {
-  it('uses 20 as the default limit', async () => {
+  it('uses 10 as the default limit', async () => {
     const repo = new FakePlayerProfileRepository();
     const useCase = new GetRankingUseCase(repo);
 
     const result = await useCase.execute();
 
-    expect(repo.lastListTopLimit).toBe(20);
-    expect(result).toEqual([]);
+    expect(repo.lastListTopLimit).toBe(10);
+    expect(result).toEqual({ ranking: [] });
   });
 
   it('passes a custom limit to the repository', async () => {
@@ -64,7 +64,7 @@ describe('GetRankingUseCase', () => {
 
     repo.seed({
       id: 'p1',
-      playerToken: 'player-1',
+      userId: 'user-1',
       rating: 1200,
       wins: 10,
       losses: 2,
@@ -73,7 +73,7 @@ describe('GetRankingUseCase', () => {
 
     repo.seed({
       id: 'p2',
-      playerToken: 'player-2',
+      userId: 'user-2',
       rating: 1100,
       wins: 7,
       losses: 4,
@@ -82,7 +82,7 @@ describe('GetRankingUseCase', () => {
 
     repo.seed({
       id: 'p3',
-      playerToken: 'player-3',
+      userId: 'user-3',
       rating: 1300,
       wins: 14,
       losses: 1,
@@ -93,30 +93,34 @@ describe('GetRankingUseCase', () => {
     const result = await useCase.execute({ limit: 2 });
 
     expect(repo.lastListTopLimit).toBe(2);
-    expect(result).toEqual([
-      {
-        playerToken: 'player-3',
-        rating: 1300,
-        wins: 14,
-        losses: 1,
-        matchesPlayed: 15,
-      },
-      {
-        playerToken: 'player-1',
-        rating: 1200,
-        wins: 10,
-        losses: 2,
-        matchesPlayed: 12,
-      },
-    ]);
+    expect(result).toEqual({
+      ranking: [
+        {
+          profileId: 'p3',
+          userId: 'user-3',
+          rating: 1300,
+          wins: 14,
+          losses: 1,
+          matchesPlayed: 15,
+        },
+        {
+          profileId: 'p1',
+          userId: 'user-1',
+          rating: 1200,
+          wins: 10,
+          losses: 2,
+          matchesPlayed: 12,
+        },
+      ],
+    });
   });
 
-  it('returns an empty list when there are no profiles', async () => {
+  it('returns an empty ranking when there are no profiles', async () => {
     const repo = new FakePlayerProfileRepository();
     const useCase = new GetRankingUseCase(repo);
 
     const result = await useCase.execute({ limit: 5 });
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({ ranking: [] });
   });
 });

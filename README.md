@@ -1,3 +1,6 @@
+### `README.md`
+
+```md
 # Truco Paulista — Backend
 
 > Authoritative backend for the **Truco Paulista** card game, built with **NestJS**, **TypeScript (strict)**, **DDD**, and **Clean Architecture**.
@@ -31,8 +34,8 @@ This project was created as a practical, incremental study to:
 | Phase 6 | Observability (health, readiness, structured logging, error classification) | ✅ Complete |
 | Phase 7 | Containerization (Docker multi-stage + Compose orchestration) | ✅ Complete |
 | Phase 8 | Production deployment (Render + managed Postgres + automated migrations) | ✅ Complete |
-| Phase 9 | Real authentication (Google/GitHub OAuth) | 🔜 Next |
-| Phase 10 | Playable frontend (React/Next.js) | 🔜 Planned |
+| Phase 9 | Real authentication (Google/GitHub OAuth + app auth token + authenticated WebSocket identity) | ✅ Complete |
+| Phase 10 | Playable frontend (React/Next.js) | 🔜 Next |
 | Phase 11 | 1v1 mode + bot seat filling | 🔜 Planned |
 | Phase 12 | Bot architecture preparation | 🔜 Planned |
 | Phase 13 | Public matchmaking | 🔜 Planned |
@@ -46,7 +49,7 @@ This project was created as a practical, incremental study to:
 
 ### Domain-first
 
-The Domain has **zero dependency** on frameworks, databases, transport layers, logging, health checks, or operational concerns.
+The Domain has **zero dependency** on frameworks, databases, transport layers, logging, health checks, authentication providers, or operational concerns.
 
 ### Clean Architecture
 
@@ -54,10 +57,13 @@ The Domain has **zero dependency** on frameworks, databases, transport layers, l
 Gateway → Application → Domain
 Infrastructure implements Application Ports
 Domain with zero external dependencies
+
 Domain must not depend on:
+
 ❌ NestJS
 ❌ Prisma
 ❌ Socket.IO
+❌ OAuth providers
 ❌ transport-level validation concerns
 ❌ logging / health / readiness concerns
 Testability
@@ -72,8 +78,9 @@ complex mocks
 Layer	Responsibility
 Domain	Pure Truco rules — entities, value objects, services, invariants
 Application	Use Cases, DTOs, orchestration, ports, mappers
-Infrastructure	Persistence, Prisma integration, database readiness, external adapters
+Infrastructure	Persistence, Prisma integration, database readiness, auth adapters, external integrations
 Gateway	WebSocket transport, ephemeral room/presence/turn state, multiplayer coordination
+Auth	HTTP auth entrypoints, OAuth strategies, internal auth token issuance
 Bootstrap / Health	Startup lifecycle, health endpoints, structured operational logging
 🎮 What Works Today
 Multiplayer and Ranking
@@ -86,17 +93,24 @@ T2B
 Turn order:
 T1A → T2A → T1B → T2B
 Ready state synchronization — match starts only when all 4 players are ready
-Reconnection by token, preserving the same seat
+Reconnection by technical session identity, preserving the same seat
 Persisted ranking with simplified ELO:
 +25 for win
 -25 for loss
 floor 100
-Player profile persistence:
+Authenticated identity and player ownership
+Real Google OAuth flow
+Real GitHub OAuth flow
+Internal User persistence for authenticated identities
+Application-issued auth token after OAuth callback
+Authenticated WebSocket handshake through authToken
+PlayerProfile persistence now linked to userId
+Distinct authenticated users can join the same multiplayer match without seat collision
+Player profile persistence
 wins
 losses
 rating
 matchesPlayed
-Debug frontend for manual testing with browser tabs simulating multiple players
 Observability
 GET /health/live
 GET /health/ready
@@ -140,6 +154,7 @@ Health endpoints validated in production
 Automated Prisma migration execution adapted for Render Free
 Successful production startup after migration execution
 🌐 Production URL
+
 https://truco-paulista-backend.onrender.com
 
 Health endpoints:
@@ -153,14 +168,15 @@ backend/
 │   ├── styles.css
 │   └── app.js
 ├── prisma/
-│   ├── schema.prisma          # MatchSnapshot + PlayerProfile
+│   ├── schema.prisma
 │   └── migrations/
 ├── src/
+│   ├── auth/                  # OAuth strategies, auth controller, auth token service
 │   ├── domain/                # Pure business rules — framework-free
-│   │   ├── entities/          # Match, Hand, Round
-│   │   ├── value-objects/     # Card, PlayerId, Score, MatchState...
-│   │   ├── services/          # TrucoRules
-│   │   └── exceptions/        # DomainError, InvalidMoveError
+│   │   ├── entities/
+│   │   ├── value-objects/
+│   │   ├── services/
+│   │   └── exceptions/
 │   ├── application/           # Use Cases, DTOs, Ports, Mappers
 │   │   ├── use-cases/
 │   │   ├── dtos/
@@ -168,20 +184,18 @@ backend/
 │   │   └── mappers/
 │   ├── infrastructure/
 │   │   └── persistence/
-│   │       ├── prisma/        # PrismaMatchRepository, PrismaPlayerProfileRepository, PrismaService
-│   │       └── in-memory/     # Legacy — used in tests
+│   │       ├── prisma/
+│   │       └── in-memory/
 │   ├── gateway/               # WebSocket transport
 │   │   ├── game.gateway.ts
-│   │   └── multiplayer/       # RoomManager, SeatId
+│   │   └── multiplayer/
 │   ├── health/                # Liveness / readiness surface
-│   │   ├── health.controller.ts
-│   │   ├── health.service.ts
-│   │   └── health.module.ts
 │   ├── modules/               # NestJS DI wiring
 │   ├── scripts/               # simulate-hand.ts, ws-client.ts
-│   └── main.ts                # Bootstrap + structured startup logs
+│   └── main.ts
 └── test/
     └── unit/
+        ├── auth/
         ├── domain/
         ├── application/
         └── gateway/
@@ -222,19 +236,56 @@ docker compose logs --tail=100 migrate
 
 # 4. Inspect backend logs
 docker compose logs --tail=100 backend
-Manual Testing with the Debug Frontend
-# Open backend/frontend/index.html in the browser
-# Use 4 tabs with different tokens to simulate 4 players
-Automated Validation
+🔐 Authentication
+OAuth endpoints
+GET /auth/google
+GET /auth/google/callback
+GET /auth/github
+GET /auth/github/callback
+
+Expected callback response shape:
+
+{
+  "user": {
+    "id": "...",
+    "provider": "google | github",
+    "providerUserId": "...",
+    "email": "...",
+    "displayName": "...",
+    "avatarUrl": "..."
+  },
+  "authToken": "...",
+  "expiresIn": "7d"
+}
+WebSocket authenticated flow
+
+Create a match with authenticated identity:
+
+npm run ws:client -- create <AUTH_TOKEN> 1
+
+Join an existing match with another authenticated identity:
+
+npm run ws:client -- join <MATCH_ID> <ANOTHER_AUTH_TOKEN>
+🧪 Automated Validation
 npm run test
 npm run test:watch
 npm run lint
 npm run build
+
+Current validated automated state:
+
+16 test suites
+55 tests
+0 failures
 📡 HTTP / Operational Endpoints
 Route	Method	Description
 /	GET	Basic root route
 /health/live	GET	Liveness check — process is up
 /health/ready	GET	Readiness check — database dependency is ready
+/auth/google	GET	Starts Google OAuth login
+/auth/google/callback	GET	Google OAuth callback
+/auth/github	GET	Starts GitHub OAuth login
+/auth/github/callback	GET	GitHub OAuth callback
 📡 WebSocket Events
 Event	Direction	Description
 create-match	Client → Server	Create a new room
@@ -263,19 +314,36 @@ model MatchSnapshot {
   updatedAt   DateTime @updatedAt
 }
 
+model User {
+  id             String   @id @default(cuid())
+  provider       String
+  providerUserId String
+  email          String?
+  displayName    String?
+  avatarUrl      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  playerProfile  PlayerProfile?
+
+  @@unique([provider, providerUserId])
+}
+
 model PlayerProfile {
   id            String   @id @default(cuid())
-  playerToken   String   @unique
+  userId        String   @unique
   rating        Int      @default(1000)
   wins          Int      @default(0)
   losses        Int      @default(0)
   matchesPlayed Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id])
 }
 📐 Recorded Architectural Decisions
 ID	Decision
-D1	PlayerId in the Domain is `'P1'
+D1	PlayerId in the Domain remains `'P1'
 D2	SeatId and TeamId live in the Gateway, not as Domain Value Objects
 D3	Turn order in the Gateway is a transitional transport adaptation
 D4	Ranking is a separate Bounded Context — Match never updates PlayerProfile directly
@@ -287,6 +355,10 @@ D9	Gateway is the correct boundary for multiplayer observability
 D10	DomainError must remain distinguishable from technical failures
 D11	Production deployment remains an infrastructure/bootstrap concern, never a Domain concern
 D12	Render Free migration automation is implemented at container startup as an operational workaround
+D13	User is an Infrastructure identity boundary and must never leak into the Domain
+D14	OAuth providers are adapters; the application must normalize them into internal user identity
+D15	The application issues its own auth token for later runtime boundaries such as WebSocket handshake
+D16	Authenticated multiplayer entry resolves userId first and keeps technical session identity separate
 📋 Known Technical Debt
 ID	Description	Status
 DT-4	Turn order still lives in the Gateway as a transitional rule	⚠️ Accepted
@@ -294,6 +366,8 @@ DT-7	Metrics / formal instrumentation layer not implemented yet	🔜 Backlog
 DT-8	No correlation ID strategy for socket-level tracing yet	🔜 Backlog
 DT-13	Docker build still depends on a transitional legacy-peer-deps workaround	⚠️ Accepted
 DT-14	On Render Free, Prisma migrations run inside container startup instead of isolated pre-deploy/job flow	⚠️ Accepted
+DT-15	Transitional compatibility for legacy socket identity should eventually be removed after the frontend fully consumes authenticated flow	⚠️ Accepted
+DT-16	OAuth callback auth token is backend-ready, but real frontend session consumption belongs to Phase 10	🔜 Backlog
 🛠️ Stack
 Aspect	Choice
 Runtime	Node.js 20
@@ -301,6 +375,7 @@ Language	TypeScript (strict — all major strict flags enabled)
 Framework	NestJS
 Transport	WebSocket via Socket.IO
 Persistence	PostgreSQL 16 + Prisma ORM
+Authentication	Google OAuth + GitHub OAuth + app-issued auth token
 Tests	Jest + ts-jest
 Frontend (debug)	Vanilla JS
 Local container runtime	Docker + Docker Compose
@@ -319,4 +394,15 @@ containerized
 deployed in production
 connected to a managed PostgreSQL database
 running automated migrations in production
-ready to evolve into authentication, frontend gameplay, bots, and public matchmaking
+authenticated through real Google/GitHub OAuth
+issuing its own application auth token
+capable of authenticated multiplayer session entry
+ready to evolve into a playable frontend, bots, and public matchmaking
+
+🧪 Como testar
+
+Depois de colar os dois arquivos:
+
+```bash
+npm run test
+npm run build

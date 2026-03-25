@@ -8,30 +8,30 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
   private readonly store = new Map<string, PlayerProfileSnapshot>();
 
   seed(profile: PlayerProfileSnapshot): void {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
   }
 
-  findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
-    return Promise.resolve(this.store.get(playerToken) ?? null);
+  findByUserId(userId: string): Promise<PlayerProfileSnapshot | null> {
+    return Promise.resolve(this.store.get(userId) ?? null);
   }
 
-  create(playerToken: string): Promise<PlayerProfileSnapshot> {
+  createForUser(userId: string): Promise<PlayerProfileSnapshot> {
     const created: PlayerProfileSnapshot = {
-      id: `profile-${playerToken}`,
-      playerToken,
+      id: `profile-${userId}`,
+      userId,
       rating: 1000,
       wins: 0,
       losses: 0,
       matchesPlayed: 0,
     };
 
-    this.store.set(playerToken, created);
+    this.store.set(userId, created);
 
     return Promise.resolve(created);
   }
 
   save(profile: PlayerProfileSnapshot): Promise<void> {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
 
     return Promise.resolve();
   }
@@ -40,8 +40,8 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
     return Promise.resolve(Array.from(this.store.values()).slice(0, limit));
   }
 
-  getByToken(playerToken: string): PlayerProfileSnapshot | null {
-    return this.store.get(playerToken) ?? null;
+  getByUserId(userId: string): PlayerProfileSnapshot | null {
+    return this.store.get(userId) ?? null;
   }
 }
 
@@ -51,7 +51,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'w1',
-      playerToken: 'winner-1',
+      userId: 'winner-1',
       rating: 1000,
       wins: 2,
       losses: 1,
@@ -60,7 +60,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'w2',
-      playerToken: 'winner-2',
+      userId: 'winner-2',
       rating: 1025,
       wins: 5,
       losses: 2,
@@ -69,7 +69,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'l1',
-      playerToken: 'loser-1',
+      userId: 'loser-1',
       rating: 1000,
       wins: 3,
       losses: 4,
@@ -78,7 +78,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'l2',
-      playerToken: 'loser-2',
+      userId: 'loser-2',
       rating: 1100,
       wins: 8,
       losses: 3,
@@ -87,42 +87,42 @@ describe('UpdateRatingUseCase', () => {
 
     const useCase = new UpdateRatingUseCase(repo);
     const result = await useCase.execute({
-      winnerTokens: ['winner-1', 'winner-2'],
-      loserTokens: ['loser-1', 'loser-2'],
+      winnerUserIds: ['winner-1', 'winner-2'],
+      loserUserIds: ['loser-1', 'loser-2'],
     });
 
     expect(result).toEqual({ ok: true });
 
-    expect(repo.getByToken('winner-1')).toEqual({
+    expect(repo.getByUserId('winner-1')).toEqual({
       id: 'w1',
-      playerToken: 'winner-1',
+      userId: 'winner-1',
       rating: 1025,
       wins: 3,
       losses: 1,
       matchesPlayed: 4,
     });
 
-    expect(repo.getByToken('winner-2')).toEqual({
+    expect(repo.getByUserId('winner-2')).toEqual({
       id: 'w2',
-      playerToken: 'winner-2',
+      userId: 'winner-2',
       rating: 1050,
       wins: 6,
       losses: 2,
       matchesPlayed: 8,
     });
 
-    expect(repo.getByToken('loser-1')).toEqual({
+    expect(repo.getByUserId('loser-1')).toEqual({
       id: 'l1',
-      playerToken: 'loser-1',
+      userId: 'loser-1',
       rating: 975,
       wins: 3,
       losses: 5,
       matchesPlayed: 8,
     });
 
-    expect(repo.getByToken('loser-2')).toEqual({
+    expect(repo.getByUserId('loser-2')).toEqual({
       id: 'l2',
-      playerToken: 'loser-2',
+      userId: 'loser-2',
       rating: 1075,
       wins: 8,
       losses: 4,
@@ -135,7 +135,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'winner',
-      playerToken: 'winner',
+      userId: 'winner',
       rating: 1000,
       wins: 0,
       losses: 0,
@@ -144,7 +144,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'loser',
-      playerToken: 'loser',
+      userId: 'loser',
       rating: 100,
       wins: 0,
       losses: 0,
@@ -154,13 +154,13 @@ describe('UpdateRatingUseCase', () => {
     const useCase = new UpdateRatingUseCase(repo);
 
     await useCase.execute({
-      winnerTokens: ['winner'],
-      loserTokens: ['loser'],
+      winnerUserIds: ['winner'],
+      loserUserIds: ['loser'],
     });
 
-    expect(repo.getByToken('loser')).toEqual({
+    expect(repo.getByUserId('loser')).toEqual({
       id: 'loser',
-      playerToken: 'loser',
+      userId: 'loser',
       rating: 100,
       wins: 0,
       losses: 1,
@@ -173,7 +173,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'loser',
-      playerToken: 'loser',
+      userId: 'loser',
       rating: 1000,
       wins: 0,
       losses: 0,
@@ -184,8 +184,8 @@ describe('UpdateRatingUseCase', () => {
 
     await expect(
       useCase.execute({
-        winnerTokens: ['missing-winner'],
-        loserTokens: ['loser'],
+        winnerUserIds: ['missing-winner'],
+        loserUserIds: ['loser'],
       }),
     ).rejects.toThrow('Player profile not found');
   });
@@ -195,7 +195,7 @@ describe('UpdateRatingUseCase', () => {
 
     repo.seed({
       id: 'winner',
-      playerToken: 'winner',
+      userId: 'winner',
       rating: 1000,
       wins: 0,
       losses: 0,
@@ -206,8 +206,8 @@ describe('UpdateRatingUseCase', () => {
 
     await expect(
       useCase.execute({
-        winnerTokens: ['winner'],
-        loserTokens: ['missing-loser'],
+        winnerUserIds: ['winner'],
+        loserUserIds: ['missing-loser'],
       }),
     ).rejects.toThrow('Player profile not found');
   });

@@ -1,27 +1,50 @@
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 
-export type RankingEntryDto = {
-  playerToken: string;
+type RankingEntryDto = {
+  profileId: string;
+  userId: string;
   rating: number;
   wins: number;
   losses: number;
   matchesPlayed: number;
 };
 
+type GetRankingRequestDto = {
+  limit?: number;
+};
+
+type GetRankingResponseDto = {
+  ranking: RankingEntryDto[];
+};
+
 export class GetRankingUseCase {
   constructor(private readonly repo: PlayerProfileRepository) {}
 
-  async execute(dto?: { limit?: number }): Promise<RankingEntryDto[]> {
-    const limit = dto?.limit ?? 20;
-
+  async execute(request?: GetRankingRequestDto): Promise<GetRankingResponseDto> {
+    const limit = this.normalizeLimit(request?.limit);
     const profiles = await this.repo.listTop(limit);
 
-    return profiles.map((p) => ({
-      playerToken: p.playerToken,
-      rating: p.rating,
-      wins: p.wins,
-      losses: p.losses,
-      matchesPlayed: p.matchesPlayed,
-    }));
+    return {
+      ranking: profiles.map((profile) => ({
+        profileId: profile.id,
+        userId: profile.userId,
+        rating: profile.rating,
+        wins: profile.wins,
+        losses: profile.losses,
+        matchesPlayed: profile.matchesPlayed,
+      })),
+    };
+  }
+
+  private normalizeLimit(limit?: number): number {
+    if (limit === undefined) {
+      return 10;
+    }
+
+    if (!Number.isInteger(limit) || limit <= 0) {
+      throw new Error('limit must be a positive integer');
+    }
+
+    return limit;
   }
 }
