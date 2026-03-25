@@ -4,6 +4,7 @@ import type { Request } from 'express';
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
 import { AuthService, type AuthenticatedUserDto } from './auth.service';
 import { DevAuthGuard } from './guards/dev-auth.guard';
+import { GitHubAuthGuard } from './guards/github-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 
 type BootstrapUserBodyDto = {
@@ -83,6 +84,20 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
   async googleCallback(@Req() request: RequestWithUser): Promise<MeResponseDto> {
+    return {
+      user: request.user,
+    };
+  }
+
+  @UseGuards(GitHubAuthGuard)
+  @Get('github')
+  async githubLogin(): Promise<void> {
+    // NOTE: Passport handles the redirect to GitHub.
+  }
+
+  @UseGuards(GitHubAuthGuard)
+  @Get('github/callback')
+  async githubCallback(@Req() request: RequestWithUser): Promise<MeResponseDto> {
     return {
       user: request.user,
     };

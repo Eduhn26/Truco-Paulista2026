@@ -29,6 +29,13 @@ export type GoogleIdentityInput = {
   avatarUrl?: string | null;
 };
 
+export type GitHubIdentityInput = {
+  providerUserId: string;
+  email?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+};
+
 @Injectable()
 export class AuthService {
   constructor(private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase) {}
@@ -67,6 +74,31 @@ export class AuthService {
   ): Promise<AuthenticatedUserDto> {
     const request: GetOrCreateUserRequestDto = {
       provider: 'google',
+      providerUserId: input.providerUserId,
+    };
+
+    if (input.email !== undefined) {
+      request.email = input.email;
+    }
+
+    if (input.displayName !== undefined) {
+      request.displayName = input.displayName;
+    }
+
+    if (input.avatarUrl !== undefined) {
+      request.avatarUrl = input.avatarUrl;
+    }
+
+    const result = await this.getOrCreateUserUseCase.execute(request);
+
+    return result.user;
+  }
+
+  async validateOrCreateGitHubUser(
+    input: GitHubIdentityInput,
+  ): Promise<AuthenticatedUserDto> {
+    const request: GetOrCreateUserRequestDto = {
+      provider: 'github',
       providerUserId: input.providerUserId,
     };
 
