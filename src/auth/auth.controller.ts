@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
-import type { Request } from 'express';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
 import {
@@ -37,6 +46,10 @@ type MeResponseDto = {
 
 type RequestWithUser = Request & {
   user: AuthenticatedUserDto;
+};
+
+type OAuthStateDto = {
+  frontendUrl?: string;
 };
 
 @Controller('auth')
@@ -89,8 +102,11 @@ export class AuthController {
   @Get('google/callback')
   async googleCallback(
     @Req() request: RequestWithUser,
-  ): Promise<AuthenticatedSessionResponseDto> {
-    return this.authService.createSession(request.user);
+    @Query() query: OAuthStateDto,
+    @Res({ passthrough: false }) response: Response,
+  ): Promise<void> {
+    const session = this.authService.createSession(request.user);
+    this.redirectToFrontendCallback(response, request.user, session, query.frontendUrl);
   }
 
   @UseGuards(GitHubAuthGuard)
@@ -103,8 +119,54 @@ export class AuthController {
   @Get('github/callback')
   async githubCallback(
     @Req() request: RequestWithUser,
-  ): Promise<AuthenticatedSessionResponseDto> {
-    return this.authService.createSession(request.user);
+    @Query() query: OAuthStateDto,
+    @Res({ passthrough: false }) response: Response,
+  ): Promise<void> {
+    const session = this.authService.createSession(request.user);
+    this.redirectToFrontendCallback(response, request.user, session, query.frontendUrl);
+  }
+
+  private redirectToFrontendCallback(
+    response: Response,
+    user: AuthenticatedUserDto,
+    session: AuthenticatedSessionResponseDto,
+    rawFrontendUrl?: string,
+  ): void {
+    const frontendUrl = this.resolveFrontendUrl(rawFrontendUrl);
+    const callbackUrl = new URL('/auth/callback', frontendUrl);
+
+    callbackUrl.searchParams.set('authToken', session.authToken);
+    callbackUrl.searchParams.set('expiresIn', session.expiresIn);
+    callbackUrl.searchParams.set('userId', user.id);
+    callbackUrl.searchParams.set('provider', user.provider);
+
+    if (user.email) {
+      callbackUrl.searchParams.set('email', user.email);
+    }
+
+    if (user.displayName) {
+      callbackUrl.searchParams.set('displayName', user.displayName);
+    }
+
+    if (user.avatarUrl) {
+      callbackUrl.searchParams.set('avatarUrl', user.avatarUrl);
+    }
+
+    response.redirect(callbackUrl.toString());
+  }
+
+  private resolveFrontendUrl(rawFrontendUrl?: string): string {
+    const normalizedQueryUrl = rawFrontendUrl?.trim();
+    if (normalizedQueryUrl) {
+      return normalizedQueryUrl.replace(/\/+$/, '');
+    }
+
+    const envFrontendUrl = process.env['FRONTEND_URL']?.trim();
+    if (!envFrontendUrl) {
+      throw new Error('FRONTEND_URL is required for OAuth callback redirect');
+    }
+
+    return envFrontendUrl.replace(/\/+$/, '');
   }
 
   private toRequiredString(value: unknown, fieldName: string): string {

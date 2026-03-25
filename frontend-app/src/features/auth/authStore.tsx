@@ -37,6 +37,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         {
           authToken: '',
           backendUrl: DEFAULT_BACKEND_URL,
+          expiresIn: null,
+          user: null,
         },
       setSession,
       clearSession,
