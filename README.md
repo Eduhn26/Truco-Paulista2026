@@ -43,7 +43,7 @@ Este projeto foi criado como um estudo prático e incremental para:
 | **7** | Containerização (Docker multi-stage + Compose) | ✅ Completo |
 | **8** | Deploy em produção (Render + Postgres gerenciado + migrations automáticas) | ✅ Completo |
 | **9** | Autenticação real (Google/GitHub OAuth + auth token + WebSocket autenticado) | ✅ Completo |
-| **10** | Frontend jogável (React/Next.js) | 🔜 Próximo |
+| **10** | Frontend jogável (React + Vite + fluxo OAuth no browser + mesa inicial jogável) | ✅ Completo |
 | **11** | Modo 1v1 + bot preenchendo assentos | 🔜 Planejado |
 | **12** | Preparação da arquitetura de bots | 🔜 Planejado |
 | **13** | Matchmaking público | 🔜 Planejado |
@@ -76,6 +76,7 @@ Domain sem dependências externas
 | **Infrastructure** | Persistência, Prisma, readiness do banco, adaptadores de auth |
 | **Gateway** | Transporte WebSocket, estado efêmero de sala/presença/turno, coordenação multiplayer |
 | **Auth** | Entrypoints HTTP de autenticação, estratégias OAuth, emissão de auth token |
+| **Frontend** | Fluxo de sessão no browser, UI autenticada, coordenação de socket, estado visual |
 | **Bootstrap / Health** | Lifecycle de startup, endpoints de health, logging operacional estruturado |
 
 ### Testabilidade
@@ -89,6 +90,18 @@ As regras do jogo são testáveis **sem**:
 ---
 
 ## 🎮 O que Funciona Hoje
+
+### Frontend jogável
+
+- Aplicação frontend real em `frontend-app/`
+- React + Vite + TypeScript + Tailwind CSS
+- Callback OAuth integrado de volta ao frontend
+- Persistência de sessão no browser: `authToken`, `backendUrl`, `expiresIn`, identidade do usuário autenticado
+- Página de lobby autenticado
+- Página de partida ao vivo com hidratação direta via socket
+- Mesa de partida inicial jogável
+- Frontend emite ações reais de partida: `get-state`, `start-hand`, `play-card`
+- Frontend permanece não-autoritativo — o backend ainda é dono da verdade da partida
 
 ### Multiplayer e Ranking
 
@@ -132,10 +145,19 @@ GET /health/ready  → Banco de dados está pronto
 
 ```
 backend/
-├── frontend/                  # Debug UI (Vanilla JS, sem framework)
+├── frontend-app/              # Frontend jogável (React + Vite + TypeScript + Tailwind)
+│   ├── src/
+│   │   ├── app/
+│   │   ├── features/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   └── styles/
 │   ├── index.html
-│   ├── styles.css
-│   └── app.js
+│   ├── package.json
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── tsconfig.json
+│   └── vite.config.ts
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
@@ -198,6 +220,21 @@ npx prisma migrate dev
 npm run start:dev
 ```
 
+### Rodar o Frontend
+
+```bash
+# 1. Entrar na pasta do frontend
+cd frontend-app
+
+# 2. Instalar dependências do frontend
+npm install
+
+# 3. Iniciar o frontend
+npm run dev
+```
+
+URL local do frontend: `http://localhost:5173`
+
 ### Validar Health Endpoints
 
 ```bash
@@ -237,7 +274,9 @@ GET /auth/github
 GET /auth/github/callback
 ```
 
-**Formato da resposta do callback:**
+O backend autentica o usuário, emite um token interno de aplicação e redireciona de volta para a rota de callback do frontend para que o browser persista a sessão autenticada.
+
+**Formato do payload de callback:**
 
 ```json
 {
@@ -254,7 +293,17 @@ GET /auth/github/callback
 }
 ```
 
-### Fluxo WebSocket Autenticado
+### Fluxo autenticado pelo frontend
+
+```
+1. Abrir o frontend
+2. Autenticar com Google ou GitHub
+3. O browser retorna para /auth/callback
+4. Sessão armazenada automaticamente
+5. Abrir o lobby e conectar via Socket.IO autenticado
+```
+
+### Fluxo WebSocket Autenticado (via CLI)
 
 ```bash
 # Criar uma partida com identidade autenticada
@@ -378,7 +427,10 @@ model PlayerProfile {
 | D13 | `User` é um boundary de identidade da Infraestrutura e nunca deve vazar para o Domínio |
 | D14 | Provedores OAuth são adaptadores; a aplicação deve normalizá-los em identidade interna |
 | D15 | A aplicação emite seu próprio auth token para boundaries de runtime como o handshake WebSocket |
-| D16 | Entrada autenticada no multiplayer resolve `userId` primeiro e mantém identidade de sessão técnica separada |
+| D17 | O frontend consome o boundary autenticado do backend em vez de redefini-lo |
+| D18 | Gerenciamento de auth/sessão no browser pertence ao boundary do frontend, não ao Domínio |
+| D19 | A página de partida pode se hidratar diretamente via estado de socket e ainda permanecer não-autoritativa |
+| D20 | Simulação local de mão no frontend é um auxílio visual progressivo, não estado autoritativo do jogo |
 
 ---
 
@@ -392,7 +444,7 @@ model PlayerProfile {
 | DT-13 | Build do Docker ainda depende de workaround transitório `legacy-peer-deps` | ⚠️ Aceita |
 | DT-14 | No Render Free, migrations do Prisma rodam no startup do container em vez de um job de pré-deploy isolado | ⚠️ Aceita |
 | DT-15 | Compatibilidade transitória para identidade de socket legado deve ser removida após o frontend consumir o fluxo autenticado | ⚠️ Aceita |
-| DT-16 | Auth token do callback OAuth está pronto no backend, mas consumo de sessão real pelo frontend pertence à Fase 10 | 🔜 Backlog |
+| DT-HIGH | Validação autenticada local do `canStart` 2v2 é custosa porque testes reais end-to-end exigem múltiplas identidades OAuth distintas | ⚠️ Aceita |
 
 ---
 
@@ -406,6 +458,7 @@ model PlayerProfile {
 | **Transporte** | WebSocket via Socket.IO |
 | **Persistência** | PostgreSQL 16 + Prisma ORM |
 | **Autenticação** | Google OAuth + GitHub OAuth + auth token próprio |
+| **Frontend** | React + Vite + TypeScript + Tailwind CSS |
 | **Testes** | Jest + ts-jest |
 | **Frontend (debug)** | Vanilla JS |
 | **Runtime containerizado** | Docker + Docker Compose |
@@ -430,7 +483,9 @@ O backend está atualmente:
 - 🔐 Autenticado via Google/GitHub OAuth real
 - 🎫 Emitindo seu próprio auth token de aplicação
 - 🤝 Capaz de entrada autenticada em sessão multiplayer
-- 🚀 Pronto para evoluir para frontend jogável, bots e matchmaking público
+- 💻 Equipado com frontend real no browser
+- 🃏 Capaz de lobby autenticado e hidratação de partida ao vivo
+- 🚀 Pronto para evoluir para melhor testabilidade multiplayer, bots e matchmaking público
 
 ---
 
