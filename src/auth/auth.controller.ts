@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Req, UseGuards, Body } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
 import { AuthService, type AuthenticatedUserDto } from './auth.service';
 import { DevAuthGuard } from './guards/dev-auth.guard';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 
 type BootstrapUserBodyDto = {
   provider?: unknown;
@@ -68,6 +69,20 @@ export class AuthController {
   @UseGuards(DevAuthGuard)
   @Get('me')
   async getMe(@Req() request: RequestWithUser): Promise<MeResponseDto> {
+    return {
+      user: request.user,
+    };
+  }
+
+  @UseGuards(GoogleAuthGuard)
+  @Get('google')
+  async googleLogin(): Promise<void> {
+    // NOTE: Passport handles the redirect to Google.
+  }
+
+  @UseGuards(GoogleAuthGuard)
+  @Get('google/callback')
+  async googleCallback(@Req() request: RequestWithUser): Promise<MeResponseDto> {
     return {
       user: request.user,
     };
