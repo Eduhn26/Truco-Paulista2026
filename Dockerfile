@@ -45,4 +45,7 @@ COPY --from=builder /app/src/generated/prisma /app/dist/src/generated/prisma
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+# HACK: Render free instances do not support pre-deploy commands. We run
+# migrations during container startup to keep production schema aligned
+# without introducing a paid-only platform dependency.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
