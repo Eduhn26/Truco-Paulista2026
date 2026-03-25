@@ -1,47 +1,17 @@
 import { io, type Socket } from 'socket.io-client';
 
+import {
+  normalizeMatchStatePayload,
+  normalizePlayerAssignedPayload,
+  normalizeRankingPayload,
+  normalizeRoomStatePayload,
+  normalizeServerErrorPayload,
+  type GameSocketEvents,
+} from './socketTypes';
+
 type ConnectOptions = {
   backendUrl: string;
   authToken: string;
-};
-
-export type RoomStatePayload = {
-  matchId?: string;
-  currentTurnSeatId?: string | null;
-  canStart?: boolean;
-  players?: Array<{
-    seatId?: string;
-    ready?: boolean;
-  }>;
-};
-
-export type MatchStatePayload = {
-  matchId?: string;
-  state?: string;
-  score?: {
-    playerOne?: number;
-    playerTwo?: number;
-  };
-};
-
-export type RankingPayload = {
-  ranking?: Array<{
-    playerToken?: string;
-    rating?: number;
-    wins?: number;
-    losses?: number;
-    matchesPlayed?: number;
-  }>;
-};
-
-export type GameSocketEvents = {
-  onConnect?: (socketId: string) => void;
-  onDisconnect?: (reason: string) => void;
-  onError?: (payload: unknown) => void;
-  onRoomState?: (payload: RoomStatePayload) => void;
-  onMatchState?: (payload: MatchStatePayload) => void;
-  onRanking?: (payload: RankingPayload) => void;
-  onPlayerAssigned?: (payload: unknown) => void;
 };
 
 export class GameSocketClient {
@@ -66,24 +36,24 @@ export class GameSocketClient {
       events.onDisconnect?.(reason);
     });
 
-    this.socket.on('error', (payload) => {
-      events.onError?.(payload);
+    this.socket.on('error', (payload: unknown) => {
+      events.onError?.(normalizeServerErrorPayload(payload));
     });
 
-    this.socket.on('player-assigned', (payload) => {
-      events.onPlayerAssigned?.(payload);
+    this.socket.on('player-assigned', (payload: unknown) => {
+      events.onPlayerAssigned?.(normalizePlayerAssignedPayload(payload));
     });
 
-    this.socket.on('room-state', (payload: RoomStatePayload) => {
-      events.onRoomState?.(payload);
+    this.socket.on('room-state', (payload: unknown) => {
+      events.onRoomState?.(normalizeRoomStatePayload(payload));
     });
 
-    this.socket.on('match-state', (payload: MatchStatePayload) => {
-      events.onMatchState?.(payload);
+    this.socket.on('match-state', (payload: unknown) => {
+      events.onMatchState?.(normalizeMatchStatePayload(payload));
     });
 
-    this.socket.on('ranking', (payload: RankingPayload) => {
-      events.onRanking?.(payload);
+    this.socket.on('ranking', (payload: unknown) => {
+      events.onRanking?.(normalizeRankingPayload(payload));
     });
 
     return this.socket;

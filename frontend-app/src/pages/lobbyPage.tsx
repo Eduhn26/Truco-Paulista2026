@@ -2,11 +2,14 @@ import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
-import {
-  GameSocketClient,
-  type MatchStatePayload,
-  type RoomStatePayload,
-} from '../services/socket/gameSocketClient';
+import { saveMatchSnapshot } from '../features/match/matchSnapshotStorage';
+import { GameSocketClient } from '../services/socket/gameSocketClient';
+import type {
+  MatchStatePayload,
+  PlayerAssignedPayload,
+  RoomStatePayload,
+  ServerErrorPayload,
+} from '../services/socket/socketTypes';
 
 export function LobbyPage() {
   const { session } = useAuth();
@@ -17,15 +20,38 @@ export function LobbyPage() {
   const [matchId, setMatchId] = useState('');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
   const [matchState, setMatchState] = useState<MatchStatePayload | null>(null);
+  const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
 
   const canConnect = Boolean(session?.backendUrl && session?.authToken);
-  const derivedMatchId = matchState?.matchId ?? roomState?.matchId ?? matchId;
+  const derivedMatchId = matchState?.matchId || roomState?.matchId || playerAssigned?.matchId || matchId;
 
   function appendLog(line: string): void {
     setEventLog((current) =>
       [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30),
     );
+  }
+
+  function persistSnapshot(next: {
+    nextRoomState?: RoomStatePayload | null;
+    nextMatchState?: MatchStatePayload | null;
+    nextPlayerAssigned?: PlayerAssignedPayload | null;
+  }): void {
+    const snapshotMatchId =
+      next.nextMatchState?.matchId ||
+      next.nextRoomState?.matchId ||
+      next.nextPlayerAssigned?.matchId ||
+      derivedMatchId;
+
+    if (!snapshotMatchId) {
+      return;
+    }
+
+    saveMatchSnapshot(snapshotMatchId, {
+      roomState: next.nextRoomState ?? roomState,
+      matchState: next.nextMatchState ?? matchState,
+      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
+    });
   }
 
   function handleConnect(): void {
@@ -51,18 +77,28 @@ export function LobbyPage() {
           setConnectionStatus('offline');
           appendLog(`Socket disconnected (${reason}).`);
         },
-        onError: () => {
-          appendLog('Server emitted error event.');
+        onError: (payload: ServerErrorPayload) => {
+          const errorText = payload.message
+            ? `Server error: ${payload.message}`
+            : 'Server emitted error event.';
+
+          appendLog(errorText);
         },
-        onPlayerAssigned: () => {
-          appendLog('Received player-assigned.');
+        onPlayerAssigned: (payload) => {
+          setPlayerAssigned(payload);
+          persistSnapshot({ nextPlayerAssigned: payload });
+          appendLog(
+            `Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`,
+          );
         },
         onRoomState: (payload) => {
           setRoomState(payload);
+          persistSnapshot({ nextRoomState: payload });
           appendLog('Received room-state.');
         },
         onMatchState: (payload) => {
           setMatchState(payload);
+          persistSnapshot({ nextMatchState: payload });
           appendLog('Received match-state.');
         },
       },
@@ -93,9 +129,9 @@ export function LobbyPage() {
   }
 
   function handleReady(): void {
-    const meSeatId = roomState?.players?.find((player) => player?.seatId)?.seatId;
+    const mySeatId = playerAssigned?.seatId;
     const currentReady =
-      roomState?.players?.find((player) => player?.seatId === meSeatId)?.ready ?? false;
+      roomState?.players.find((player) => player.seatId === mySeatId)?.ready ?? false;
 
     clientRef.current?.emitSetReady(!currentReady);
     appendLog(`Emitted set-ready (${String(!currentReady)}).`);
@@ -134,6 +170,15 @@ export function LobbyPage() {
             </div>
             <div className="mt-1 break-all text-xs text-slate-400">
               userId: {session?.user?.id ?? '-'}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+              Assigned seat
+            </div>
+            <div className="mt-2 text-sm font-bold text-slate-100">
+              {playerAssigned?.seatId ?? '-'}
             </div>
           </div>
 
@@ -258,14 +303,16 @@ export function LobbyPage() {
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 font-mono text-sm">{roomState?.matchId ?? '-'}</div>
+              <div className="mt-2 break-all font-mono text-sm">{roomState?.matchId || '-'}</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
                 currentTurnSeatId
               </div>
-              <div className="mt-2 font-mono text-sm">{roomState?.currentTurnSeatId ?? '-'}</div>
+              <div className="mt-2 font-mono text-sm">
+                {roomState?.currentTurnSeatId || '-'}
+              </div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
@@ -285,16 +332,14 @@ export function LobbyPage() {
                 No players received yet.
               </div>
             ) : (
-              roomPlayers.map((player, index) => (
+              roomPlayers.map((player) => (
                 <div
-                  key={`${player?.seatId ?? 'unknown'}-${index}`}
+                  key={player.seatId}
                   className="rounded-2xl border border-white/10 bg-slate-950/70 p-4"
                 >
-                  <div className="text-sm font-bold text-slate-100">
-                    {player?.seatId ?? 'unknown seat'}
-                  </div>
+                  <div className="text-sm font-bold text-slate-100">{player.seatId}</div>
                   <div className="mt-2 text-sm text-slate-400">
-                    ready: {String(player?.ready ?? false)}
+                    ready: {String(player.ready)}
                   </div>
                 </div>
               ))
@@ -311,18 +356,18 @@ export function LobbyPage() {
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 font-mono text-sm">{matchState?.matchId ?? '-'}</div>
+              <div className="mt-2 break-all font-mono text-sm">{matchState?.matchId || '-'}</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">state</div>
-              <div className="mt-2 font-mono text-sm">{matchState?.state ?? '-'}</div>
+              <div className="mt-2 font-mono text-sm">{matchState?.state || '-'}</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">score</div>
               <div className="mt-2 font-mono text-sm">
-                T1 {matchState?.score?.playerOne ?? 0} × T2 {matchState?.score?.playerTwo ?? 0}
+                T1 {matchState?.score.playerOne ?? 0} × T2 {matchState?.score.playerTwo ?? 0}
               </div>
             </div>
           </div>
