@@ -21,14 +21,30 @@ services:
       retries: 20
       start_period: 15s
 
-  backend:
+  migrate:
     build:
       context: .
       dockerfile: Dockerfile
+    image: truco-paulista-backend
+    container_name: truco-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres?schema=public}
+    command: ['npm', 'run', 'prisma:deploy']
+    restart: 'no'
+
+  backend:
+    image: truco-paulista-backend
     container_name: truco-backend
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
