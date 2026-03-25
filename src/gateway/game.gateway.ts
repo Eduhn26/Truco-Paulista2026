@@ -18,6 +18,7 @@ import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-st
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
+import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
@@ -140,6 +141,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
     private readonly getRankingUseCase: GetRankingUseCase,
+    private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
     private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
   ) {}
@@ -231,15 +233,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return payload.sub;
   }
 
-  private resolveHandshakeIdentity(socket: Socket): ResolvedHandshakeIdentity {
+  private async resolveLegacyUserId(playerToken: string): Promise<string> {
+    const result = await this.getOrCreateUserUseCase.execute({
+      provider: 'legacy-socket',
+      providerUserId: playerToken,
+      displayName: `Legacy ${playerToken}`,
+    });
+
+    return result.user.id;
+  }
+
+  private async resolveHandshakeIdentity(socket: Socket): Promise<ResolvedHandshakeIdentity> {
     const authToken = this.readHandshakeAuthValue(socket, 'authToken');
 
     if (authToken) {
       const userId = this.resolveAuthenticatedUserId(authToken);
 
-      // NOTE: The room/session token remains technical.
-      // For authenticated users we normalize it to a stable user-bound token so
-      // reconnection and seat ownership stay stable without depending on provider callbacks.
       return {
         userId,
         playerToken: `auth:${userId}`,
@@ -247,39 +256,40 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const playerToken = this.extractPlayerToken(socket);
+    const userId = await this.resolveLegacyUserId(playerToken);
 
     return {
-      userId: playerToken,
+      userId,
       playerToken,
     };
   }
 
   handleConnection(socket: Socket): void {
-    try {
-      const identity = this.resolveHandshakeIdentity(socket);
+    this.resolveHandshakeIdentity(socket)
+      .then((identity) => {
+        this.logGateway('log', {
+          layer: 'gateway',
+          event: 'socket_connected',
+          status: 'connected',
+          socketId: socket.id,
+          playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+        });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : 'Invalid socket handshake';
 
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'socket_connected',
-        status: 'connected',
-        socketId: socket.id,
-        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+        this.logGateway('warn', {
+          layer: 'gateway',
+          event: 'socket_connected',
+          status: 'rejected',
+          socketId: socket.id,
+          errorType: 'transport_error',
+          errorMessage: message,
+        });
+
+        socket.emit('error', { message });
+        socket.disconnect(true);
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Invalid socket handshake';
-
-      this.logGateway('warn', {
-        layer: 'gateway',
-        event: 'socket_connected',
-        status: 'rejected',
-        socketId: socket.id,
-        errorType: 'transport_error',
-        errorMessage: message,
-      });
-
-      socket.emit('error', { message });
-      socket.disconnect(true);
-    }
   }
 
   handleDisconnect(socket: Socket): void {
@@ -328,7 +338,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const identity = this.resolveHandshakeIdentity(socket);
+      const identity = await this.resolveHandshakeIdentity(socket);
       const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
         userId: identity.userId,
       });
@@ -408,7 +418,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const identity = this.resolveHandshakeIdentity(socket);
+      const identity = await this.resolveHandshakeIdentity(socket);
       const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
         userId: identity.userId,
       });

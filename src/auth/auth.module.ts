@@ -43,6 +43,6 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
       inject: [USER_REPOSITORY],
     },
   ],
-  exports: [AuthService, AuthTokenService, PassportModule],
+  exports: [AuthService, AuthTokenService, PassportModule, GetOrCreateUserUseCase],
 })
 export class AuthModule {}
