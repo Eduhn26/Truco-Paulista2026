@@ -4,17 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 
 type CreatedPayload = { matchId: string };
-type JoinedPayload = { ok: true };
+type JoinedPayload = { matchId: string };
 type ErrorPayload = { message: string };
 
 const port = process.env['PORT'] ?? '3000';
 const baseUrl = process.env['WS_URL'] ?? `http://localhost:${port}`;
 
-const TIMEOUT_MS = 7000;
+const TIMEOUT_MS = 10000;
 
 function once<T>(socket: Socket, event: string, timeoutMs = TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       cleanup();
       reject(new Error(`Timeout aguardando evento "${event}"`));
     }, timeoutMs);
@@ -25,7 +25,7 @@ function once<T>(socket: Socket, event: string, timeoutMs = TIMEOUT_MS): Promise
     };
 
     const cleanup = () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       socket.off(event, handler);
     };
 
@@ -35,18 +35,23 @@ function once<T>(socket: Socket, event: string, timeoutMs = TIMEOUT_MS): Promise
 
 function logJson(label: string, data: unknown) {
   // eslint-disable-next-line no-console
-  console.log(label, JSON.stringify(data, null, 2));
+  console.log(label);
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify(data, null, 2));
 }
 
 type Args =
   | { mode: 'help' }
-  | { mode: 'create'; token?: string; pointsToWin?: number }
-  | { mode: 'join'; matchId: string; token?: string };
+  | { mode: 'create'; token?: string; authToken?: string; pointsToWin?: number }
+  | { mode: 'join'; matchId: string; token?: string; authToken?: string };
 
 function parseIntArg(raw: string): number | null {
-  const n = Number(raw);
-  if (!Number.isInteger(n)) return null;
-  return n;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : null;
+}
+
+function isLikelyJwt(value: string): boolean {
+  return value.split('.').length === 3;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -55,16 +60,36 @@ function parseArgs(argv: string[]): Args {
   if (!mode) return { mode: 'help' };
 
   if (mode === 'create') {
-    const token = typeof a1 === 'string' ? a1.trim() : '';
-    const pointsRaw = typeof a2 === 'string' ? a2.trim() : '';
+    const firstArg = typeof a1 === 'string' ? a1.trim() : '';
+    const secondArg = typeof a2 === 'string' ? a2.trim() : '';
 
-    if (!token && !pointsRaw) return { mode: 'create' };
+    if (!firstArg && !secondArg) return { mode: 'create' };
 
-    if (token && !pointsRaw) return { mode: 'create', token };
+    if (firstArg && !secondArg) {
+      if (isLikelyJwt(firstArg)) {
+        return { mode: 'create', authToken: firstArg };
+      }
 
-    if (token && pointsRaw) {
-      const parsed = parseIntArg(pointsRaw);
-      return parsed ? { mode: 'create', token, pointsToWin: parsed } : { mode: 'create', token };
+      const parsedPoints = parseIntArg(firstArg);
+      if (parsedPoints !== null) {
+        return { mode: 'create', pointsToWin: parsedPoints };
+      }
+
+      return { mode: 'create', token: firstArg };
+    }
+
+    if (firstArg && secondArg) {
+      const parsedPoints = parseIntArg(secondArg);
+
+      if (isLikelyJwt(firstArg)) {
+        return parsedPoints !== null
+          ? { mode: 'create', authToken: firstArg, pointsToWin: parsedPoints }
+          : { mode: 'create', authToken: firstArg };
+      }
+
+      return parsedPoints !== null
+        ? { mode: 'create', token: firstArg, pointsToWin: parsedPoints }
+        : { mode: 'create', token: firstArg };
     }
 
     return { mode: 'create' };
@@ -72,8 +97,21 @@ function parseArgs(argv: string[]): Args {
 
   if (mode === 'join') {
     const matchId = typeof a1 === 'string' ? a1.trim() : '';
-    const token = typeof a2 === 'string' ? a2.trim() : '';
-    return token ? { mode: 'join', matchId, token } : { mode: 'join', matchId };
+    const identityArg = typeof a2 === 'string' ? a2.trim() : '';
+
+    if (!matchId) {
+      return { mode: 'help' };
+    }
+
+    if (!identityArg) {
+      return { mode: 'join', matchId };
+    }
+
+    if (isLikelyJwt(identityArg)) {
+      return { mode: 'join', matchId, authToken: identityArg };
+    }
+
+    return { mode: 'join', matchId, token: identityArg };
   }
 
   return { mode: 'help' };
@@ -83,19 +121,27 @@ function printHelp() {
   // eslint-disable-next-line no-console
   console.log(`
 Uso:
-  npm run ws:client -- create [token] [pointsToWin]
-  npm run ws:client -- join <matchId> [token]
+  npm run ws:client -- create [token|authToken] [pointsToWin]
+  npm run ws:client -- join <matchId> [token|authToken]
 
 Exemplos:
   npm run ws:client -- create token-t1a 1
+  npm run ws:client -- create <JWT_AUTH_TOKEN> 1
   npm run ws:client -- join <matchId> token-t2a
+  npm run ws:client -- join <matchId> <JWT_AUTH_TOKEN>
+
+Variáveis opcionais:
+  WS_TOKEN       -> fallback do token técnico antigo
+  WS_AUTH_TOKEN  -> token autenticado da aplicação
+  WS_URL         -> URL do gateway
 
 Comandos:
   ready            -> ready=true
   unready          -> ready=false
-  start <viraRank> -> start-hand (ex: start 7)
-  play <card>      -> play-card (ex: play AP | play A P)
+  start <viraRank> -> start-hand
+  play <card>      -> play-card
   state            -> get-state
+  ranking [n]      -> get-ranking
   help             -> comandos
   exit             -> sair
 `);
@@ -106,34 +152,79 @@ function normalizeSuit(raw: string): string {
 }
 
 function normalizeRank(raw: string): string {
-  const v = raw.trim().toUpperCase();
-  if (v === '10') return '10';
-  return v;
+  const value = raw.trim().toUpperCase();
+  return value === '10' ? '10' : value;
 }
 
 function parsePlayArg(arg: string): { rank: string; suit: string } | null {
   const trimmed = arg.trim().toUpperCase();
   if (!trimmed) return null;
 
-  // COMPAT: Regex literal de traço. Removido escape desnecessário.
   const cleaned = trimmed.replace(/[ ,-]/g, '');
   if (cleaned.length < 2) return null;
 
   const rank = cleaned.slice(0, cleaned.length - 1);
   const suit = cleaned.slice(cleaned.length - 1);
 
-  return { rank: normalizeRank(rank), suit: normalizeSuit(suit) };
+  return {
+    rank: normalizeRank(rank),
+    suit: normalizeSuit(suit),
+  };
 }
 
-async function connect(playerToken: string): Promise<Socket> {
+type ConnectIdentity =
+  | { kind: 'auth'; authToken: string }
+  | { kind: 'legacy'; token: string };
+
+function resolveConnectIdentity(args: Args): ConnectIdentity {
+  const authTokenFromArgs = args.mode === 'help' ? undefined : args.authToken;
+  const tokenFromArgs = args.mode === 'help' ? undefined : args.token;
+
+  const authToken = authTokenFromArgs ?? process.env['WS_AUTH_TOKEN']?.trim();
+  if (authToken) {
+    return {
+      kind: 'auth',
+      authToken,
+    };
+  }
+
+  const token = tokenFromArgs ?? process.env['WS_TOKEN']?.trim() ?? randomUUID();
+
+  return {
+    kind: 'legacy',
+    token,
+  };
+}
+
+async function connect(identity: ConnectIdentity): Promise<Socket> {
   // eslint-disable-next-line no-console
   console.log(`[ws-client] Connecting to: ${baseUrl}`);
-  // eslint-disable-next-line no-console
-  console.log(`[ws-client] playerToken=${playerToken}`);
+
+  if (identity.kind === 'auth') {
+    // eslint-disable-next-line no-console
+    console.log('[ws-client] authMode=authToken');
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(`[ws-client] authMode=legacyToken token=${identity.token}`);
+  }
 
   const socket = io(baseUrl, {
-    transports: ['websocket'],
-    auth: { token: playerToken },
+    auth:
+      identity.kind === 'auth'
+        ? { authToken: identity.authToken }
+        : { token: identity.token },
+    transports: ['websocket', 'polling'],
+    timeout: TIMEOUT_MS,
+    reconnection: false,
+  });
+
+  socket.on('connect_error', (error: Error) => {
+    // eslint-disable-next-line no-console
+    console.error('[ws-client] connect_error:', error.message);
+  });
+
+  socket.on('error', (payload: ErrorPayload) => {
+    logJson('[ws-client] server:error', payload);
   });
 
   await once<void>(socket, 'connect');
@@ -146,6 +237,7 @@ async function connect(playerToken: string): Promise<Socket> {
 
 async function createMatch(socket: Socket, pointsToWin?: number): Promise<string> {
   const payload = typeof pointsToWin === 'number' ? { pointsToWin } : {};
+  logJson('[emit] create-match', payload);
   socket.emit('create-match', payload);
 
   const created = await once<CreatedPayload>(socket, 'created');
@@ -155,35 +247,40 @@ async function createMatch(socket: Socket, pointsToWin?: number): Promise<string
 }
 
 async function joinMatch(socket: Socket, matchId: string): Promise<void> {
-  if (!matchId)
-    throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token]');
-  socket.emit('join-match', { matchId });
-  await once<JoinedPayload>(socket, 'joined');
+  if (!matchId) {
+    throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token|authToken]');
+  }
+
+  const payload = { matchId };
+  logJson('[emit] join-match', payload);
+  socket.emit('join-match', payload);
+
+  const joined = await once<JoinedPayload>(socket, 'joined');
   // eslint-disable-next-line no-console
-  console.log(`[ws-client] joined: matchId=${matchId}`);
+  console.log(`[ws-client] joined: matchId=${joined.matchId}`);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
   if (args.mode === 'help') {
     printHelp();
     process.exit(0);
   }
 
-  const playerToken = args.token ?? process.env['WS_TOKEN'] ?? randomUUID();
-  const socket = await connect(playerToken);
+  const identity = resolveConnectIdentity(args);
+  const socket = await connect(identity);
 
   let matchId: string | null = null;
 
-  socket.on('player-assigned', (p: unknown) => logJson('[event] player-assigned:', p));
-  socket.on('room-state', (p: unknown) => logJson('[event] room-state:', p));
-  socket.on('match-state', (p: unknown) => logJson('[event] match-state:', p));
-  socket.on('ready-updated', (p: unknown) => logJson('[event] ready-updated:', p));
-  socket.on('hand-started', (p: unknown) => logJson('[event] hand-started:', p));
-  socket.on('card-played', (p: unknown) => logJson('[event] card-played:', p));
-  socket.on('rating-updated', (p: unknown) => logJson('[event] rating-updated:', p));
-  socket.on('ranking', (p: unknown) => logJson('[event] ranking:', p));
-  socket.on('error', (p: ErrorPayload) => logJson('[event] error:', p));
+  socket.on('player-assigned', (payload: unknown) => logJson('[event] player-assigned', payload));
+  socket.on('room-state', (payload: unknown) => logJson('[event] room-state', payload));
+  socket.on('match-state', (payload: unknown) => logJson('[event] match-state', payload));
+  socket.on('ready-updated', (payload: unknown) => logJson('[event] ready-updated', payload));
+  socket.on('hand-started', (payload: unknown) => logJson('[event] hand-started', payload));
+  socket.on('card-played', (payload: unknown) => logJson('[event] card-played', payload));
+  socket.on('rating-updated', (payload: unknown) => logJson('[event] rating-updated', payload));
+  socket.on('ranking', (payload: unknown) => logJson('[event] ranking', payload));
 
   if (args.mode === 'create') {
     matchId = await createMatch(socket, args.pointsToWin);
@@ -246,7 +343,7 @@ async function main() {
       const viraRank = arg.toUpperCase();
       if (!viraRank) {
         // eslint-disable-next-line no-console
-        console.log('Uso: start <viraRank> (ex: start 7)');
+        console.log('Uso: start <viraRank>');
         rl.prompt();
         return;
       }
@@ -260,12 +357,18 @@ async function main() {
       const parsed = parsePlayArg(arg);
       if (!parsed) {
         // eslint-disable-next-line no-console
-        console.log('Uso: play <card> (ex: play AP | play A P)');
+        console.log('Uso: play <card> (ex: play AP)');
         rl.prompt();
         return;
       }
 
-      socket.emit('play-card', { matchId, card: { rank: parsed.rank, suit: parsed.suit } });
+      socket.emit('play-card', {
+        matchId,
+        card: {
+          rank: parsed.rank,
+          suit: parsed.suit,
+        },
+      });
       rl.prompt();
       return;
     }
@@ -277,8 +380,8 @@ async function main() {
     }
 
     if (cmd === 'ranking') {
-      const n = arg ? parseIntArg(arg) : null;
-      const limit = n && n > 0 ? n : 20;
+      const parsed = arg ? parseIntArg(arg) : null;
+      const limit = parsed && parsed > 0 ? parsed : 20;
       socket.emit('get-ranking', { limit });
       rl.prompt();
       return;
@@ -297,8 +400,8 @@ async function main() {
   });
 }
 
-main().catch((err) => {
+main().catch((error) => {
   // eslint-disable-next-line no-console
-  console.error(err);
+  console.error(error);
   process.exit(1);
 });

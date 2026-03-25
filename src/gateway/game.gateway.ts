@@ -24,6 +24,7 @@ import type { CreateMatchRequestDto } from '@game/application/dtos/requests/crea
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
 import { RoomManager } from './multiplayer/room-manager';
@@ -117,6 +118,11 @@ type RejectContext = Omit<
   'layer' | 'event' | 'status' | 'errorMessage' | 'errorType'
 >;
 
+type ResolvedHandshakeIdentity = {
+  userId: string;
+  playerToken: string;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -134,6 +140,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
     private readonly getRankingUseCase: GetRankingUseCase,
+    private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
   ) {}
 
@@ -196,26 +203,81 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.reject(event, message, context, 'unexpected_error');
   }
 
-  private extractPlayerToken(socket: Socket): string {
-    const raw = (socket.handshake as unknown as { auth?: { token?: unknown } })?.auth?.token;
+  private readHandshakeAuthValue(socket: Socket, key: 'token' | 'authToken'): string | undefined {
+    const rawValue = (socket.handshake as { auth?: Record<string, unknown> })?.auth?.[key];
 
-    if (typeof raw !== 'string' || raw.trim().length === 0) {
+    if (typeof rawValue !== 'string') {
+      return undefined;
+    }
+
+    const normalizedValue = rawValue.trim();
+
+    return normalizedValue || undefined;
+  }
+
+  private extractPlayerToken(socket: Socket): string {
+    const playerToken = this.readHandshakeAuthValue(socket, 'token');
+
+    if (!playerToken) {
       throw new Error('Missing player token. Provide it via Socket.IO handshake auth.token.');
     }
 
-    return raw.trim();
+    return playerToken;
+  }
+
+  private resolveAuthenticatedUserId(authToken: string): string {
+    const payload = this.authTokenService.verifyToken(authToken);
+
+    return payload.sub;
+  }
+
+  private resolveUserIdFromSessionToken(playerToken: string): string {
+    if (playerToken.startsWith('auth:')) {
+      const userId = playerToken.slice('auth:'.length);
+
+      if (!userId) {
+        throw new Error('Invalid authenticated session token.');
+      }
+
+      return userId;
+    }
+
+    return playerToken;
+  }
+
+  private resolveHandshakeIdentity(socket: Socket): ResolvedHandshakeIdentity {
+    const authToken = this.readHandshakeAuthValue(socket, 'authToken');
+
+    if (authToken) {
+      const userId = this.resolveAuthenticatedUserId(authToken);
+
+      // NOTE: The room/session token remains technical.
+      // For authenticated users we normalize it to a stable user-bound token so
+      // reconnection and rating translation no longer depend on provider callbacks.
+      return {
+        userId,
+        playerToken: `auth:${userId}`,
+      };
+    }
+
+    const playerToken = this.extractPlayerToken(socket);
+
+    return {
+      userId: playerToken,
+      playerToken,
+    };
   }
 
   handleConnection(socket: Socket): void {
     try {
-      const playerToken = this.extractPlayerToken(socket);
+      const identity = this.resolveHandshakeIdentity(socket);
 
       this.logGateway('log', {
         layer: 'gateway',
         event: 'socket_connected',
         status: 'connected',
         socketId: socket.id,
-        playerTokenSuffix: this.maskPlayerToken(playerToken),
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Invalid socket handshake';
@@ -280,12 +342,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const playerToken = this.extractPlayerToken(socket);
-
-      // NOTE: This is a temporary bridge for phase 9.A.
-      // The transport token still resolves the persisted identity until OAuth introduces a real user boundary.
-      const userId = playerToken;
-      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({ userId });
+      const identity = this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
 
       const pointsToWinRaw = payload?.pointsToWin;
       const pointsToWin = typeof pointsToWinRaw === 'number' ? pointsToWinRaw : undefined;
@@ -296,7 +356,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'Invalid payload: pointsToWin must be an integer.',
           {
             socketId: socket.id,
-            playerTokenSuffix: this.maskPlayerToken(playerToken),
+            playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
           },
           'validation_error',
         );
@@ -307,14 +367,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const matchId = result.matchId;
 
       await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity.playerToken);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerToken,
+        playerToken: identity.playerToken,
         profileId: profileResult.profile.id,
       });
 
@@ -334,7 +394,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(playerToken),
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       };
 
       if (dto.pointsToWin !== undefined) {
@@ -362,11 +422,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const playerToken = this.extractPlayerToken(socket);
-
-      // NOTE: Temporary identity bridge until OAuth introduces a real User.
-      const userId = playerToken;
-      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({ userId });
+      const identity = this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
 
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
@@ -377,21 +436,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'Invalid payload: matchId is required.',
           {
             socketId: socket.id,
-            playerTokenSuffix: this.maskPlayerToken(playerToken),
+            playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
           },
           'validation_error',
         );
       }
 
       await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity.playerToken);
 
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerToken,
+        playerToken: identity.playerToken,
         profileId: profileResult.profile.id,
       });
 
@@ -411,7 +470,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: session.seatId,
         teamId: session.teamId,
         playerId: session.domainPlayerId,
-        playerTokenSuffix: this.maskPlayerToken(playerToken),
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       });
 
       return { event: 'joined', data: { matchId } };
@@ -662,13 +721,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
           const tokens = this.roomManager.getTeamTokens(matchId);
 
-          const winnerTokens = winnerTeamId === 'T1' ? tokens.T1 : tokens.T2;
-          const loserTokens = winnerTeamId === 'T1' ? tokens.T2 : tokens.T1;
+          const winnerUserIds = (winnerTeamId === 'T1' ? tokens.T1 : tokens.T2).map((playerToken) =>
+            this.resolveUserIdFromSessionToken(playerToken),
+          );
 
-          // NOTE: Temporary bridge until authenticated User becomes the real identity root.
+          const loserUserIds = (winnerTeamId === 'T1' ? tokens.T2 : tokens.T1).map((playerToken) =>
+            this.resolveUserIdFromSessionToken(playerToken),
+          );
+
           await this.updateRatingUseCase.execute({
-            winnerUserIds: winnerTokens,
-            loserUserIds: loserTokens,
+            winnerUserIds,
+            loserUserIds,
           });
 
           this.logGateway('log', {
