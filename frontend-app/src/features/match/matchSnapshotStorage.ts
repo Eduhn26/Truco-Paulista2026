@@ -11,6 +11,7 @@ export type MatchSnapshot = {
 };
 
 const STORAGE_PREFIX = 'truco-paulista:match-snapshot';
+const ACTIVE_MATCH_KEY = 'truco-paulista:active-match-id';
 
 export function saveMatchSnapshot(matchId: string, snapshot: MatchSnapshot): void {
   if (!matchId) {
@@ -18,6 +19,7 @@ export function saveMatchSnapshot(matchId: string, snapshot: MatchSnapshot): voi
   }
 
   window.sessionStorage.setItem(storageKey(matchId), JSON.stringify(snapshot));
+  window.sessionStorage.setItem(ACTIVE_MATCH_KEY, matchId);
 }
 
 export function loadMatchSnapshot(matchId: string): MatchSnapshot | null {
@@ -42,6 +44,12 @@ export function loadMatchSnapshot(matchId: string): MatchSnapshot | null {
   } catch {
     return null;
   }
+}
+
+export function getLastActiveMatchId(): string | null {
+  const value = window.sessionStorage.getItem(ACTIVE_MATCH_KEY);
+
+  return value && value.trim() ? value : null;
 }
 
 function storageKey(matchId: string): string {
