@@ -9,12 +9,16 @@ import { PrismaService } from './prisma/prisma.service';
 export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
-    return this.prisma.playerProfile.findUnique({ where: { playerToken } });
+  async findByUserId(userId: string): Promise<PlayerProfileSnapshot | null> {
+    return this.prisma.playerProfile.findUnique({
+      where: { userId },
+    });
   }
 
-  async create(playerToken: string): Promise<PlayerProfileSnapshot> {
-    return this.prisma.playerProfile.create({ data: { playerToken } });
+  async createForUser(userId: string): Promise<PlayerProfileSnapshot> {
+    return this.prisma.playerProfile.create({
+      data: { userId },
+    });
   }
 
   async save(profile: PlayerProfileSnapshot): Promise<void> {
@@ -31,7 +35,7 @@ export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
 
   async listTop(limit: number): Promise<PlayerProfileSnapshot[]> {
     return this.prisma.playerProfile.findMany({
-      orderBy: { rating: 'desc' },
+      orderBy: [{ rating: 'desc' }, { wins: 'desc' }, { matchesPlayed: 'desc' }],
       take: limit,
     });
   }

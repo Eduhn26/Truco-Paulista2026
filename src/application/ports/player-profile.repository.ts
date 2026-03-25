@@ -1,6 +1,6 @@
 export type PlayerProfileSnapshot = {
   id: string;
-  playerToken: string;
+  userId: string;
   rating: number;
   wins: number;
   losses: number;
@@ -8,8 +8,8 @@ export type PlayerProfileSnapshot = {
 };
 
 export interface PlayerProfileRepository {
-  findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null>;
-  create(playerToken: string): Promise<PlayerProfileSnapshot>;
+  findByUserId(userId: string): Promise<PlayerProfileSnapshot | null>;
+  createForUser(userId: string): Promise<PlayerProfileSnapshot>;
   save(profile: PlayerProfileSnapshot): Promise<void>;
   listTop(limit: number): Promise<PlayerProfileSnapshot[]>;
 }

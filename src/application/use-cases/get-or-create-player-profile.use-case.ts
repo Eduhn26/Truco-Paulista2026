@@ -3,20 +3,44 @@ import type {
   PlayerProfileSnapshot,
 } from '@game/application/ports/player-profile.repository';
 
-// NOTE: Idempotente por design: o mesmo token sempre resolve no mesmo profile.
+type GetOrCreatePlayerProfileForUserRequestDto = {
+  userId: string;
+};
+
+type GetOrCreatePlayerProfileForUserResponseDto = {
+  profile: PlayerProfileSnapshot;
+};
+
 export class GetOrCreatePlayerProfileUseCase {
-  constructor(private readonly repo: PlayerProfileRepository) {}
+  constructor(private readonly playerProfileRepository: PlayerProfileRepository) {}
 
-  async execute(input: { playerToken: string }): Promise<PlayerProfileSnapshot> {
-    const token = input.playerToken.trim();
+  async execute(
+    request: GetOrCreatePlayerProfileForUserRequestDto,
+  ): Promise<GetOrCreatePlayerProfileForUserResponseDto> {
+    const userId = this.normalizeUserId(request.userId);
 
-    if (!token) {
-      throw new Error('playerToken is required');
+    const existingProfile = await this.playerProfileRepository.findByUserId(userId);
+
+    if (existingProfile) {
+      return { profile: existingProfile };
     }
 
-    const existing = await this.repo.findByToken(token);
-    if (existing) return existing;
+    const createdProfile = await this.playerProfileRepository.createForUser(userId);
 
-    return this.repo.create(token);
+    return { profile: createdProfile };
+  }
+
+  private normalizeUserId(userId: string): string {
+    if (typeof userId !== 'string') {
+      throw new Error('userId is required');
+    }
+
+    const normalizedUserId = userId.trim();
+
+    if (!normalizedUserId) {
+      throw new Error('userId is required');
+    }
+
+    return normalizedUserId;
   }
 }

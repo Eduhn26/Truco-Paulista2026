@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@game/generated/prisma';
 
 type DatabaseLogContext = {
   layer: 'infrastructure';
