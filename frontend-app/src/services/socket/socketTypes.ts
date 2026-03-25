@@ -1,4 +1,11 @@
 export type SeatId = 'T1A' | 'T1B' | 'T2A' | 'T2B' | string;
+export type Suit = 'C' | 'O' | 'P' | 'E' | string;
+export type Rank = '4' | '5' | '6' | '7' | 'Q' | 'J' | 'K' | 'A' | '2' | '3' | string;
+
+export type CardPayload = {
+  rank: Rank;
+  suit: Suit;
+};
 
 export type RoomPlayerView = {
   seatId: SeatId;
@@ -27,6 +34,8 @@ export type PlayerAssignedPayload = {
   matchId?: string;
   seatId?: SeatId;
   playerId?: string;
+  teamId?: string;
+  profileId?: string;
 };
 
 export type ServerErrorPayload = {
@@ -46,6 +55,18 @@ export type RankingPayload = {
   ranking: RankingEntryPayload[];
 };
 
+export type HandStartedPayload = {
+  matchId?: string;
+  viraRank?: Rank;
+};
+
+export type CardPlayedPayload = {
+  matchId?: string;
+  card?: CardPayload;
+  seatId?: SeatId;
+  playerId?: string;
+};
+
 export type GameSocketEvents = {
   onConnect?: (socketId: string) => void;
   onDisconnect?: (reason: string) => void;
@@ -54,6 +75,8 @@ export type GameSocketEvents = {
   onMatchState?: (payload: MatchStatePayload) => void;
   onRanking?: (payload: RankingPayload) => void;
   onPlayerAssigned?: (payload: PlayerAssignedPayload) => void;
+  onHandStarted?: (payload: HandStartedPayload) => void;
+  onCardPlayed?: (payload: CardPlayedPayload) => void;
 };
 
 export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
@@ -98,6 +121,8 @@ export function normalizePlayerAssignedPayload(payload: unknown): PlayerAssigned
     matchId: typeof candidate.matchId === 'string' ? candidate.matchId : undefined,
     seatId: typeof candidate.seatId === 'string' ? candidate.seatId : undefined,
     playerId: typeof candidate.playerId === 'string' ? candidate.playerId : undefined,
+    teamId: typeof candidate.teamId === 'string' ? candidate.teamId : undefined,
+    profileId: typeof candidate.profileId === 'string' ? candidate.profileId : undefined,
   };
 }
 
@@ -127,6 +152,33 @@ export function normalizeRankingPayload(payload: unknown): RankingPayload {
     : [];
 
   return { ranking };
+}
+
+export function normalizeHandStartedPayload(payload: unknown): HandStartedPayload {
+  const candidate = isObject(payload) ? payload : {};
+
+  return {
+    matchId: typeof candidate.matchId === 'string' ? candidate.matchId : undefined,
+    viraRank: typeof candidate.viraRank === 'string' ? candidate.viraRank : undefined,
+  };
+}
+
+export function normalizeCardPlayedPayload(payload: unknown): CardPlayedPayload {
+  const candidate = isObject(payload) ? payload : {};
+  const card = isObject(candidate.card) ? candidate.card : {};
+
+  return {
+    matchId: typeof candidate.matchId === 'string' ? candidate.matchId : undefined,
+    seatId: typeof candidate.seatId === 'string' ? candidate.seatId : undefined,
+    playerId: typeof candidate.playerId === 'string' ? candidate.playerId : undefined,
+    card:
+      typeof card.rank === 'string' && typeof card.suit === 'string'
+        ? {
+            rank: card.rank,
+            suit: card.suit,
+          }
+        : undefined,
+  };
 }
 
 function isObject(value: unknown): value is Record<string, any> {

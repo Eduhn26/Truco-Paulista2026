@@ -1,12 +1,16 @@
 import { io, type Socket } from 'socket.io-client';
 
 import {
+  normalizeCardPlayedPayload,
+  normalizeHandStartedPayload,
   normalizeMatchStatePayload,
   normalizePlayerAssignedPayload,
   normalizeRankingPayload,
   normalizeRoomStatePayload,
   normalizeServerErrorPayload,
+  type CardPayload,
   type GameSocketEvents,
+  type Rank,
 } from './socketTypes';
 
 type ConnectOptions = {
@@ -56,6 +60,14 @@ export class GameSocketClient {
       events.onRanking?.(normalizeRankingPayload(payload));
     });
 
+    this.socket.on('hand-started', (payload: unknown) => {
+      events.onHandStarted?.(normalizeHandStartedPayload(payload));
+    });
+
+    this.socket.on('card-played', (payload: unknown) => {
+      events.onCardPlayed?.(normalizeCardPlayedPayload(payload));
+    });
+
     return this.socket;
   }
 
@@ -86,5 +98,13 @@ export class GameSocketClient {
 
   emitGetRanking(limit = 20): void {
     this.socket?.emit('get-ranking', { limit });
+  }
+
+  emitStartHand(matchId: string, viraRank: Rank): void {
+    this.socket?.emit('start-hand', { matchId, viraRank });
+  }
+
+  emitPlayCard(matchId: string, card: CardPayload): void {
+    this.socket?.emit('play-card', { matchId, card });
   }
 }
