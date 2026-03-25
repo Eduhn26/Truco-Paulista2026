@@ -1,21 +1,32 @@
 import { Module } from '@nestjs/common';
+import { PassportModule } from '@nestjs/passport';
 
 import { AuthController } from '@game/auth/auth.controller';
 import { AuthService } from '@game/auth/auth.service';
-import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
-import { PrismaUserRepository } from '@game/infrastructure/persistence/prisma-user.repository';
+import { DevAuthGuard } from '@game/auth/guards/dev-auth.guard';
+import { DevAuthStrategy } from '@game/auth/strategies/dev-auth.strategy';
 import type { UserRepository } from '@game/application/ports/user.repository';
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
+import { PrismaUserRepository } from '@game/infrastructure/persistence/prisma-user.repository';
+import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
 
 export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
 
 @Module({
-  imports: [PrismaModule],
+  imports: [
+    PrismaModule,
+    PassportModule.register({
+      defaultStrategy: 'dev-auth',
+      session: false,
+    }),
+  ],
   controllers: [AuthController],
   providers: [
     PrismaUserRepository,
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
     AuthService,
+    DevAuthStrategy,
+    DevAuthGuard,
     {
       provide: GetOrCreateUserUseCase,
       useFactory: (userRepository: UserRepository) =>
@@ -23,6 +34,6 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
       inject: [USER_REPOSITORY],
     },
   ],
-  exports: [AuthService],
+  exports: [AuthService, PassportModule],
 })
 export class AuthModule {}

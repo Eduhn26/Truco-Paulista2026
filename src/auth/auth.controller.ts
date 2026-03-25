@@ -1,7 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Controller, Get, Post, Req, UseGuards, Body } from '@nestjs/common';
+import type { Request } from 'express';
 
-import { AuthService } from './auth.service';
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
+import { AuthService, type AuthenticatedUserDto } from './auth.service';
+import { DevAuthGuard } from './guards/dev-auth.guard';
 
 type BootstrapUserBodyDto = {
   provider?: unknown;
@@ -21,6 +23,14 @@ type BootstrapUserResponseDto = {
     avatarUrl: string | null;
   };
   created: boolean;
+};
+
+type MeResponseDto = {
+  user: AuthenticatedUserDto;
+};
+
+type RequestWithUser = Request & {
+  user: AuthenticatedUserDto;
 };
 
 @Controller('auth')
@@ -52,9 +62,15 @@ export class AuthController {
       request.avatarUrl = avatarUrl;
     }
 
-    const result = await this.authService.bootstrapUser(request);
+    return this.authService.bootstrapUser(request);
+  }
 
-    return result;
+  @UseGuards(DevAuthGuard)
+  @Get('me')
+  async getMe(@Req() request: RequestWithUser): Promise<MeResponseDto> {
+    return {
+      user: request.user,
+    };
   }
 
   private toRequiredString(value: unknown, fieldName: string): string {
