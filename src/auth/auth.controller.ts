@@ -2,7 +2,11 @@ import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
-import { AuthService, type AuthenticatedUserDto } from './auth.service';
+import {
+  AuthService,
+  type AuthenticatedSessionResponseDto,
+  type AuthenticatedUserDto,
+} from './auth.service';
 import { DevAuthGuard } from './guards/dev-auth.guard';
 import { GitHubAuthGuard } from './guards/github-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
@@ -83,10 +87,10 @@ export class AuthController {
 
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
-  async googleCallback(@Req() request: RequestWithUser): Promise<MeResponseDto> {
-    return {
-      user: request.user,
-    };
+  async googleCallback(
+    @Req() request: RequestWithUser,
+  ): Promise<AuthenticatedSessionResponseDto> {
+    return this.authService.createSession(request.user);
   }
 
   @UseGuards(GitHubAuthGuard)
@@ -97,10 +101,10 @@ export class AuthController {
 
   @UseGuards(GitHubAuthGuard)
   @Get('github/callback')
-  async githubCallback(@Req() request: RequestWithUser): Promise<MeResponseDto> {
-    return {
-      user: request.user,
-    };
+  async githubCallback(
+    @Req() request: RequestWithUser,
+  ): Promise<AuthenticatedSessionResponseDto> {
+    return this.authService.createSession(request.user);
   }
 
   private toRequiredString(value: unknown, fieldName: string): string {

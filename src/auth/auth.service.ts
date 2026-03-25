@@ -5,6 +5,7 @@ import {
   type GetOrCreateUserRequestDto,
   type GetOrCreateUserResponseDto,
 } from '@game/application/use-cases/get-or-create-user.use-case';
+import { AuthTokenService, type AuthSessionDto } from './auth-token.service';
 
 export type AuthenticatedUserDto = {
   id: string;
@@ -13,6 +14,8 @@ export type AuthenticatedUserDto = {
   email: string | null;
   displayName: string | null;
   avatarUrl: string | null;
+  createdAt?: Date;
+  updatedAt?: Date;
 };
 
 export type DevIdentityInput = {
@@ -36,9 +39,18 @@ export type GitHubIdentityInput = {
   avatarUrl?: string | null;
 };
 
+export type AuthenticatedSessionResponseDto = {
+  user: AuthenticatedUserDto;
+  authToken: string;
+  expiresIn: string;
+};
+
 @Injectable()
 export class AuthService {
-  constructor(private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase) {}
+  constructor(
+    private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
+    private readonly authTokenService: AuthTokenService,
+  ) {}
 
   async bootstrapUser(
     request: GetOrCreateUserRequestDto,
@@ -117,5 +129,15 @@ export class AuthService {
     const result = await this.getOrCreateUserUseCase.execute(request);
 
     return result.user;
+  }
+
+  createSession(user: AuthenticatedUserDto): AuthenticatedSessionResponseDto {
+    const session: AuthSessionDto = this.authTokenService.issueToken(user);
+
+    return {
+      user,
+      authToken: session.authToken,
+      expiresIn: session.expiresIn,
+    };
   }
 }

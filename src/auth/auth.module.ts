@@ -3,6 +3,7 @@ import { PassportModule } from '@nestjs/passport';
 
 import { AuthController } from '@game/auth/auth.controller';
 import { AuthService } from '@game/auth/auth.service';
+import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DevAuthGuard } from '@game/auth/guards/dev-auth.guard';
 import { GitHubAuthGuard } from '@game/auth/guards/github-auth.guard';
 import { GoogleAuthGuard } from '@game/auth/guards/google-auth.guard';
@@ -27,6 +28,7 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
   providers: [
     PrismaUserRepository,
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
+    AuthTokenService,
     AuthService,
     DevAuthStrategy,
     GoogleAuthStrategy,
@@ -41,6 +43,6 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
       inject: [USER_REPOSITORY],
     },
   ],
-  exports: [AuthService, PassportModule],
+  exports: [AuthService, AuthTokenService, PassportModule],
 })
 export class AuthModule {}
