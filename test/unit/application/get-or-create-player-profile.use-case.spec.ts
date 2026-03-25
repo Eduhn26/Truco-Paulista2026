@@ -9,32 +9,32 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
   private sequence = 0;
 
   seed(profile: PlayerProfileSnapshot): void {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
   }
 
-  findByToken(playerToken: string): Promise<PlayerProfileSnapshot | null> {
-    return Promise.resolve(this.store.get(playerToken) ?? null);
+  findByUserId(userId: string): Promise<PlayerProfileSnapshot | null> {
+    return Promise.resolve(this.store.get(userId) ?? null);
   }
 
-  create(playerToken: string): Promise<PlayerProfileSnapshot> {
+  createForUser(userId: string): Promise<PlayerProfileSnapshot> {
     this.sequence += 1;
 
     const created: PlayerProfileSnapshot = {
       id: `profile-${this.sequence}`,
-      playerToken,
+      userId,
       rating: 1000,
       wins: 0,
       losses: 0,
       matchesPlayed: 0,
     };
 
-    this.store.set(playerToken, created);
+    this.store.set(userId, created);
 
     return Promise.resolve(created);
   }
 
   save(profile: PlayerProfileSnapshot): Promise<void> {
-    this.store.set(profile.playerToken, profile);
+    this.store.set(profile.userId, profile);
 
     return Promise.resolve();
   }
@@ -45,11 +45,11 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
 }
 
 describe('GetOrCreatePlayerProfileUseCase', () => {
-  it('returns an existing profile when the token already exists', async () => {
+  it('returns an existing profile when the userId already exists', async () => {
     const repo = new FakePlayerProfileRepository();
     const existing: PlayerProfileSnapshot = {
       id: 'profile-1',
-      playerToken: 'player-a',
+      userId: 'user-a',
       rating: 1125,
       wins: 3,
       losses: 1,
@@ -59,42 +59,44 @@ describe('GetOrCreatePlayerProfileUseCase', () => {
     repo.seed(existing);
 
     const useCase = new GetOrCreatePlayerProfileUseCase(repo);
-    const result = await useCase.execute({ playerToken: 'player-a' });
-
-    expect(result).toEqual(existing);
-  });
-
-  it('creates a new profile when the token does not exist', async () => {
-    const repo = new FakePlayerProfileRepository();
-    const useCase = new GetOrCreatePlayerProfileUseCase(repo);
-
-    const result = await useCase.execute({ playerToken: 'player-new' });
+    const result = await useCase.execute({ userId: 'user-a' });
 
     expect(result).toEqual({
-      id: 'profile-1',
-      playerToken: 'player-new',
-      rating: 1000,
-      wins: 0,
-      losses: 0,
-      matchesPlayed: 0,
+      profile: existing,
     });
   });
 
-  it('trims the incoming token before lookup and creation', async () => {
+  it('creates a new profile when the userId does not exist', async () => {
     const repo = new FakePlayerProfileRepository();
     const useCase = new GetOrCreatePlayerProfileUseCase(repo);
 
-    const result = await useCase.execute({ playerToken: '   player-trimmed   ' });
+    const result = await useCase.execute({ userId: 'user-new' });
 
-    expect(result.playerToken).toBe('player-trimmed');
+    expect(result).toEqual({
+      profile: {
+        id: 'profile-1',
+        userId: 'user-new',
+        rating: 1000,
+        wins: 0,
+        losses: 0,
+        matchesPlayed: 0,
+      },
+    });
   });
 
-  it('throws when playerToken is empty after trim', async () => {
+  it('trims the incoming userId before lookup and creation', async () => {
     const repo = new FakePlayerProfileRepository();
     const useCase = new GetOrCreatePlayerProfileUseCase(repo);
 
-    await expect(useCase.execute({ playerToken: '   ' })).rejects.toThrow(
-      'playerToken is required',
-    );
+    const result = await useCase.execute({ userId: '   user-trimmed   ' });
+
+    expect(result.profile.userId).toBe('user-trimmed');
+  });
+
+  it('throws when userId is empty after trim', async () => {
+    const repo = new FakePlayerProfileRepository();
+    const useCase = new GetOrCreatePlayerProfileUseCase(repo);
+
+    await expect(useCase.execute({ userId: '   ' })).rejects.toThrow('userId is required');
   });
 });
