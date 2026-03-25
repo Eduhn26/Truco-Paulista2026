@@ -2,41 +2,36 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# NOTE: The project currently carries an old Nest schematics dependency whose
-# peer range conflicts with the TypeScript version used by the application.
-# We keep the container build unblocked with legacy peer resolution and defer
-# the dependency cleanup to a dedicated maintenance step.
-ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
-
+# NOTE: We copy manifest files first to maximize Docker layer cache reuse
+# when source code changes but dependencies stay the same.
 COPY package*.json ./
+
+# COMPAT: The project currently relies on legacy peer dependency resolution
+# because of a transient ecosystem mismatch already identified in the phase notes.
+RUN npm ci --legacy-peer-deps
+
+COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY prisma ./prisma
-
-RUN npm ci
-RUN npx prisma generate
-
-COPY nest-cli.json tsconfig*.json ./
 COPY src ./src
 
+RUN npx prisma generate
 RUN npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:20-alpine AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
+# NOTE: Production image only receives the minimum runtime artifacts needed
+# to execute the compiled Nest application and Prisma client.
 COPY package*.json ./
+RUN npm ci --omit=dev --legacy-peer-deps
+
 COPY prisma ./prisma
-
-# NOTE: Runtime keeps only production dependencies. Prisma generated artifacts
-# are copied from the builder stage because the Prisma CLI itself is not needed
-# in the final image.
-RUN npm ci --omit=dev
-
-COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
