@@ -8,11 +8,17 @@ type RoomState = {
   ratingApplied: boolean;
 };
 
+export type JoinPlayerIdentity = {
+  userId: string;
+  playerToken: string;
+};
+
 export type PlayerSession = {
   matchId: string;
   seatId: SeatId;
   teamId: TeamId;
   domainPlayerId: 'P1' | 'P2';
+  userId: string;
   playerToken: string;
   socketId: string;
 };
@@ -54,7 +60,7 @@ export class RoomManager {
     });
   }
 
-  join(matchId: string, socketId: string, playerToken: string): PlayerSession {
+  join(matchId: string, socketId: string, identity: JoinPlayerIdentity): PlayerSession {
     this.ensureRoom(matchId);
 
     const room = this.roomsByMatchId.get(matchId);
@@ -63,7 +69,7 @@ export class RoomManager {
     const existingSocket = this.sessionsBySocketId.get(socketId);
     if (existingSocket) return existingSocket;
 
-    const key = tokenKey(matchId, playerToken);
+    const key = tokenKey(matchId, identity.playerToken);
     const existingToken = this.sessionsByTokenKey.get(key);
 
     // NOTE:
@@ -78,6 +84,7 @@ export class RoomManager {
       const reattached: PlayerSession = {
         ...existingToken,
         socketId,
+        userId: identity.userId,
       };
 
       this.sessionsByTokenKey.set(key, reattached);
@@ -102,7 +109,8 @@ export class RoomManager {
       seatId,
       teamId,
       domainPlayerId,
-      playerToken,
+      userId: identity.userId,
+      playerToken: identity.playerToken,
       socketId,
     };
 
@@ -197,8 +205,8 @@ export class RoomManager {
     return room.currentTurnSeatId === session.seatId;
   }
 
-  getTeamTokens(matchId: string): { T1: string[]; T2: string[] } {
-    const teamTokens = {
+  getTeamUserIds(matchId: string): { T1: string[]; T2: string[] } {
+    const teamUserIds = {
       T1: [] as string[],
       T2: [] as string[],
     };
@@ -207,13 +215,13 @@ export class RoomManager {
       if (session.matchId !== matchId) continue;
 
       if (session.teamId === 'T1') {
-        teamTokens.T1.push(session.playerToken);
+        teamUserIds.T1.push(session.userId);
       } else {
-        teamTokens.T2.push(session.playerToken);
+        teamUserIds.T2.push(session.userId);
       }
     }
 
-    return teamTokens;
+    return teamUserIds;
   }
 
   tryMarkRatingApplied(matchId: string): boolean {

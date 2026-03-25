@@ -231,20 +231,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return payload.sub;
   }
 
-  private resolveUserIdFromSessionToken(playerToken: string): string {
-    if (playerToken.startsWith('auth:')) {
-      const userId = playerToken.slice('auth:'.length);
-
-      if (!userId) {
-        throw new Error('Invalid authenticated session token.');
-      }
-
-      return userId;
-    }
-
-    return playerToken;
-  }
-
   private resolveHandshakeIdentity(socket: Socket): ResolvedHandshakeIdentity {
     const authToken = this.readHandshakeAuthValue(socket, 'authToken');
 
@@ -253,7 +239,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // NOTE: The room/session token remains technical.
       // For authenticated users we normalize it to a stable user-bound token so
-      // reconnection and rating translation no longer depend on provider callbacks.
+      // reconnection and seat ownership stay stable without depending on provider callbacks.
       return {
         userId,
         playerToken: `auth:${userId}`,
@@ -367,7 +353,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const matchId = result.matchId;
 
       await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity.playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity);
 
       socket.emit('player-assigned', {
         matchId,
@@ -443,7 +429,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity.playerToken);
+      const session = this.roomManager.join(matchId, socket.id, identity);
 
       socket.emit('player-assigned', {
         matchId,
@@ -719,15 +705,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         if (score.playerOne !== score.playerTwo) {
           const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
-          const tokens = this.roomManager.getTeamTokens(matchId);
+          const teamUserIds = this.roomManager.getTeamUserIds(matchId);
 
-          const winnerUserIds = (winnerTeamId === 'T1' ? tokens.T1 : tokens.T2).map((playerToken) =>
-            this.resolveUserIdFromSessionToken(playerToken),
-          );
-
-          const loserUserIds = (winnerTeamId === 'T1' ? tokens.T2 : tokens.T1).map((playerToken) =>
-            this.resolveUserIdFromSessionToken(playerToken),
-          );
+          const winnerUserIds = winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2;
+          const loserUserIds = winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1;
 
           await this.updateRatingUseCase.execute({
             winnerUserIds,
