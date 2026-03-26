@@ -237,4 +237,172 @@ describe('RoomManager (1v1)', () => {
     roomManager.advanceTurn('match-1');
     expect(roomManager.getState('match-1').currentTurnSeatId).toBe('T1A');
   });
+
+  it('fills the missing 1v1 seat with a ready bot', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+
+    const roomState = roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomState.mode).toBe('1v1');
+    expect(roomState.players).toEqual([
+      {
+        seatId: 'T1A',
+        teamId: 'T1',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T2A',
+        teamId: 'T2',
+        ready: true,
+        isBot: true,
+      },
+    ]);
+    expect(roomState.canStart).toBe(false);
+
+    const afterHumanReady = roomManager.setReady('socket-1', true);
+
+    expect(afterHumanReady.canStart).toBe(true);
+  });
+
+  it('replaces the 1v1 bot with a human on the same seat', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    const secondHuman = roomManager.join(
+      'match-1',
+      'socket-2',
+      identity('user-2', 'token-2'),
+    );
+
+    const roomState = roomManager.getState('match-1');
+
+    expect(secondHuman.seatId).toBe('T2A');
+    expect(roomState.players).toEqual([
+      {
+        seatId: 'T1A',
+        teamId: 'T1',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T2A',
+        teamId: 'T2',
+        ready: false,
+        isBot: false,
+      },
+    ]);
+  });
+});
+
+describe('RoomManager bot fill (2v2)', () => {
+  it('fills the two missing 2v2 seats with ready bots', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '2v2');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    const roomState = roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomState.mode).toBe('2v2');
+    expect(roomState.players).toEqual([
+      {
+        seatId: 'T1A',
+        teamId: 'T1',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T2A',
+        teamId: 'T2',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T1B',
+        teamId: 'T1',
+        ready: true,
+        isBot: true,
+      },
+      {
+        seatId: 'T2B',
+        teamId: 'T2',
+        ready: true,
+        isBot: true,
+      },
+    ]);
+    expect(roomState.canStart).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    const afterSecondHumanReady = roomManager.setReady('socket-2', true);
+
+    expect(afterSecondHumanReady.canStart).toBe(true);
+  });
+
+  it('ignores bots when grouping team user ids', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '2v2');
+    roomManager.join('match-1', 'socket-1', identity('user-alpha', 'alpha'));
+    roomManager.join('match-1', 'socket-2', identity('user-beta', 'beta'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    const teamUserIds = roomManager.getTeamUserIds('match-1');
+
+    expect(teamUserIds.T1).toEqual(['user-alpha']);
+    expect(teamUserIds.T2).toEqual(['user-beta']);
+  });
+
+  it('replaces the first available bot with a human in 2v2 mode', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '2v2');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    const thirdHuman = roomManager.join(
+      'match-1',
+      'socket-3',
+      identity('user-3', 'token-3'),
+    );
+
+    expect(thirdHuman.seatId).toBe('T1B');
+
+    const roomState = roomManager.getState('match-1');
+
+    expect(roomState.players).toEqual([
+      {
+        seatId: 'T1A',
+        teamId: 'T1',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T2A',
+        teamId: 'T2',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T1B',
+        teamId: 'T1',
+        ready: false,
+        isBot: false,
+      },
+      {
+        seatId: 'T2B',
+        teamId: 'T2',
+        ready: true,
+        isBot: true,
+      },
+    ]);
+  });
 });
