@@ -159,3 +159,82 @@ describe('RoomManager (2v2)', () => {
     );
   });
 });
+
+describe('RoomManager (1v1)', () => {
+  it('preserves 1v1 mode after players join the room', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    expect(roomManager.getState('match-1').mode).toBe('1v1');
+  });
+
+  it('assigns seats only in 1v1 order', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+
+    const p1 = roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    const p2 = roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    expect(p1.seatId).toBe('T1A');
+    expect(p2.seatId).toBe('T2A');
+  });
+
+  it('rejects a third player because the 1v1 room is full', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    expect(() =>
+      roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3')),
+    ).toThrow('match is full (1v1 mode)');
+  });
+
+  it('only allows start when both 1v1 players are ready', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    expect(roomManager.canStart('match-1')).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    expect(roomManager.canStart('match-1')).toBe(false);
+
+    const roomState = roomManager.setReady('socket-2', true);
+
+    expect(roomManager.canStart('match-1')).toBe(true);
+    expect(roomState.canStart).toBe(true);
+  });
+
+  it('begins the hand with T1A and rotates turns only between T1A and T2A', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    roomManager.setReady('socket-1', true);
+    roomManager.setReady('socket-2', true);
+
+    const started = roomManager.beginHand('match-1');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+
+    roomManager.advanceTurn('match-1');
+    expect(roomManager.getState('match-1').currentTurnSeatId).toBe('T2A');
+
+    roomManager.advanceTurn('match-1');
+    expect(roomManager.getState('match-1').currentTurnSeatId).toBe('T1A');
+  });
+});
