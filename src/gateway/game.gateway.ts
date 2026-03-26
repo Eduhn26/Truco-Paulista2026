@@ -280,42 +280,59 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null as never;
   }
 
-  handleConnection(socket: Socket): void {
-  try {
-    const authToken = this.readHandshakeAuthValue(socket, 'authToken');
-    const legacyToken = this.readHandshakeAuthValue(socket, 'token');
-
-    if (!authToken && !legacyToken) {
-      throw new Error(
-        'Missing socket credentials. Provide auth.authToken or auth.token in the Socket.IO handshake.',
-      );
-    }
-
-    const tokenForLog = authToken ?? legacyToken ?? 'unknown';
-
-    this.logGateway('log', {
-      layer: 'gateway',
-      event: 'socket_connected',
-      status: 'connected',
-      socketId: socket.id,
-      playerTokenSuffix: this.maskPlayerToken(tokenForLog),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid socket handshake';
-
-    this.logGateway('warn', {
-      layer: 'gateway',
-      event: 'socket_connected',
-      status: 'rejected',
-      socketId: socket.id,
-      errorType: 'transport_error',
-      errorMessage: message,
+  private async emitMatchState(matchId: string): Promise<void> {
+    const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
+      matchId,
     });
 
-    socket.emit('error', { message });
-    socket.disconnect(true);
+    this.server.to(matchId).emit('match-state', state);
   }
-}
+
+  private emitRoomState(matchId: string): void {
+    this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
+  }
+
+  private fillBotsAndBroadcast(matchId: string): void {
+    this.roomManager.fillMissingSeatsWithBots(matchId);
+    this.emitRoomState(matchId);
+  }
+
+  handleConnection(socket: Socket): void {
+    try {
+      const authToken = this.readHandshakeAuthValue(socket, 'authToken');
+      const legacyToken = this.readHandshakeAuthValue(socket, 'token');
+
+      if (!authToken && !legacyToken) {
+        throw new Error(
+          'Missing socket credentials. Provide auth.authToken or auth.token in the Socket.IO handshake.',
+        );
+      }
+
+      const tokenForLog = authToken ?? legacyToken ?? 'unknown';
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'socket_connected',
+        status: 'connected',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(tokenForLog),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid socket handshake';
+
+      this.logGateway('warn', {
+        layer: 'gateway',
+        event: 'socket_connected',
+        status: 'rejected',
+        socketId: socket.id,
+        errorType: 'transport_error',
+        errorMessage: message,
+      });
+
+      socket.emit('error', { message });
+      socket.disconnect(true);
+    }
+  }
 
   handleDisconnect(socket: Socket): void {
     const existingSession = this.roomManager.getSessionBySocketId(socket.id);
@@ -347,7 +364,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.logGateway('log', logContext);
-    this.server.to(result.matchId).emit('room-state', this.roomManager.getState(result.matchId));
+    this.emitRoomState(result.matchId);
   }
 
   @SubscribeMessage('create-match')
@@ -420,12 +437,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         profileId: profileResult.profile.id,
       });
 
-      this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
-
-      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
-        matchId,
-      });
-      this.server.to(matchId).emit('match-state', state);
+      this.fillBotsAndBroadcast(matchId);
+      await this.emitMatchState(matchId);
 
       const successLog: GatewayLogContext = {
         layer: 'gateway',
@@ -496,12 +509,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         profileId: profileResult.profile.id,
       });
 
-      this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
-
-      const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
-        matchId,
-      });
-      this.server.to(matchId).emit('match-state', state);
+      this.fillBotsAndBroadcast(matchId);
+      await this.emitMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -642,8 +651,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
-      this.server.to(matchId).emit('match-state', state);
+      await this.emitMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
