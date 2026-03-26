@@ -21,7 +21,10 @@ import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-c
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
-import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
+import type {
+  CreateMatchRequestDto,
+  MatchMode,
+} from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
@@ -34,6 +37,7 @@ type ErrorResponseDto = { message: string };
 
 type CreateMatchPayload = {
   pointsToWin?: unknown;
+  mode?: unknown;
 };
 
 type StartHandPayload = {
@@ -264,33 +268,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
-  handleConnection(socket: Socket): void {
-    this.resolveHandshakeIdentity(socket)
-      .then((identity) => {
-        this.logGateway('log', {
-          layer: 'gateway',
-          event: 'socket_connected',
-          status: 'connected',
-          socketId: socket.id,
-          playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
-        });
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : 'Invalid socket handshake';
+  private normalizeMode(value: unknown): MatchMode | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
 
-        this.logGateway('warn', {
-          layer: 'gateway',
-          event: 'socket_connected',
-          status: 'rejected',
-          socketId: socket.id,
-          errorType: 'transport_error',
-          errorMessage: message,
-        });
+    if (value === '1v1' || value === '2v2') {
+      return value;
+    }
 
-        socket.emit('error', { message });
-        socket.disconnect(true);
-      });
+    return null as never;
   }
+
+  handleConnection(socket: Socket): void {
+  try {
+    const authToken = this.readHandshakeAuthValue(socket, 'authToken');
+    const legacyToken = this.readHandshakeAuthValue(socket, 'token');
+
+    if (!authToken && !legacyToken) {
+      throw new Error(
+        'Missing socket credentials. Provide auth.authToken or auth.token in the Socket.IO handshake.',
+      );
+    }
+
+    const tokenForLog = authToken ?? legacyToken ?? 'unknown';
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'socket_connected',
+      status: 'connected',
+      socketId: socket.id,
+      playerTokenSuffix: this.maskPlayerToken(tokenForLog),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid socket handshake';
+
+    this.logGateway('warn', {
+      layer: 'gateway',
+      event: 'socket_connected',
+      status: 'rejected',
+      socketId: socket.id,
+      errorType: 'transport_error',
+      errorMessage: message,
+    });
+
+    socket.emit('error', { message });
+    socket.disconnect(true);
+  }
+}
 
   handleDisconnect(socket: Socket): void {
     const existingSession = this.roomManager.getSessionBySocketId(socket.id);
@@ -358,9 +383,30 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const dto: CreateMatchRequestDto = pointsToWin === undefined ? {} : { pointsToWin };
+      const modeRaw = payload?.mode;
+      const mode = this.normalizeMode(modeRaw);
+
+      if (modeRaw !== undefined && mode !== '1v1' && mode !== '2v2') {
+        return this.reject(
+          'create_match_rejected',
+          'Invalid payload: mode must be either "1v1" or "2v2".',
+          {
+            socketId: socket.id,
+            playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: CreateMatchRequestDto = {
+        ...(pointsToWin === undefined ? {} : { pointsToWin }),
+        ...(mode === undefined ? {} : { mode }),
+      };
+
       const result = await this.createMatchUseCase.execute(dto);
       const matchId = result.matchId;
+
+      this.roomManager.ensureRoom(matchId, dto.mode ?? '2v2');
 
       await socket.join(matchId);
       const session = this.roomManager.join(matchId, socket.id, identity);

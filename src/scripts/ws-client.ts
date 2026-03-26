@@ -7,6 +7,8 @@ type CreatedPayload = { matchId: string };
 type JoinedPayload = { matchId: string };
 type ErrorPayload = { message: string };
 
+type MatchMode = '1v1' | '2v2';
+
 const port = process.env['PORT'] ?? '3000';
 const baseUrl = process.env['WS_URL'] ?? `http://localhost:${port}`;
 
@@ -42,7 +44,13 @@ function logJson(label: string, data: unknown) {
 
 type Args =
   | { mode: 'help' }
-  | { mode: 'create'; token?: string; authToken?: string; pointsToWin?: number }
+  | {
+      mode: 'create';
+      token?: string;
+      authToken?: string;
+      pointsToWin?: number;
+      matchMode?: MatchMode;
+    }
   | { mode: 'join'; matchId: string; token?: string; authToken?: string };
 
 function parseIntArg(raw: string): number | null {
@@ -54,79 +62,27 @@ function isLikelyJwt(value: string): boolean {
   return value.split('.').length === 3;
 }
 
-function parseArgs(argv: string[]): Args {
-  const [mode, a1, a2] = argv;
-
-  if (!mode) return { mode: 'help' };
-
-  if (mode === 'create') {
-    const firstArg = typeof a1 === 'string' ? a1.trim() : '';
-    const secondArg = typeof a2 === 'string' ? a2.trim() : '';
-
-    if (!firstArg && !secondArg) return { mode: 'create' };
-
-    if (firstArg && !secondArg) {
-      if (isLikelyJwt(firstArg)) {
-        return { mode: 'create', authToken: firstArg };
-      }
-
-      const parsedPoints = parseIntArg(firstArg);
-      if (parsedPoints !== null) {
-        return { mode: 'create', pointsToWin: parsedPoints };
-      }
-
-      return { mode: 'create', token: firstArg };
-    }
-
-    if (firstArg && secondArg) {
-      const parsedPoints = parseIntArg(secondArg);
-
-      if (isLikelyJwt(firstArg)) {
-        return parsedPoints !== null
-          ? { mode: 'create', authToken: firstArg, pointsToWin: parsedPoints }
-          : { mode: 'create', authToken: firstArg };
-      }
-
-      return parsedPoints !== null
-        ? { mode: 'create', token: firstArg, pointsToWin: parsedPoints }
-        : { mode: 'create', token: firstArg };
-    }
-
-    return { mode: 'create' };
-  }
-
-  if (mode === 'join') {
-    const matchId = typeof a1 === 'string' ? a1.trim() : '';
-    const identityArg = typeof a2 === 'string' ? a2.trim() : '';
-
-    if (!matchId) {
-      return { mode: 'help' };
-    }
-
-    if (!identityArg) {
-      return { mode: 'join', matchId };
-    }
-
-    if (isLikelyJwt(identityArg)) {
-      return { mode: 'join', matchId, authToken: identityArg };
-    }
-
-    return { mode: 'join', matchId, token: identityArg };
-  }
-
-  return { mode: 'help' };
+function isMatchMode(value: string): value is MatchMode {
+  return value === '1v1' || value === '2v2';
 }
 
 function printHelp() {
   // eslint-disable-next-line no-console
   console.log(`
 Uso:
+  npm run ws:client -- create
+  npm run ws:client -- create [pointsToWin]
+  npm run ws:client -- create [pointsToWin] [mode]
   npm run ws:client -- create [token|authToken] [pointsToWin]
+  npm run ws:client -- create [token|authToken] [pointsToWin] [mode]
   npm run ws:client -- join <matchId> [token|authToken]
 
 Exemplos:
-  npm run ws:client -- create token-t1a 1
-  npm run ws:client -- create <JWT_AUTH_TOKEN> 1
+  npm run ws:client -- create
+  npm run ws:client -- create 12
+  npm run ws:client -- create 12 1v1
+  npm run ws:client -- create token-t1a 12 1v1
+  npm run ws:client -- create <JWT_AUTH_TOKEN> 12 2v2
   npm run ws:client -- join <matchId> token-t2a
   npm run ws:client -- join <matchId> <JWT_AUTH_TOKEN>
 
@@ -145,6 +101,134 @@ Comandos:
   help             -> comandos
   exit             -> sair
 `);
+}
+
+function parseCreateArgs(argv: string[]): Args {
+  const [a1, a2, a3] = argv.map((value) => value.trim()).filter(Boolean);
+
+  if (!a1 && !a2 && !a3) {
+    return { mode: 'create' };
+  }
+
+  if (a1 && !a2 && !a3) {
+    if (isLikelyJwt(a1)) {
+      return { mode: 'create', authToken: a1 };
+    }
+
+    const pointsToWin = parseIntArg(a1);
+    if (pointsToWin !== null) {
+      return { mode: 'create', pointsToWin };
+    }
+
+    if (isMatchMode(a1)) {
+      return { mode: 'create', matchMode: a1 };
+    }
+
+    return { mode: 'create', token: a1 };
+  }
+
+  if (a1 && a2 && !a3) {
+    if (isLikelyJwt(a1)) {
+      const pointsToWin = parseIntArg(a2);
+      if (pointsToWin !== null) {
+        return { mode: 'create', authToken: a1, pointsToWin };
+      }
+
+      if (isMatchMode(a2)) {
+        return { mode: 'create', authToken: a1, matchMode: a2 };
+      }
+
+      return { mode: 'create', authToken: a1 };
+    }
+
+    const firstIsPoints = parseIntArg(a1);
+    if (firstIsPoints !== null) {
+      if (isMatchMode(a2)) {
+        return { mode: 'create', pointsToWin: firstIsPoints, matchMode: a2 };
+      }
+
+      return { mode: 'create', pointsToWin: firstIsPoints };
+    }
+
+    const secondIsPoints = parseIntArg(a2);
+    if (secondIsPoints !== null) {
+      return { mode: 'create', token: a1, pointsToWin: secondIsPoints };
+    }
+
+    if (isMatchMode(a2)) {
+      return { mode: 'create', token: a1, matchMode: a2 };
+    }
+
+    return { mode: 'create', token: a1 };
+  }
+
+  if (a1 && a2 && a3) {
+    if (isLikelyJwt(a1)) {
+      const pointsToWin = parseIntArg(a2);
+      const matchMode = isMatchMode(a3) ? a3 : undefined;
+
+      return {
+        mode: 'create',
+        authToken: a1,
+        ...(pointsToWin === null ? {} : { pointsToWin }),
+        ...(matchMode === undefined ? {} : { matchMode }),
+      };
+    }
+
+    const firstIsPoints = parseIntArg(a1);
+    if (firstIsPoints !== null) {
+      const matchMode = isMatchMode(a2) ? a2 : isMatchMode(a3) ? a3 : undefined;
+
+      return {
+        mode: 'create',
+        pointsToWin: firstIsPoints,
+        ...(matchMode === undefined ? {} : { matchMode }),
+      };
+    }
+
+    const secondIsPoints = parseIntArg(a2);
+    const matchMode = isMatchMode(a3) ? a3 : undefined;
+
+    return {
+      mode: 'create',
+      token: a1,
+      ...(secondIsPoints === null ? {} : { pointsToWin: secondIsPoints }),
+      ...(matchMode === undefined ? {} : { matchMode }),
+    };
+  }
+
+  return { mode: 'create' };
+}
+
+function parseArgs(argv: string[]): Args {
+  const [mode, ...rest] = argv;
+
+  if (!mode) return { mode: 'help' };
+
+  if (mode === 'create') {
+    return parseCreateArgs(rest);
+  }
+
+  if (mode === 'join') {
+    const matchId = typeof rest[0] === 'string' ? rest[0].trim() : '';
+    const identityArg = typeof rest[1] === 'string' ? rest[1].trim() : '';
+
+    if (!matchId) {
+      return { mode: 'help' };
+    }
+
+    if (!identityArg) {
+      return { mode: 'join', matchId };
+    }
+
+    if (isLikelyJwt(identityArg)) {
+      return { mode: 'join', matchId, authToken: identityArg };
+    }
+
+    return { mode: 'join', matchId, token: identityArg };
+  }
+
+  return { mode: 'help' };
 }
 
 function normalizeSuit(raw: string): string {
@@ -235,8 +319,15 @@ async function connect(identity: ConnectIdentity): Promise<Socket> {
   return socket;
 }
 
-async function createMatch(socket: Socket, pointsToWin?: number): Promise<string> {
-  const payload = typeof pointsToWin === 'number' ? { pointsToWin } : {};
+async function createMatch(
+  socket: Socket,
+  options: { pointsToWin?: number; matchMode?: MatchMode },
+): Promise<string> {
+  const payload = {
+    ...(typeof options.pointsToWin === 'number' ? { pointsToWin: options.pointsToWin } : {}),
+    ...(options.matchMode ? { mode: options.matchMode } : {}),
+  };
+
   logJson('[emit] create-match', payload);
   socket.emit('create-match', payload);
 
@@ -283,7 +374,10 @@ async function main() {
   socket.on('ranking', (payload: unknown) => logJson('[event] ranking', payload));
 
   if (args.mode === 'create') {
-    matchId = await createMatch(socket, args.pointsToWin);
+   matchId = await createMatch(socket, {
+  ...(args.pointsToWin === undefined ? {} : { pointsToWin: args.pointsToWin }),
+  ...(args.matchMode === undefined ? {} : { matchMode: args.matchMode }),
+});
   } else {
     await joinMatch(socket, args.matchId);
     matchId = args.matchId;
