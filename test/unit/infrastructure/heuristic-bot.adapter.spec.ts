@@ -78,10 +78,14 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toBeNull();
   });
 
-  it('plays the lowest card when opening the round', () => {
+  it('balanced profile plays the lowest card when opening the round', () => {
     const adapter = new HeuristicBotAdapter();
 
-    const decision = adapter.decideNextMove(makeRequest());
+    const decision = adapter.decideNextMove(
+      makeRequest({
+        profile: 'balanced',
+      }),
+    );
 
     expect(decision).not.toBeNull();
     expect(decision).toEqual({
@@ -92,11 +96,30 @@ describe('HeuristicBotAdapter', () => {
     });
   });
 
-  it('plays the lowest winning card when responding to an opponent card', () => {
+  it('aggressive profile plays the highest card when opening the round', () => {
     const adapter = new HeuristicBotAdapter();
 
     const decision = adapter.decideNextMove(
       makeRequest({
+        profile: 'aggressive',
+      }),
+    );
+
+    expect(decision).not.toBeNull();
+    expect(decision).toEqual({
+      seatId: 'T2A',
+      teamId: 'T2',
+      playerId: 'P2',
+      card: '5C',
+    });
+  });
+
+  it('balanced profile plays the lowest winning card when responding', () => {
+    const adapter = new HeuristicBotAdapter();
+
+    const decision = adapter.decideNextMove(
+      makeRequest({
+        profile: 'balanced',
         state: {
           matchId: 'match-1',
           state: 'in_progress',
@@ -131,11 +154,52 @@ describe('HeuristicBotAdapter', () => {
     });
   });
 
-  it('throws away the lowest card when no winning response exists', () => {
+  it('aggressive profile plays the highest winning card when responding', () => {
     const adapter = new HeuristicBotAdapter();
 
     const decision = adapter.decideNextMove(
       makeRequest({
+        profile: 'aggressive',
+        state: {
+          matchId: 'match-1',
+          state: 'in_progress',
+          score: {
+            playerOne: 0,
+            playerTwo: 0,
+          },
+          currentHand: {
+            viraRank: '4',
+            finished: false,
+            playerOneHand: ['7P', '3E'],
+            playerTwoHand: ['KO', '6P', '5C'],
+            rounds: [
+              {
+                playerOneCard: 'KO',
+                playerTwoCard: null,
+                result: null,
+                finished: false,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(decision).not.toBeNull();
+    expect(decision).toEqual({
+      seatId: 'T2A',
+      teamId: 'T2',
+      playerId: 'P2',
+      card: '5C',
+    });
+  });
+
+  it('cautious profile throws away the lowest card when no winning response exists', () => {
+    const adapter = new HeuristicBotAdapter();
+
+    const decision = adapter.decideNextMove(
+      makeRequest({
+        profile: 'cautious',
         state: {
           matchId: 'match-1',
           state: 'in_progress',
@@ -167,6 +231,46 @@ describe('HeuristicBotAdapter', () => {
       teamId: 'T2',
       playerId: 'P2',
       card: '5C',
+    });
+  });
+
+  it('aggressive profile throws away the highest card when no winning response exists', () => {
+    const adapter = new HeuristicBotAdapter();
+
+    const decision = adapter.decideNextMove(
+      makeRequest({
+        profile: 'aggressive',
+        state: {
+          matchId: 'match-1',
+          state: 'in_progress',
+          score: {
+            playerOne: 0,
+            playerTwo: 0,
+          },
+          currentHand: {
+            viraRank: '4',
+            finished: false,
+            playerOneHand: ['3E', 'AP'],
+            playerTwoHand: ['7C', 'KO', '6P'],
+            rounds: [
+              {
+                playerOneCard: '3E',
+                playerTwoCard: null,
+                result: null,
+                finished: false,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(decision).not.toBeNull();
+    expect(decision).toEqual({
+      seatId: 'T2A',
+      teamId: 'T2',
+      playerId: 'P2',
+      card: 'KO',
     });
   });
 });

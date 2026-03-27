@@ -4,6 +4,7 @@ import type {
   BotDecision,
   BotDecisionPort,
   BotDecisionRequest,
+  BotProfile,
 } from '@game/application/ports/bot-decision.port';
 import { compareCards } from '@game/domain/services/truco-rules';
 import type { Rank } from '@game/domain/value-objects/rank';
@@ -46,13 +47,14 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const opponentCard =
       playerId === 'P1' ? currentRound?.playerTwoCard : currentRound?.playerOneCard;
 
+    const profile = request.profile ?? 'balanced';
     const orderedHand = [...hand].sort((left, right) =>
       this.compareCardStrength(left, right, currentHand.viraRank),
     );
 
     const selectedCard = opponentCard
-      ? this.pickResponseCard(orderedHand, opponentCard, currentHand.viraRank)
-      : orderedHand[0] ?? null;
+      ? this.pickResponseCard(orderedHand, opponentCard, currentHand.viraRank, profile)
+      : this.pickOpeningCard(orderedHand, profile);
 
     if (!selectedCard) {
       return null;
@@ -74,12 +76,41 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return rounds[rounds.length - 1] ?? null;
   }
 
-  private pickResponseCard(hand: string[], opponentCard: string, viraRank: Rank): string {
-    const winningCard = hand.find((candidate) =>
+  private pickOpeningCard(hand: string[], profile: BotProfile): string {
+    if (profile === 'aggressive') {
+      return hand[hand.length - 1]!;
+    }
+
+    return hand[0]!;
+  }
+
+  private pickResponseCard(
+    hand: string[],
+    opponentCard: string,
+    viraRank: Rank,
+    profile: BotProfile,
+  ): string {
+    const winningCards = hand.filter((candidate) =>
       this.beats(candidate, opponentCard, viraRank),
     );
 
-    return winningCard ?? hand[0]!;
+    if (winningCards.length === 0) {
+      return this.pickLosingCard(hand, profile);
+    }
+
+    if (profile === 'aggressive') {
+      return winningCards[winningCards.length - 1]!;
+    }
+
+    return winningCards[0]!;
+  }
+
+  private pickLosingCard(hand: string[], profile: BotProfile): string {
+    if (profile === 'aggressive') {
+      return hand[hand.length - 1]!;
+    }
+
+    return hand[0]!;
   }
 
   private beats(candidate: string, opponentCard: string, viraRank: Rank): boolean {

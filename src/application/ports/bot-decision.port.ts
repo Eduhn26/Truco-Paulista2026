@@ -2,6 +2,8 @@ import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses
 
 export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
 
+export type BotProfile = 'aggressive' | 'balanced' | 'cautious';
+
 export type BotRoomPlayerView = {
   seatId: string;
   teamId: 'T1' | 'T2';
@@ -18,6 +20,7 @@ export type BotDecisionRequest = {
   matchId: string;
   state: ViewMatchStateResponseDto;
   roomState: BotRoomStateView;
+  profile?: BotProfile;
 };
 
 export type BotDecision = {
