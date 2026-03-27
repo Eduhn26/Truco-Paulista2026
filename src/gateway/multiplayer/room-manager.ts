@@ -1,4 +1,5 @@
 import type { MatchMode } from '@game/application/dtos/requests/create-match.request.dto';
+import type { BotProfile } from '@game/application/ports/bot-decision.port';
 
 import { teamFromSeat, type SeatId, type TeamId } from './seat-id';
 
@@ -25,6 +26,7 @@ export type PlayerSession = {
   playerToken: string;
   socketId: string;
   isBot: boolean;
+  botProfile: BotProfile | null;
 };
 
 export type RoomStateDto = {
@@ -171,6 +173,15 @@ export class RoomManager {
 
   getSessionBySocketId(socketId: string): PlayerSession | null {
     return this.sessionsBySocketId.get(socketId) ?? null;
+  }
+
+  getBotProfile(matchId: string, seatId: SeatId): BotProfile | null {
+    const session = this.getSessionBySeat(matchId, seatId);
+    if (!session || !session.isBot) {
+      return null;
+    }
+
+    return session.botProfile;
   }
 
   setReady(socketId: string, ready: boolean): RoomStateDto {
@@ -352,6 +363,7 @@ export class RoomManager {
       playerToken: identity.playerToken,
       socketId,
       isBot: false,
+      botProfile: null,
     };
   }
 
@@ -368,7 +380,19 @@ export class RoomManager {
       playerToken: `${BOT_TOKEN_PREFIX}:${matchId}:${seatId}`,
       socketId: `${BOT_SOCKET_PREFIX}:${matchId}:${seatId}`,
       isBot: true,
+      botProfile: this.resolveBotProfile(seatId),
     };
+  }
+
+  private resolveBotProfile(seatId: SeatId): BotProfile {
+    const profileBySeat: Record<SeatId, BotProfile> = {
+      T1A: 'balanced',
+      T2A: 'aggressive',
+      T1B: 'cautious',
+      T2B: 'balanced',
+    };
+
+    return profileBySeat[seatId];
   }
 
   private firstBotSeat(room: RoomState): SeatId | null {

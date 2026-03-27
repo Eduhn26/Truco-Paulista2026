@@ -31,6 +31,7 @@ import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-ca
 import {
   BOT_DECISION_PORT,
   type BotDecisionPort,
+  type BotProfile,
 } from '@game/application/ports/bot-decision.port';
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
@@ -301,6 +302,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.emitRoomState(matchId);
   }
 
+  private resolveBotProfile(matchId: string, seatId: string | null): BotProfile {
+    if (!seatId) {
+      return 'balanced';
+    }
+
+    return this.roomManager.getBotProfile(matchId, seatId as never) ?? 'balanced';
+  }
+
   private async finalizeMatchIfFinished(
     matchId: string,
     state: ViewMatchStateResponseDto,
@@ -346,6 +355,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const pendingBotMove = this.botDecisionPort.decideNextMove({
         matchId,
         state,
+        profile: this.resolveBotProfile(matchId, roomState.currentTurnSeatId),
         roomState: {
           currentTurnSeatId: roomState.currentTurnSeatId,
           players: roomState.players.map((player) => ({
