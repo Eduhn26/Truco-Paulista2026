@@ -16,6 +16,7 @@ function makeRequest(
       currentHand: {
         viraRank: '4',
         finished: false,
+        viewerPlayerId: null,
         playerOneHand: ['7P', '3E', 'AP'],
         playerTwoHand: ['5C', '6P', 'KO'],
         rounds: [
@@ -130,6 +131,7 @@ describe('HeuristicBotAdapter', () => {
           currentHand: {
             viraRank: '4',
             finished: false,
+            viewerPlayerId: null,
             playerOneHand: ['7P', '3E'],
             playerTwoHand: ['KO', '6P', '5C'],
             rounds: [
@@ -170,6 +172,7 @@ describe('HeuristicBotAdapter', () => {
           currentHand: {
             viraRank: '4',
             finished: false,
+            viewerPlayerId: null,
             playerOneHand: ['7P', '3E'],
             playerTwoHand: ['KO', '6P', '5C'],
             rounds: [
@@ -210,6 +213,7 @@ describe('HeuristicBotAdapter', () => {
           currentHand: {
             viraRank: '4',
             finished: false,
+            viewerPlayerId: null,
             playerOneHand: ['3E', 'AP'],
             playerTwoHand: ['7C', 'KO', '5C'],
             rounds: [
@@ -250,6 +254,7 @@ describe('HeuristicBotAdapter', () => {
           currentHand: {
             viraRank: '4',
             finished: false,
+            viewerPlayerId: null,
             playerOneHand: ['3E', 'AP'],
             playerTwoHand: ['7C', 'KO', '6P'],
             rounds: [
