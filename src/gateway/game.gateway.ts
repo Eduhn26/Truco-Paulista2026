@@ -287,10 +287,43 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null as never;
   }
 
-  private async emitMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
-    const state = await this.viewMatchStateUseCase.execute({ matchId });
-    this.server.to(matchId).emit('match-state', state);
-    return state;
+  private resolveViewerPlayerId(socketId: string, matchId: string): 'P1' | 'P2' | undefined {
+    const session = this.roomManager.getSessionBySocketId(socketId);
+
+    if (!session || session.matchId !== matchId) {
+      return undefined;
+    }
+
+    return session.domainPlayerId;
+  }
+
+  private async getAuthoritativeMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
+    return this.viewMatchStateUseCase.execute({ matchId });
+  }
+
+  private toPublicMatchState(state: ViewMatchStateResponseDto): ViewMatchStateResponseDto {
+    if (!state.currentHand) {
+      return state;
+    }
+
+    return {
+      ...state,
+      currentHand: {
+        ...state.currentHand,
+        viewerPlayerId: null,
+        playerOneHand: state.currentHand.playerOneHand.map(() => 'HIDDEN'),
+        playerTwoHand: state.currentHand.playerTwoHand.map(() => 'HIDDEN'),
+      },
+    };
+  }
+
+  private async emitPublicMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
+    const authoritativeState = await this.getAuthoritativeMatchState(matchId);
+    const publicState = this.toPublicMatchState(authoritativeState);
+
+    this.server.to(matchId).emit('match-state', publicState);
+
+    return authoritativeState;
   }
 
   private emitRoomState(matchId: string): void {
@@ -350,7 +383,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async processBotTurns(matchId: string): Promise<void> {
     while (true) {
       const roomState = this.roomManager.getState(matchId);
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
+      const state = await this.getAuthoritativeMatchState(matchId);
 
       const pendingBotMove = this.botDecisionPort.decideNextMove({
         matchId,
@@ -392,7 +425,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         isBot: true,
       });
 
-      const updatedState = await this.emitMatchState(matchId);
+      const updatedState = await this.emitPublicMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -554,7 +587,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       this.fillBotsAndBroadcast(matchId);
-      await this.emitMatchState(matchId);
+      await this.emitPublicMatchState(matchId);
 
       const successLog: GatewayLogContext = {
         layer: 'gateway',
@@ -626,7 +659,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       this.fillBotsAndBroadcast(matchId);
-      await this.emitMatchState(matchId);
+      await this.emitPublicMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -767,7 +800,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      await this.emitMatchState(matchId);
+      await this.emitPublicMatchState(matchId);
       await this.processBotTurns(matchId);
 
       this.logGateway('log', {
@@ -866,7 +899,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      const state = await this.emitMatchState(matchId);
+      const state = await this.emitPublicMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -951,7 +984,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
+    const viewerPlayerId = this.resolveViewerPlayerId(socket.id, matchId);
+
+const state = await this.viewMatchStateUseCase.execute(
+  viewerPlayerId === undefined
+    ? { matchId }
+    : { matchId, viewerPlayerId },
+);
+
       socket.emit('match-state', state);
 
       this.logGateway('debug', {
