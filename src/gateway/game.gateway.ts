@@ -326,6 +326,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return authoritativeState;
   }
 
+  private async emitPrivateMatchState(matchId: string): Promise<void> {
+    const humanSessions = this.roomManager.getHumanSessions(matchId);
+
+    await Promise.all(
+      humanSessions.map(async (session) => {
+        const privateState = await this.viewMatchStateUseCase.execute({
+          matchId,
+          viewerPlayerId: session.domainPlayerId,
+        });
+
+        this.server.to(session.socketId).emit('match-state:private', privateState);
+      }),
+    );
+  }
+
   private emitRoomState(matchId: string): void {
     this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
   }
@@ -426,6 +441,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       const updatedState = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -588,6 +604,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
 
       const successLog: GatewayLogContext = {
         layer: 'gateway',
@@ -660,6 +677,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -801,6 +819,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
       await this.processBotTurns(matchId);
 
       this.logGateway('log', {
@@ -900,6 +919,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -984,13 +1004,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-    const viewerPlayerId = this.resolveViewerPlayerId(socket.id, matchId);
+      const viewerPlayerId = this.resolveViewerPlayerId(socket.id, matchId);
 
-const state = await this.viewMatchStateUseCase.execute(
-  viewerPlayerId === undefined
-    ? { matchId }
-    : { matchId, viewerPlayerId },
-);
+      const state = await this.viewMatchStateUseCase.execute(
+        viewerPlayerId === undefined ? { matchId } : { matchId, viewerPlayerId },
+      );
 
       socket.emit('match-state', state);
 

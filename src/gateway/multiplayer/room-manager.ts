@@ -175,6 +175,20 @@ export class RoomManager {
     return this.sessionsBySocketId.get(socketId) ?? null;
   }
 
+  getHumanSessions(matchId: string): PlayerSession[] {
+    const sessions: PlayerSession[] = [];
+
+    for (const session of this.sessionsByTokenKey.values()) {
+      if (session.matchId !== matchId || session.isBot) {
+        continue;
+      }
+
+      sessions.push(session);
+    }
+
+    return sessions;
+  }
+
   getBotProfile(matchId: string, seatId: SeatId): BotProfile | null {
     const session = this.getSessionBySeat(matchId, seatId);
     if (!session || !session.isBot) {
