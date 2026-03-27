@@ -8,7 +8,7 @@ import {
   WebSocketServer,
   type WsResponse,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
 import type { Server, Socket } from 'socket.io';
 
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
@@ -28,6 +28,10 @@ import type {
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import {
+  BOT_DECISION_PORT,
+  type BotDecisionPort,
+} from '@game/application/ports/bot-decision.port';
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
@@ -128,13 +132,6 @@ type ResolvedHandshakeIdentity = {
   playerToken: string;
 };
 
-type PendingBotMove = {
-  seatId: string;
-  teamId: 'T1' | 'T2';
-  playerId: 'P1' | 'P2';
-  card: string;
-};
-
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -155,6 +152,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
     private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
+    @Inject(BOT_DECISION_PORT)
+    private readonly botDecisionPort: BotDecisionPort,
   ) {}
 
   private formatGatewayLog(context: GatewayLogContext): string {
@@ -288,10 +287,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async emitMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
-    const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
-      matchId,
-    });
-
+    const state = await this.viewMatchStateUseCase.execute({ matchId });
     this.server.to(matchId).emit('match-state', state);
     return state;
   }
@@ -303,36 +299,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private fillBotsAndBroadcast(matchId: string): void {
     this.roomManager.fillMissingSeatsWithBots(matchId);
     this.emitRoomState(matchId);
-  }
-
-  private pickBotMove(matchId: string, state: ViewMatchStateResponseDto): PendingBotMove | null {
-    const roomState = this.roomManager.getState(matchId);
-    const currentTurnSeatId = roomState.currentTurnSeatId;
-
-    if (!currentTurnSeatId || !state.currentHand) {
-      return null;
-    }
-
-    const currentSeat = roomState.players.find((player) => player.seatId === currentTurnSeatId);
-    if (!currentSeat || !currentSeat.isBot) {
-      return null;
-    }
-
-    const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
-    const hand =
-      playerId === 'P1' ? state.currentHand.playerOneHand : state.currentHand.playerTwoHand;
-
-    const card = hand[0];
-    if (!card) {
-      return null;
-    }
-
-    return {
-      seatId: currentSeat.seatId,
-      teamId: currentSeat.teamId,
-      playerId,
-      card,
-    };
   }
 
   private async finalizeMatchIfFinished(
@@ -374,8 +340,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async processBotTurns(matchId: string): Promise<void> {
     while (true) {
+      const roomState = this.roomManager.getState(matchId);
       const state = await this.viewMatchStateUseCase.execute({ matchId });
-      const pendingBotMove = this.pickBotMove(matchId, state);
+
+      const pendingBotMove = this.botDecisionPort.decideNextMove({
+        matchId,
+        state,
+        roomState: {
+          currentTurnSeatId: roomState.currentTurnSeatId,
+          players: roomState.players.map((player) => ({
+            seatId: player.seatId,
+            teamId: player.teamId,
+            ready: player.ready,
+            isBot: player.isBot,
+          })),
+        },
+      });
 
       if (!pendingBotMove) {
         return;
@@ -389,8 +369,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       await this.playCardUseCase.execute(dto);
 
-      const roomState = this.roomManager.advanceTurn(matchId);
-      this.server.to(matchId).emit('room-state', roomState);
+      const nextRoomState = this.roomManager.advanceTurn(matchId);
+      this.server.to(matchId).emit('room-state', nextRoomState);
 
       this.server.to(matchId).emit('card-played', {
         matchId,
@@ -398,7 +378,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         seatId: pendingBotMove.seatId,
         teamId: pendingBotMove.teamId,
         card: pendingBotMove.card,
-        currentTurnSeatId: roomState.currentTurnSeatId,
+        currentTurnSeatId: nextRoomState.currentTurnSeatId,
         isBot: true,
       });
 
