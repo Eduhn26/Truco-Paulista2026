@@ -128,6 +128,13 @@ type ResolvedHandshakeIdentity = {
   playerToken: string;
 };
 
+type PendingBotMove = {
+  seatId: string;
+  teamId: 'T1' | 'T2';
+  playerId: 'P1' | 'P2';
+  card: string;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -280,12 +287,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null as never;
   }
 
-  private async emitMatchState(matchId: string): Promise<void> {
+  private async emitMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
     const state: ViewMatchStateResponseDto = await this.viewMatchStateUseCase.execute({
       matchId,
     });
 
     this.server.to(matchId).emit('match-state', state);
+    return state;
   }
 
   private emitRoomState(matchId: string): void {
@@ -295,6 +303,124 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private fillBotsAndBroadcast(matchId: string): void {
     this.roomManager.fillMissingSeatsWithBots(matchId);
     this.emitRoomState(matchId);
+  }
+
+  private pickBotMove(matchId: string, state: ViewMatchStateResponseDto): PendingBotMove | null {
+    const roomState = this.roomManager.getState(matchId);
+    const currentTurnSeatId = roomState.currentTurnSeatId;
+
+    if (!currentTurnSeatId || !state.currentHand) {
+      return null;
+    }
+
+    const currentSeat = roomState.players.find((player) => player.seatId === currentTurnSeatId);
+    if (!currentSeat || !currentSeat.isBot) {
+      return null;
+    }
+
+    const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
+    const hand =
+      playerId === 'P1' ? state.currentHand.playerOneHand : state.currentHand.playerTwoHand;
+
+    const card = hand[0];
+    if (!card) {
+      return null;
+    }
+
+    return {
+      seatId: currentSeat.seatId,
+      teamId: currentSeat.teamId,
+      playerId,
+      card,
+    };
+  }
+
+  private async finalizeMatchIfFinished(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+  ): Promise<void> {
+    if (state.state !== 'finished' || !this.roomManager.tryMarkRatingApplied(matchId)) {
+      return;
+    }
+
+    const score = state.score;
+
+    if (score.playerOne === score.playerTwo) {
+      return;
+    }
+
+    const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
+    const teamUserIds = this.roomManager.getTeamUserIds(matchId);
+
+    const winnerUserIds = winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2;
+    const loserUserIds = winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1;
+
+    await this.updateRatingUseCase.execute({
+      winnerUserIds,
+      loserUserIds,
+    });
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'match_finished',
+      status: 'succeeded',
+      matchId,
+      teamId: winnerTeamId,
+    });
+
+    const ranking = await this.getRankingUseCase.execute({ limit: 20 });
+    this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
+  }
+
+  private async processBotTurns(matchId: string): Promise<void> {
+    while (true) {
+      const state = await this.viewMatchStateUseCase.execute({ matchId });
+      const pendingBotMove = this.pickBotMove(matchId, state);
+
+      if (!pendingBotMove) {
+        return;
+      }
+
+      const dto: PlayCardRequestDto = {
+        matchId,
+        playerId: pendingBotMove.playerId,
+        card: pendingBotMove.card,
+      };
+
+      await this.playCardUseCase.execute(dto);
+
+      const roomState = this.roomManager.advanceTurn(matchId);
+      this.server.to(matchId).emit('room-state', roomState);
+
+      this.server.to(matchId).emit('card-played', {
+        matchId,
+        playerId: pendingBotMove.playerId,
+        seatId: pendingBotMove.seatId,
+        teamId: pendingBotMove.teamId,
+        card: pendingBotMove.card,
+        currentTurnSeatId: roomState.currentTurnSeatId,
+        isBot: true,
+      });
+
+      const updatedState = await this.emitMatchState(matchId);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'play_card_succeeded',
+        status: 'succeeded',
+        matchId,
+        seatId: pendingBotMove.seatId,
+        teamId: pendingBotMove.teamId,
+        playerId: pendingBotMove.playerId,
+        card: pendingBotMove.card,
+      });
+
+      await this.finalizeMatchIfFinished(matchId, updatedState);
+
+      if (updatedState.state !== 'in_progress') {
+        return;
+      }
+    }
   }
 
   handleConnection(socket: Socket): void {
@@ -652,6 +778,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       await this.emitMatchState(matchId);
+      await this.processBotTurns(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -749,8 +876,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      const state = await this.viewMatchStateUseCase.execute({ matchId });
-      this.server.to(matchId).emit('match-state', state);
+      const state = await this.emitMatchState(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -764,32 +890,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         card,
       });
 
-      if (state.state === 'finished' && this.roomManager.tryMarkRatingApplied(matchId)) {
-        const score = state.score;
+      await this.finalizeMatchIfFinished(matchId, state);
 
-        if (score.playerOne !== score.playerTwo) {
-          const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
-          const teamUserIds = this.roomManager.getTeamUserIds(matchId);
-
-          const winnerUserIds = winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2;
-          const loserUserIds = winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1;
-
-          await this.updateRatingUseCase.execute({
-            winnerUserIds,
-            loserUserIds,
-          });
-
-          this.logGateway('log', {
-            layer: 'gateway',
-            event: 'match_finished',
-            status: 'succeeded',
-            matchId,
-            teamId: winnerTeamId,
-          });
-
-          const ranking = await this.getRankingUseCase.execute({ limit: 20 });
-          this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
-        }
+      if (state.state === 'in_progress') {
+        await this.processBotTurns(matchId);
       }
 
       return { event: 'card-played', data: { matchId: result.matchId } };
