@@ -406,3 +406,51 @@ describe('RoomManager bot fill (2v2)', () => {
     ]);
   });
 });
+
+describe('RoomManager bot profiles', () => {
+  it('assigns deterministic bot profiles by seat in 2v2 mode', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '2v2');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
+    expect(roomManager.getBotProfile('match-1', 'T1B')).toBe('cautious');
+    expect(roomManager.getBotProfile('match-1', 'T2B')).toBe('balanced');
+  });
+
+  it('assigns deterministic bot profile by seat in 1v1 mode', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
+  });
+
+  it('returns null for human seats', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '2v2');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomManager.getBotProfile('match-1', 'T1A')).toBeNull();
+  });
+
+  it('returns null after a human replaces a bot seat', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-1', '1v1');
+    roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
+
+    roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
+
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBeNull();
+  });
+});
