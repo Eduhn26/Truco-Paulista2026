@@ -32,6 +32,12 @@ const LS = {
   },
 };
 
+/**
+ * NOTE:
+ * This file is now legacy/debug-only.
+ * The real match flow must rely on backend-driven room-state, match-state and match-state:private.
+ * Keep these helpers only as a non-authoritative fallback for visual experiments.
+ */
 export function loadLocalHand(matchId: string): LocalHandState | null {
   const handNo = getCurrentHandNo(matchId);
   if (!handNo) {
@@ -80,9 +86,13 @@ export function startLocalHand(matchId: string, viraRankChosen: Rank): LocalHand
   for (let i = 0; i < 3; i += 1) {
     for (const seatId of SEATS) {
       const nextCard = deck.pop();
-      if (nextCard) {
-        (hands[seatId] ??= []).push(nextCard);
+      if (!nextCard) {
+        continue;
       }
+
+      const seatHand = hands[seatId] ?? [];
+      seatHand.push(nextCard);
+      hands[seatId] = seatHand;
     }
   }
 
@@ -177,12 +187,29 @@ export function clearPlayedCards(hand: LocalHandState): LocalHandState {
   return nextHand;
 }
 
+export function clearLocalHand(matchId: string): void {
+  const handNo = getCurrentHandNo(matchId);
+
+  try {
+    window.localStorage.removeItem(LS.keyCurrentHand(matchId));
+
+    if (handNo) {
+      window.localStorage.removeItem(LS.keyHand(matchId, handNo));
+    }
+  } catch {
+    // NOTE: This cleanup is best-effort only.
+  }
+}
+
 function persistLocalHand(hand: LocalHandState): void {
   try {
-    window.localStorage.setItem(LS.keyCurrentHand(hand.matchId), JSON.stringify({ handNo: hand.handNo }));
+    window.localStorage.setItem(
+      LS.keyCurrentHand(hand.matchId),
+      JSON.stringify({ handNo: hand.handNo }),
+    );
     window.localStorage.setItem(LS.keyHand(hand.matchId, hand.handNo), JSON.stringify(hand));
   } catch {
-    // NOTE: Local simulation is a progressive enhancement for the UI.
+    // NOTE: Local simulation is a progressive enhancement for debug-only UI experiments.
   }
 }
 
@@ -237,12 +264,10 @@ function mulberry32(seed: number): () => number {
 
   return function nextRandom(): number {
     state += 0x6d2b79f5;
-
-    let temp = state;
-    temp = Math.imul(temp ^ (temp >>> 15), temp | 1);
-    temp ^= temp + Math.imul(temp ^ (temp >>> 7), temp | 61);
-
-    return ((temp ^ (temp >>> 14)) >>> 0) / 4294967296;
+    let result = state;
+    result = Math.imul(result ^ (result >>> 15), result | 1);
+    result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
+    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
   };
 }
 

@@ -11,7 +11,6 @@ import { GameSocketClient } from '../services/socket/gameSocketClient';
 import type {
   CardPayload,
   MatchStatePayload,
-  MatchStateRoundPayload,
   PlayerAssignedPayload,
   Rank,
   RoomStatePayload,
@@ -46,10 +45,10 @@ export function MatchPage() {
     initialSnapshot?.roomState ?? null,
   );
   const [publicMatchState, setPublicMatchState] = useState<MatchStatePayload | null>(
-    initialSnapshot?.matchState ?? null,
+    initialSnapshot?.publicMatchState ?? null,
   );
   const [privateMatchState, setPrivateMatchState] = useState<MatchStatePayload | null>(
-    initialSnapshot?.matchState ?? null,
+    initialSnapshot?.privateMatchState ?? null,
   );
   const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(
     initialSnapshot?.playerAssigned ?? null,
@@ -65,11 +64,13 @@ export function MatchPage() {
 
   function persistLiveSnapshot(next: {
     nextRoomState?: RoomStatePayload | null;
-    nextMatchState?: MatchStatePayload | null;
+    nextPublicMatchState?: MatchStatePayload | null;
+    nextPrivateMatchState?: MatchStatePayload | null;
     nextPlayerAssigned?: PlayerAssignedPayload | null;
   }): void {
     const snapshotMatchId =
-      next.nextMatchState?.matchId ||
+      next.nextPrivateMatchState?.matchId ||
+      next.nextPublicMatchState?.matchId ||
       next.nextRoomState?.matchId ||
       next.nextPlayerAssigned?.matchId ||
       effectiveMatchId;
@@ -80,7 +81,8 @@ export function MatchPage() {
 
     saveMatchSnapshot(snapshotMatchId, {
       roomState: next.nextRoomState ?? roomState,
-      matchState: next.nextMatchState ?? privateMatchState ?? publicMatchState,
+      publicMatchState: next.nextPublicMatchState ?? publicMatchState,
+      privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
       playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
     });
   }
@@ -118,7 +120,6 @@ export function MatchPage() {
         },
         onPlayerAssigned: (payload) => {
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
-
           if (!sameMatch) {
             return;
           }
@@ -142,6 +143,7 @@ export function MatchPage() {
           }
 
           setPublicMatchState(payload);
+          persistLiveSnapshot({ nextPublicMatchState: payload });
           appendLog('Received public match-state.');
         },
         onPrivateMatchState: (payload) => {
@@ -150,7 +152,7 @@ export function MatchPage() {
           }
 
           setPrivateMatchState(payload);
-          persistLiveSnapshot({ nextMatchState: payload });
+          persistLiveSnapshot({ nextPrivateMatchState: payload });
           appendLog('Received private match-state.');
         },
         onHandStarted: (payload) => {
@@ -299,14 +301,14 @@ export function MatchPage() {
     <section className="grid gap-6">
       <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-          Phase 12.M
+          Phase 12.N
         </p>
 
         <h1 className="mt-3 text-3xl font-black tracking-tight">Match {resolvedMatchId || '-'}</h1>
 
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          A UI agora mostra melhor o desfecho da mão: resultado da última rodada, quantidade de
-          rodadas jogadas e call to action claro para iniciar a próxima mão.
+          O frontend agora está consolidado em torno do estado real do backend: mesa pública,
+          visão privada do jogador e snapshot explícito para cada camada.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
