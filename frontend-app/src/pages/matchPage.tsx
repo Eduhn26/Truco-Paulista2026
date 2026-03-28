@@ -221,16 +221,25 @@ export function MatchPage() {
       .filter((card): card is CardPayload => card !== null);
   }, [currentPrivateHand]);
 
-  const latestRound = currentPublicHand?.rounds[currentPublicHand.rounds.length - 1] ?? null;
+  const rounds = currentPublicHand?.rounds ?? [];
+  const playedRounds = rounds.filter(
+    (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
+  );
+  const latestRound = playedRounds.length > 0 ? playedRounds[playedRounds.length - 1] : null;
+
   const playerOnePlayedCard = latestRound?.playerOneCard ?? null;
   const playerTwoPlayedCard = latestRound?.playerTwoCard ?? null;
 
   const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
-  const canStartHand = Boolean(
-    roomState?.canStart && publicMatchState?.state === 'waiting' && resolvedMatchId,
-  );
+  const handFinished = Boolean(currentPublicHand?.finished);
+  const matchWaiting = publicMatchState?.state === 'waiting';
+  const canStartHand = Boolean(roomState?.canStart && matchWaiting && resolvedMatchId);
   const canPlayCard = Boolean(
-    privateMatchState?.state === 'in_progress' && isMyTurn && mySeat && myCards.length > 0,
+    privateMatchState?.state === 'in_progress' &&
+      !handFinished &&
+      isMyTurn &&
+      mySeat &&
+      myCards.length > 0,
   );
 
   const seatCards: TableSeatView[] = visibleSeatOrder.map((seatId) => {
@@ -243,6 +252,15 @@ export function MatchPage() {
       isCurrentTurn: roomState?.currentTurnSeatId === seatId,
       isMine: mySeat === seatId,
     };
+  });
+
+  const handStatus = getHandStatus({
+    publicMatchState,
+    currentPublicHand,
+    isMyTurn,
+    canStartHand,
+    myCardsCount: myCards.length,
+    playedRoundsCount: playedRounds.length,
   });
 
   function handleRefreshState(): void {
@@ -281,14 +299,14 @@ export function MatchPage() {
     <section className="grid gap-6">
       <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-          Phase 12.K
+          Phase 12.M
         </p>
 
         <h1 className="mt-3 text-3xl font-black tracking-tight">Match {resolvedMatchId || '-'}</h1>
 
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          A mesa agora mostra melhor o que já está acontecendo no backend: modo 1v1 sem seats
-          fantasmas, cartas públicas por lado e mão privada do jogador separada da mesa.
+          A UI agora mostra melhor o desfecho da mão: resultado da última rodada, quantidade de
+          rodadas jogadas e call to action claro para iniciar a próxima mão.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
@@ -323,7 +341,11 @@ export function MatchPage() {
             type="button"
             onClick={handleStartHand}
             disabled={!canStartHand}
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              canStartHand
+                ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20'
+                : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
+            }`}
           >
             Start next hand
           </button>
@@ -334,7 +356,9 @@ export function MatchPage() {
         <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
           <div className="rounded-[2rem] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.18),_transparent_55%),linear-gradient(180deg,rgba(10,40,22,0.85),rgba(10,32,22,0.65))] p-6">
             <div className="grid gap-6">
-              <div className={`grid gap-4 ${isOneVsOne ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+              <div
+                className={`grid gap-4 ${isOneVsOne ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}
+              >
                 {seatCards.map((seat) => (
                   <div
                     key={seat.seatId}
@@ -367,14 +391,18 @@ export function MatchPage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Team T1 card</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    Team T1 card
+                  </div>
                   <div className="mt-4 flex min-h-24 items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 text-2xl font-black text-slate-100">
                     {playerOnePlayedCard ?? '—'}
                   </div>
                 </div>
 
                 <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Team T2 card</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    Team T2 card
+                  </div>
                   <div className="mt-4 flex min-h-24 items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 text-2xl font-black text-slate-100">
                     {playerTwoPlayedCard ?? '—'}
                   </div>
@@ -398,18 +426,84 @@ export function MatchPage() {
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Round result</div>
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Last round
+                    </div>
                     <div className="mt-2 text-sm font-bold text-slate-100">
-                      {latestRound?.result ?? '-'}
+                      {formatRoundResult(latestRound?.result ?? null)}
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
                     <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Score</div>
                     <div className="mt-2 text-sm font-bold text-slate-100">
-                      T1 {publicMatchState?.score.playerOne ?? 0} × T2 {publicMatchState?.score.playerTwo ?? 0}
+                      T1 {publicMatchState?.score.playerOne ?? 0} × T2{' '}
+                      {publicMatchState?.score.playerTwo ?? 0}
                     </div>
                   </div>
+                </div>
+
+                <div
+                  className={`mt-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
+                    handStatus.variant === 'success'
+                      ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300'
+                      : handStatus.variant === 'warning'
+                        ? 'border-amber-400/20 bg-amber-500/10 text-amber-200'
+                        : 'border-white/10 bg-slate-900/60 text-slate-200'
+                  }`}
+                >
+                  {handStatus.label}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-bold">Rounds played</h2>
+                  <span className="rounded-full bg-slate-700/50 px-3 py-1 text-xs font-bold text-slate-200">
+                    {playedRounds.length} / 3
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  {[0, 1, 2].map((index) => {
+                    const round = rounds[index] ?? null;
+                    const played = Boolean(round?.playerOneCard || round?.playerTwoCard);
+
+                    return (
+                      <div
+                        key={index}
+                        className={`rounded-2xl border p-4 ${
+                          played
+                            ? 'border-white/10 bg-slate-900/60'
+                            : 'border-dashed border-white/10 bg-slate-950/30'
+                        }`}
+                      >
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                          Round {index + 1}
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-400">T1</span>
+                            <span className="font-mono text-slate-100">
+                              {round?.playerOneCard ?? '—'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-400">T2</span>
+                            <span className="font-mono text-slate-100">
+                              {round?.playerTwoCard ?? '—'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 text-xs text-slate-400">
+                          Result: {formatRoundResult(round?.result ?? null)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -430,9 +524,11 @@ export function MatchPage() {
                 <div className="mt-4 flex min-h-28 flex-wrap gap-3">
                   {myCards.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-4 py-6 text-sm text-slate-400">
-                      {privateMatchState?.state === 'in_progress'
-                        ? 'Aguardando mão privada.'
-                        : 'Aguardando start-hand.'}
+                      {handFinished
+                        ? 'Mão encerrada. A terceira carta não será usada se a mão já foi decidida.'
+                        : privateMatchState?.state === 'in_progress'
+                          ? 'Aguardando mão privada.'
+                          : 'Aguardando start-hand.'}
                     </div>
                   ) : (
                     myCards.map((card) => (
@@ -464,6 +560,13 @@ export function MatchPage() {
                     Viewer:{' '}
                     <span className="font-mono text-slate-200">
                       {currentPrivateHand?.viewerPlayerId ?? '-'}
+                    </span>
+                  </div>
+
+                  <div>
+                    Hand finished:{' '}
+                    <span className="font-mono text-slate-200">
+                      {String(currentPublicHand?.finished ?? false)}
                     </span>
                   </div>
                 </div>
@@ -516,7 +619,9 @@ export function MatchPage() {
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">currentTurnSeatId</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                currentTurnSeatId
+              </div>
               <div className="mt-2 font-mono text-sm text-slate-100">
                 {roomState?.currentTurnSeatId || '-'}
               </div>
@@ -552,6 +657,63 @@ export function MatchPage() {
       </section>
     </section>
   );
+}
+
+function formatRoundResult(result: string | null): string {
+  if (!result) return '-';
+  if (result === 'P1') return 'Team T1';
+  if (result === 'P2') return 'Team T2';
+  if (result === 'TIE') return 'Tie';
+  return result;
+}
+
+function getHandStatus(input: {
+  publicMatchState: MatchStatePayload | null;
+  currentPublicHand: MatchStatePayload['currentHand'] | null;
+  isMyTurn: boolean;
+  canStartHand: boolean;
+  myCardsCount: number;
+  playedRoundsCount: number;
+}): { label: string; variant: 'neutral' | 'success' | 'warning' } {
+  if (input.publicMatchState?.state === 'finished') {
+    return {
+      label: 'Partida encerrada. O placar final já foi definido.',
+      variant: 'success',
+    };
+  }
+
+  if (input.currentPublicHand?.finished) {
+    return {
+      label: `Mão encerrada em ${input.playedRoundsCount} rodada(s). Você já pode iniciar a próxima mão.`,
+      variant: 'success',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'waiting' && input.canStartHand) {
+    return {
+      label: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
+      variant: 'neutral',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'in_progress' && input.isMyTurn && input.myCardsCount > 0) {
+    return {
+      label: 'É o seu turno. Escolha uma carta da sua mão.',
+      variant: 'warning',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'in_progress') {
+    return {
+      label: 'A mão está em andamento. Aguarde a próxima jogada.',
+      variant: 'neutral',
+    };
+  }
+
+  return {
+    label: 'Aguardando início da mão.',
+    variant: 'neutral',
+  };
 }
 
 function suitSymbol(suit: string): string {
