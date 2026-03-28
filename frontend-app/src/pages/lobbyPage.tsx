@@ -20,11 +20,17 @@ export function LobbyPage() {
   const [matchId, setMatchId] = useState('');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
   const [matchState, setMatchState] = useState<MatchStatePayload | null>(null);
+  const [privateMatchState, setPrivateMatchState] = useState<MatchStatePayload | null>(null);
   const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
 
   const canConnect = Boolean(session?.backendUrl && session?.authToken);
-  const derivedMatchId = matchState?.matchId || roomState?.matchId || playerAssigned?.matchId || matchId;
+  const derivedMatchId =
+    privateMatchState?.matchId ||
+    matchState?.matchId ||
+    roomState?.matchId ||
+    playerAssigned?.matchId ||
+    matchId;
 
   function appendLog(line: string): void {
     setEventLog((current) =>
@@ -49,7 +55,7 @@ export function LobbyPage() {
 
     saveMatchSnapshot(snapshotMatchId, {
       roomState: next.nextRoomState ?? roomState,
-      matchState: next.nextMatchState ?? matchState,
+      matchState: next.nextMatchState ?? privateMatchState ?? matchState,
       playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
     });
   }
@@ -98,8 +104,13 @@ export function LobbyPage() {
         },
         onMatchState: (payload) => {
           setMatchState(payload);
+          appendLog('Received public match-state.');
+        },
+        onPrivateMatchState: (payload) => {
+          setPrivateMatchState(payload);
+          setMatchState(payload);
           persistSnapshot({ nextMatchState: payload });
-          appendLog('Received match-state.');
+          appendLog('Received private match-state.');
         },
       },
     );
@@ -112,8 +123,8 @@ export function LobbyPage() {
   }
 
   function handleCreateMatch(): void {
-    clientRef.current?.emitCreateMatch();
-    appendLog('Emitted create-match.');
+    clientRef.current?.emitCreateMatch('1v1', 12);
+    appendLog('Emitted create-match (1v1, 12).');
   }
 
   function handleJoinMatch(): void {
@@ -148,6 +159,7 @@ export function LobbyPage() {
   }
 
   const roomPlayers = useMemo(() => roomState?.players ?? [], [roomState]);
+  const displayedMatchState = privateMatchState ?? matchState;
 
   return (
     <section className="grid gap-6 xl:grid-cols-[360px_1fr]">
@@ -341,6 +353,9 @@ export function LobbyPage() {
                   <div className="mt-2 text-sm text-slate-400">
                     ready: {String(player.ready)}
                   </div>
+                  <div className="mt-1 text-sm text-slate-400">
+                    bot: {String(player.isBot ?? false)}
+                  </div>
                 </div>
               ))
             )}
@@ -350,27 +365,54 @@ export function LobbyPage() {
         <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold">Match state</h2>
-            <span className="text-xs text-slate-500">server-driven</span>
+            <span className="text-xs text-slate-500">
+              {privateMatchState ? 'private view' : 'public view'}
+            </span>
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 break-all font-mono text-sm">{matchState?.matchId || '-'}</div>
+              <div className="mt-2 break-all font-mono text-sm">
+                {displayedMatchState?.matchId || '-'}
+              </div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">state</div>
-              <div className="mt-2 font-mono text-sm">{matchState?.state || '-'}</div>
+              <div className="mt-2 font-mono text-sm">{displayedMatchState?.state || '-'}</div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">score</div>
               <div className="mt-2 font-mono text-sm">
-                T1 {matchState?.score.playerOne ?? 0} × T2 {matchState?.score.playerTwo ?? 0}
+                T1 {displayedMatchState?.score.playerOne ?? 0} × T2{' '}
+                {displayedMatchState?.score.playerTwo ?? 0}
               </div>
             </div>
           </div>
+
+          {displayedMatchState?.currentHand ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Player one hand
+                </div>
+                <div className="mt-2 font-mono text-sm text-slate-100">
+                  {displayedMatchState.currentHand.playerOneHand.join(', ') || '-'}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Player two hand
+                </div>
+                <div className="mt-2 font-mono text-sm text-slate-100">
+                  {displayedMatchState.currentHand.playerTwoHand.join(', ') || '-'}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">

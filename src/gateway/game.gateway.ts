@@ -83,31 +83,31 @@ type GatewayErrorType =
 type GatewayLogContext = {
   layer: 'gateway';
   event:
-    | 'socket_connected'
-    | 'socket_disconnected'
-    | 'socket_disconnected_without_match'
-    | 'create_match_requested'
-    | 'create_match_succeeded'
-    | 'create_match_rejected'
-    | 'join_match_requested'
-    | 'join_match_succeeded'
-    | 'join_match_rejected'
-    | 'set_ready_requested'
-    | 'set_ready_succeeded'
-    | 'set_ready_rejected'
-    | 'start_hand_requested'
-    | 'start_hand_succeeded'
-    | 'start_hand_rejected'
-    | 'play_card_requested'
-    | 'play_card_succeeded'
-    | 'play_card_rejected'
-    | 'match_finished'
-    | 'get_ranking_requested'
-    | 'get_ranking_succeeded'
-    | 'get_ranking_rejected'
-    | 'get_state_requested'
-    | 'get_state_succeeded'
-    | 'get_state_rejected';
+  | 'socket_connected'
+  | 'socket_disconnected'
+  | 'socket_disconnected_without_match'
+  | 'create_match_requested'
+  | 'create_match_succeeded'
+  | 'create_match_rejected'
+  | 'join_match_requested'
+  | 'join_match_succeeded'
+  | 'join_match_rejected'
+  | 'set_ready_requested'
+  | 'set_ready_succeeded'
+  | 'set_ready_rejected'
+  | 'start_hand_requested'
+  | 'start_hand_succeeded'
+  | 'start_hand_rejected'
+  | 'play_card_requested'
+  | 'play_card_succeeded'
+  | 'play_card_rejected'
+  | 'match_finished'
+  | 'get_ranking_requested'
+  | 'get_ranking_succeeded'
+  | 'get_ranking_rejected'
+  | 'get_state_requested'
+  | 'get_state_succeeded'
+  | 'get_state_rejected';
   status: 'started' | 'succeeded' | 'rejected' | 'connected' | 'disconnected';
   socketId?: string;
   matchId?: string;
@@ -155,7 +155,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly roomManager: RoomManager,
     @Inject(BOT_DECISION_PORT)
     private readonly botDecisionPort: BotDecisionPort,
-  ) {}
+  ) { }
 
   private formatGatewayLog(context: GatewayLogContext): string {
     return JSON.stringify({
@@ -811,6 +811,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const result = await this.startHandUseCase.execute(dto);
 
       const roomState = this.roomManager.beginHand(matchId);
+      this.server.to(matchId).emit('room-state', roomState);
 
       this.server.to(matchId).emit('hand-started', {
         matchId,

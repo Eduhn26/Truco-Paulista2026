@@ -81,7 +81,7 @@ export function startLocalHand(matchId: string, viraRankChosen: Rank): LocalHand
     for (const seatId of SEATS) {
       const nextCard = deck.pop();
       if (nextCard) {
-        hands[seatId].push(nextCard);
+        (hands[seatId] ??= []).push(nextCard);
       }
     }
   }
