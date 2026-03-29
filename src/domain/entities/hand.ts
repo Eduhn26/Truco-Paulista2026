@@ -1,27 +1,48 @@
 ﻿import type { PlayerId } from '../value-objects/player-id';
 import type { RoundResult } from '../value-objects/round-result';
 import type { Rank } from '../value-objects/rank';
-import type { Card } from '../value-objects/card';
+import { Card } from '../value-objects/card';
 
 import { Round, type RoundSnapshot } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
+import { dealHandsFromViraRank } from '../services/deck';
 
 export type HandSnapshot = {
   viraRank: Rank;
   rounds: RoundSnapshot[];
   finished: boolean;
+  playerOneHand: string[];
+  playerTwoHand: string[];
 };
 
 export class Hand {
   private readonly rounds: Round[];
+  private readonly playerOneHand: Card[];
+  private readonly playerTwoHand: Card[];
   private finished = false;
 
-  constructor(private readonly viraRank: Rank) {
+constructor(
+  private readonly viraRank: Rank,
+  playerOneHand: Card[] = [],
+  playerTwoHand: Card[] = [],
+) {
     this.rounds = [new Round(this.viraRank)];
+    this.playerOneHand = [...playerOneHand];
+    this.playerTwoHand = [...playerTwoHand];
+  }
+
+  static start(viraRank: Rank): Hand {
+    const dealtHands = dealHandsFromViraRank(viraRank);
+
+    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand);
   }
 
   static fromSnapshot(snapshot: HandSnapshot): Hand {
-    const hand = new Hand(snapshot.viraRank);
+    const hand = new Hand(
+      snapshot.viraRank,
+      snapshot.playerOneHand.map((card) => Card.from(card)),
+      snapshot.playerTwoHand.map((card) => Card.from(card)),
+    );
 
     const restoredRounds = snapshot.rounds.map((round) => Round.fromSnapshot(round));
     hand.rounds.splice(
@@ -36,6 +57,8 @@ export class Hand {
 
   play(player: PlayerId, card: Card): void {
     if (this.finished) throw new InvalidMoveError('Hand is already finished.');
+
+    this.removeCardFromHand(player, card);
 
     const currentRound = this.getCurrentRound();
     currentRound.play(player, card);
@@ -62,11 +85,17 @@ export class Hand {
     return this.resolveWinner();
   }
 
+  getPlayerHand(player: PlayerId): Card[] {
+    return [...this.getCardsByPlayer(player)];
+  }
+
   toSnapshot(): HandSnapshot {
     return {
       viraRank: this.viraRank,
       rounds: this.rounds.map((round) => round.toSnapshot()),
       finished: this.finished,
+      playerOneHand: this.playerOneHand.map((card) => card.toString()),
+      playerTwoHand: this.playerTwoHand.map((card) => card.toString()),
     };
   }
 
@@ -133,5 +162,20 @@ export class Hand {
     }
 
     return wins;
+  }
+
+  private getCardsByPlayer(player: PlayerId): Card[] {
+    return player === 'P1' ? this.playerOneHand : this.playerTwoHand;
+  }
+
+  private removeCardFromHand(player: PlayerId, card: Card): void {
+    const hand = this.getCardsByPlayer(player);
+    const cardIndex = hand.findIndex((currentCard) => currentCard.equals(card));
+
+    if (cardIndex < 0) {
+      throw new InvalidMoveError(`Player ${player} does not have card ${card.toString()}.`);
+    }
+
+    hand.splice(cardIndex, 1);
   }
 }

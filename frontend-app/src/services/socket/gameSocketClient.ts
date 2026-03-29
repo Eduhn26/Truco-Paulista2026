@@ -56,6 +56,10 @@ export class GameSocketClient {
       events.onMatchState?.(normalizeMatchStatePayload(payload));
     });
 
+    this.socket.on('match-state:private', (payload: unknown) => {
+      events.onPrivateMatchState?.(normalizeMatchStatePayload(payload));
+    });
+
     this.socket.on('ranking', (payload: unknown) => {
       events.onRanking?.(normalizeRankingPayload(payload));
     });
@@ -80,8 +84,8 @@ export class GameSocketClient {
     this.socket = null;
   }
 
-  emitCreateMatch(): void {
-    this.socket?.emit('create-match', {});
+  emitCreateMatch(mode: '1v1' | '2v2' = '1v1', pointsToWin = 12): void {
+    this.socket?.emit('create-match', { mode, pointsToWin });
   }
 
   emitJoinMatch(matchId: string): void {

@@ -52,6 +52,10 @@ export class Match {
     return this.score;
   }
 
+  getCurrentHand(): Hand | null {
+    return this.currentHand;
+  }
+
   start(viraRank: Rank): void {
     if (this.state === 'finished') {
       throw new InvalidMoveError('Match is already finished.');
@@ -59,7 +63,7 @@ export class Match {
 
     if (this.state !== 'waiting') return;
 
-    this.currentHand = new Hand(viraRank);
+    this.currentHand = Hand.start(viraRank);
     this.state = 'in_progress';
   }
 

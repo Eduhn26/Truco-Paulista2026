@@ -6,8 +6,15 @@ import type {
 
 export type MatchSnapshot = {
   roomState: RoomStatePayload | null;
-  matchState: MatchStatePayload | null;
+  publicMatchState: MatchStatePayload | null;
+  privateMatchState: MatchStatePayload | null;
   playerAssigned: PlayerAssignedPayload | null;
+};
+
+type LegacyMatchSnapshot = {
+  roomState?: RoomStatePayload | null;
+  matchState?: MatchStatePayload | null;
+  playerAssigned?: PlayerAssignedPayload | null;
 };
 
 const STORAGE_PREFIX = 'truco-paulista:match-snapshot';
@@ -34,15 +41,31 @@ export function loadMatchSnapshot(matchId: string): MatchSnapshot | null {
       return null;
     }
 
-    const parsed = JSON.parse(raw) as Partial<MatchSnapshot>;
+    const parsed = JSON.parse(raw) as Partial<MatchSnapshot> & LegacyMatchSnapshot;
+
+    const legacyMatchState = parsed.matchState ?? null;
 
     return {
       roomState: parsed.roomState ?? null,
-      matchState: parsed.matchState ?? null,
+      publicMatchState: parsed.publicMatchState ?? legacyMatchState,
+      privateMatchState: parsed.privateMatchState ?? legacyMatchState,
       playerAssigned: parsed.playerAssigned ?? null,
     };
   } catch {
     return null;
+  }
+}
+
+export function clearMatchSnapshot(matchId: string): void {
+  if (!matchId) {
+    return;
+  }
+
+  window.sessionStorage.removeItem(storageKey(matchId));
+
+  const activeMatchId = getLastActiveMatchId();
+  if (activeMatchId === matchId) {
+    window.sessionStorage.removeItem(ACTIVE_MATCH_KEY);
   }
 }
 

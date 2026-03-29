@@ -1,7 +1,11 @@
+import type { MatchMode } from '@game/application/dtos/requests/create-match.request.dto';
+import type { BotProfile } from '@game/application/ports/bot-decision.port';
+
 import { teamFromSeat, type SeatId, type TeamId } from './seat-id';
 
 type RoomState = {
   matchId: string;
+  mode: MatchMode;
   socketsBySeat: Map<SeatId, string>;
   readyBySeat: Map<SeatId, boolean>;
   currentTurnSeatId: SeatId | null;
@@ -21,20 +25,31 @@ export type PlayerSession = {
   userId: string;
   playerToken: string;
   socketId: string;
+  isBot: boolean;
+  botProfile: BotProfile | null;
 };
 
 export type RoomStateDto = {
   matchId: string;
+  mode: MatchMode;
   players: Array<{
     seatId: SeatId;
     teamId: TeamId;
     ready: boolean;
+    isBot: boolean;
   }>;
   canStart: boolean;
   currentTurnSeatId: SeatId | null;
 };
 
-const TURN_ORDER: ReadonlyArray<SeatId> = ['T1A', 'T2A', 'T1B', 'T2B'];
+const TURN_ORDER_BY_MODE: Readonly<Record<MatchMode, ReadonlyArray<SeatId>>> = {
+  '1v1': ['T1A', 'T2A'],
+  '2v2': ['T1A', 'T2A', 'T1B', 'T2B'],
+};
+
+const BOT_SOCKET_PREFIX = 'bot-socket';
+const BOT_TOKEN_PREFIX = 'bot-token';
+const BOT_USER_PREFIX = 'bot-user';
 
 function tokenKey(matchId: string, playerToken: string): string {
   return `${matchId}::${playerToken}`;
@@ -48,11 +63,19 @@ export class RoomManager {
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
   private readonly sessionsByTokenKey = new Map<string, PlayerSession>();
 
-  ensureRoom(matchId: string): void {
-    if (this.roomsByMatchId.has(matchId)) return;
+  ensureRoom(matchId: string, mode?: MatchMode): void {
+    const existingRoom = this.roomsByMatchId.get(matchId);
+
+    if (existingRoom) {
+      if (mode !== undefined) {
+        existingRoom.mode = mode;
+      }
+      return;
+    }
 
     this.roomsByMatchId.set(matchId, {
       matchId,
+      mode: mode ?? '2v2',
       socketsBySeat: new Map(),
       readyBySeat: new Map(),
       currentTurnSeatId: null,
@@ -93,31 +116,45 @@ export class RoomManager {
       return reattached;
     }
 
+    const reusableBotSeatId = this.firstBotSeat(room);
+
+    if (reusableBotSeatId) {
+      return this.replaceBotWithHuman(room, socketId, identity, reusableBotSeatId);
+    }
+
     const seatId = this.nextFreeSeat(room);
     if (!seatId) {
-      throw new Error('match is full (2v2 mode)');
+      throw new Error(`match is full (${room.mode} mode)`);
     }
+
+    const session = this.createHumanSession(matchId, seatId, socketId, identity);
 
     room.socketsBySeat.set(seatId, socketId);
     room.readyBySeat.set(seatId, false);
-
-    const teamId = teamFromSeat(seatId);
-    const domainPlayerId: 'P1' | 'P2' = teamId === 'T1' ? 'P1' : 'P2';
-
-    const session: PlayerSession = {
-      matchId,
-      seatId,
-      teamId,
-      domainPlayerId,
-      userId: identity.userId,
-      playerToken: identity.playerToken,
-      socketId,
-    };
 
     this.sessionsBySocketId.set(socketId, session);
     this.sessionsByTokenKey.set(key, session);
 
     return session;
+  }
+
+  fillMissingSeatsWithBots(matchId: string): RoomStateDto {
+    const room = this.roomsByMatchId.get(matchId);
+    if (!room) throw new Error('room not found');
+
+    for (const seatId of this.getTurnOrder(room)) {
+      if (room.socketsBySeat.has(seatId)) {
+        continue;
+      }
+
+      const botSession = this.createBotSession(matchId, seatId);
+
+      room.socketsBySeat.set(seatId, botSession.socketId);
+      room.readyBySeat.set(seatId, true);
+      this.sessionsByTokenKey.set(tokenKey(matchId, botSession.playerToken), botSession);
+    }
+
+    return this.toDto(room);
   }
 
   leave(socketId: string): { matchId: string } | null {
@@ -138,6 +175,29 @@ export class RoomManager {
     return this.sessionsBySocketId.get(socketId) ?? null;
   }
 
+  getHumanSessions(matchId: string): PlayerSession[] {
+    const sessions: PlayerSession[] = [];
+
+    for (const session of this.sessionsByTokenKey.values()) {
+      if (session.matchId !== matchId || session.isBot) {
+        continue;
+      }
+
+      sessions.push(session);
+    }
+
+    return sessions;
+  }
+
+  getBotProfile(matchId: string, seatId: SeatId): BotProfile | null {
+    const session = this.getSessionBySeat(matchId, seatId);
+    if (!session || !session.isBot) {
+      return null;
+    }
+
+    return session.botProfile;
+  }
+
   setReady(socketId: string, ready: boolean): RoomStateDto {
     const session = this.sessionsBySocketId.get(socketId);
     if (!session) throw new Error('you must join a match first');
@@ -154,7 +214,7 @@ export class RoomManager {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) return false;
 
-    return TURN_ORDER.every((seatId) => {
+    return this.getTurnOrder(room).every((seatId) => {
       const hasSeat = room.socketsBySeat.has(seatId);
       const isReady = room.readyBySeat.get(seatId) === true;
       return hasSeat && isReady;
@@ -172,10 +232,10 @@ export class RoomManager {
     const room = this.roomsByMatchId.get(matchId);
     if (!room) throw new Error('room not found');
     if (!this.canStart(matchId)) {
-      throw new Error('all 4 players must be ready before starting the hand');
+      throw new Error(`all players must be ready before starting the hand in ${room.mode} mode`);
     }
 
-    room.currentTurnSeatId = TURN_ORDER[0]!;
+    room.currentTurnSeatId = this.getTurnOrder(room)[0] ?? null;
 
     return this.toDto(room);
   }
@@ -213,6 +273,7 @@ export class RoomManager {
 
     for (const session of this.sessionsByTokenKey.values()) {
       if (session.matchId !== matchId) continue;
+      if (session.isBot) continue;
 
       if (session.teamId === 'T1') {
         teamUserIds.T1.push(session.userId);
@@ -234,22 +295,34 @@ export class RoomManager {
   }
 
   private toDto(room: RoomState): RoomStateDto {
-    const players = TURN_ORDER.filter((seatId) => room.socketsBySeat.has(seatId)).map((seatId) => ({
-      seatId,
-      teamId: teamFromSeat(seatId),
-      ready: room.readyBySeat.get(seatId) === true,
-    }));
+    const players = this.getTurnOrder(room)
+      .filter((seatId) => room.socketsBySeat.has(seatId))
+      .map((seatId) => {
+        const session = this.getSessionBySeat(room.matchId, seatId);
+
+        return {
+          seatId,
+          teamId: teamFromSeat(seatId),
+          ready: room.readyBySeat.get(seatId) === true,
+          isBot: session?.isBot ?? false,
+        };
+      });
 
     return {
       matchId: room.matchId,
+      mode: room.mode,
       players,
       canStart: this.canStart(room.matchId),
       currentTurnSeatId: room.currentTurnSeatId,
     };
   }
 
+  private getTurnOrder(room: RoomState): ReadonlyArray<SeatId> {
+    return TURN_ORDER_BY_MODE[room.mode];
+  }
+
   private nextFreeSeat(room: RoomState): SeatId | null {
-    for (const seatId of TURN_ORDER) {
+    for (const seatId of this.getTurnOrder(room)) {
       if (!room.socketsBySeat.has(seatId)) {
         return seatId;
       }
@@ -259,7 +332,7 @@ export class RoomManager {
   }
 
   private firstOccupiedSeat(room: RoomState): SeatId | null {
-    for (const seatId of TURN_ORDER) {
+    for (const seatId of this.getTurnOrder(room)) {
       if (room.socketsBySeat.has(seatId)) {
         return seatId;
       }
@@ -269,17 +342,117 @@ export class RoomManager {
   }
 
   private nextOccupiedSeat(room: RoomState, currentSeatId: SeatId): SeatId | null {
-    const currentIndex = TURN_ORDER.indexOf(currentSeatId);
+    const turnOrder = this.getTurnOrder(room);
+    const currentIndex = turnOrder.indexOf(currentSeatId);
+
     if (currentIndex < 0) return this.firstOccupiedSeat(room);
 
-    for (let offset = 1; offset <= TURN_ORDER.length; offset += 1) {
-      const index = (currentIndex + offset) % TURN_ORDER.length;
-      const candidate = TURN_ORDER[index];
+    for (let offset = 1; offset <= turnOrder.length; offset += 1) {
+      const index = (currentIndex + offset) % turnOrder.length;
+      const candidate = turnOrder[index];
+
       if (candidate && room.socketsBySeat.has(candidate)) {
         return candidate;
       }
     }
 
     return null;
+  }
+
+  private createHumanSession(
+    matchId: string,
+    seatId: SeatId,
+    socketId: string,
+    identity: JoinPlayerIdentity,
+  ): PlayerSession {
+    const teamId = teamFromSeat(seatId);
+    const domainPlayerId: 'P1' | 'P2' = teamId === 'T1' ? 'P1' : 'P2';
+
+    return {
+      matchId,
+      seatId,
+      teamId,
+      domainPlayerId,
+      userId: identity.userId,
+      playerToken: identity.playerToken,
+      socketId,
+      isBot: false,
+      botProfile: null,
+    };
+  }
+
+  private createBotSession(matchId: string, seatId: SeatId): PlayerSession {
+    const teamId = teamFromSeat(seatId);
+    const domainPlayerId: 'P1' | 'P2' = teamId === 'T1' ? 'P1' : 'P2';
+
+    return {
+      matchId,
+      seatId,
+      teamId,
+      domainPlayerId,
+      userId: `${BOT_USER_PREFIX}:${matchId}:${seatId}`,
+      playerToken: `${BOT_TOKEN_PREFIX}:${matchId}:${seatId}`,
+      socketId: `${BOT_SOCKET_PREFIX}:${matchId}:${seatId}`,
+      isBot: true,
+      botProfile: this.resolveBotProfile(seatId),
+    };
+  }
+
+  private resolveBotProfile(seatId: SeatId): BotProfile {
+    const profileBySeat: Record<SeatId, BotProfile> = {
+      T1A: 'balanced',
+      T2A: 'aggressive',
+      T1B: 'cautious',
+      T2B: 'balanced',
+    };
+
+    return profileBySeat[seatId];
+  }
+
+  private firstBotSeat(room: RoomState): SeatId | null {
+    for (const seatId of this.getTurnOrder(room)) {
+      const session = this.getSessionBySeat(room.matchId, seatId);
+
+      if (session?.isBot) {
+        return seatId;
+      }
+    }
+
+    return null;
+  }
+
+  private getSessionBySeat(matchId: string, seatId: SeatId): PlayerSession | null {
+    for (const session of this.sessionsByTokenKey.values()) {
+      if (session.matchId === matchId && session.seatId === seatId) {
+        return session;
+      }
+    }
+
+    return null;
+  }
+
+  private replaceBotWithHuman(
+    room: RoomState,
+    socketId: string,
+    identity: JoinPlayerIdentity,
+    seatId: SeatId,
+  ): PlayerSession {
+    const existingBot = this.getSessionBySeat(room.matchId, seatId);
+
+    if (!existingBot || !existingBot.isBot) {
+      throw new Error('bot seat not found');
+    }
+
+    this.sessionsByTokenKey.delete(tokenKey(room.matchId, existingBot.playerToken));
+
+    const session = this.createHumanSession(room.matchId, seatId, socketId, identity);
+
+    room.socketsBySeat.set(seatId, socketId);
+    room.readyBySeat.set(seatId, false);
+
+    this.sessionsBySocketId.set(socketId, session);
+    this.sessionsByTokenKey.set(tokenKey(room.matchId, identity.playerToken), session);
+
+    return session;
   }
 }

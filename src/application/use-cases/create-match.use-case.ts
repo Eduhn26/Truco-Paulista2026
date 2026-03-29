@@ -1,5 +1,8 @@
 import type { MatchRepository } from '@game/application/ports/match.repository';
-import type { CreateMatchRequestDto } from '@game/application/dtos/requests/create-match.request.dto';
+import type {
+  CreateMatchRequestDto,
+  MatchMode,
+} from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import { Match } from '@game/domain/entities/match';
 
@@ -9,6 +12,11 @@ export class CreateMatchUseCase {
 
   async execute(request: CreateMatchRequestDto): Promise<CreateMatchResponseDto> {
     const pointsToWin = this.normalizePointsToWin(request.pointsToWin);
+
+    // NOTE:
+    // Match mode is an application/gateway concern for room composition.
+    // It must be validated here, but it must not leak into the Domain aggregate.
+    this.normalizeMode(request.mode);
 
     const match = new Match(pointsToWin);
     const matchId = await this.matchRepository.create(match);
@@ -25,6 +33,16 @@ export class CreateMatchUseCase {
 
     if (value <= 0) {
       throw new Error('pointsToWin must be greater than 0');
+    }
+
+    return value;
+  }
+
+  private normalizeMode(value: MatchMode | undefined): MatchMode {
+    if (value === undefined) return '2v2';
+
+    if (value !== '1v1' && value !== '2v2') {
+      throw new Error('mode must be either "1v1" or "2v2"');
     }
 
     return value;

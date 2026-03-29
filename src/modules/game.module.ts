@@ -7,11 +7,16 @@ import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-cas
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import {
+  BOT_DECISION_PORT,
+  type BotDecisionPort,
+} from '@game/application/ports/bot-decision.port';
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import { AuthModule } from '@game/auth/auth.module';
 import { GameGateway } from '@game/gateway/game.gateway';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
+import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
 import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
@@ -25,8 +30,10 @@ import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
     RoomManager,
     PrismaMatchRepository,
     PrismaPlayerProfileRepository,
+    HeuristicBotAdapter,
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
     { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
+    { provide: BOT_DECISION_PORT, useClass: HeuristicBotAdapter },
     {
       provide: CreateMatchUseCase,
       useFactory: (repo: MatchRepository) => new CreateMatchUseCase(repo),
