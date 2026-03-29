@@ -1,35 +1,42 @@
-import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
+export type BotProfile = 'balanced' | 'aggressive' | 'cautious';
 
-export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
-
-export type BotProfile = 'aggressive' | 'balanced' | 'cautious';
-
-export type BotRoomPlayerView = {
-  seatId: string;
-  teamId: 'T1' | 'T2';
-  ready: boolean;
-  isBot: boolean;
-};
-
-export type BotRoomStateView = {
-  currentTurnSeatId: string | null;
-  players: BotRoomPlayerView[];
-};
-
-export type BotDecisionRequest = {
-  matchId: string;
-  state: ViewMatchStateResponseDto;
-  roomState: BotRoomStateView;
-  profile?: BotProfile;
-};
-
-export type BotDecision = {
+export type BotPlayerView = {
   seatId: string;
   teamId: 'T1' | 'T2';
   playerId: 'P1' | 'P2';
-  card: string;
+  hand: string[];
 };
 
+export type BotRoundView = {
+  playerOneCard: string | null;
+  playerTwoCard: string | null;
+  finished: boolean;
+  result: 'P1' | 'P2' | 'TIE' | null;
+};
+
+export type BotDecisionContext = {
+  matchId: string;
+  profile: BotProfile;
+  viraRank: string;
+  currentRound: BotRoundView | null;
+  player: BotPlayerView;
+};
+
+export type BotDecision =
+  | {
+      action: 'play-card';
+      card: string;
+    }
+  | {
+      action: 'pass';
+      reason:
+        | 'not-bot-turn'
+        | 'no-current-hand'
+        | 'empty-hand'
+        | 'missing-round'
+        | 'unsupported-state';
+    };
+
 export interface BotDecisionPort {
-  decideNextMove(request: BotDecisionRequest): BotDecision | null;
+  decide(context: BotDecisionContext): BotDecision;
 }
