@@ -29,6 +29,11 @@ type TableSeatView = {
   isMine: boolean;
 };
 
+type HandOutcome = {
+  winnerLabel: string | null;
+  roundsPlayed: number;
+};
+
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -256,6 +261,7 @@ export function MatchPage() {
     };
   });
 
+  const handOutcome = getHandOutcome(playedRounds);
   const handStatus = getHandStatus({
     publicMatchState,
     currentPublicHand,
@@ -263,6 +269,7 @@ export function MatchPage() {
     canStartHand,
     myCardsCount: myCards.length,
     playedRoundsCount: playedRounds.length,
+    handOutcome,
   });
 
   function handleRefreshState(): void {
@@ -301,14 +308,14 @@ export function MatchPage() {
     <section className="grid gap-6">
       <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-          Phase 12.N
+          Phase 12.O
         </p>
 
         <h1 className="mt-3 text-3xl font-black tracking-tight">Match {resolvedMatchId || '-'}</h1>
 
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          O frontend agora está consolidado em torno do estado real do backend: mesa pública,
-          visão privada do jogador e snapshot explícito para cada camada.
+          Agora a UI destaca melhor quem venceu a mão, em quantas rodadas ela terminou e qual é a
+          próxima ação correta.
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
@@ -358,6 +365,27 @@ export function MatchPage() {
         <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
           <div className="rounded-[2rem] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.18),_transparent_55%),linear-gradient(180deg,rgba(10,40,22,0.85),rgba(10,32,22,0.65))] p-6">
             <div className="grid gap-6">
+              {handFinished ? (
+                <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
+                  <div className="text-xs uppercase tracking-[0.2em] text-emerald-300">
+                    Hand summary
+                  </div>
+                  <div className="mt-3 text-2xl font-black text-slate-100">
+                    {handOutcome.winnerLabel ?? 'Hand finished'}
+                  </div>
+                  <div className="mt-2 text-sm text-emerald-100/90">
+                    {handOutcome.roundsPlayed > 0
+                      ? `Hand finished in ${handOutcome.roundsPlayed} round(s).`
+                      : 'The hand has ended.'}
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-slate-950/30 px-4 py-3 text-sm text-slate-100">
+                    {canStartHand
+                      ? 'All players are ready. Click "Start next hand" to continue.'
+                      : 'Waiting for the next hand to be started.'}
+                  </div>
+                </div>
+              ) : null}
+
               <div
                 className={`grid gap-4 ${isOneVsOne ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}
               >
@@ -527,10 +555,10 @@ export function MatchPage() {
                   {myCards.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-4 py-6 text-sm text-slate-400">
                       {handFinished
-                        ? 'Mão encerrada. A terceira carta não será usada se a mão já foi decidida.'
+                        ? 'Hand ended. The 3rd card is not used when the winner is already defined.'
                         : privateMatchState?.state === 'in_progress'
-                          ? 'Aguardando mão privada.'
-                          : 'Aguardando start-hand.'}
+                          ? 'Waiting for private hand state.'
+                          : 'Waiting for start-hand.'}
                     </div>
                   ) : (
                     myCards.map((card) => (
@@ -661,6 +689,42 @@ export function MatchPage() {
   );
 }
 
+function getHandOutcome(
+  playedRounds: Array<{ result: string | null }>,
+): HandOutcome {
+  let playerOneWins = 0;
+  let playerTwoWins = 0;
+
+  for (const round of playedRounds) {
+    if (round.result === 'P1') {
+      playerOneWins += 1;
+    }
+
+    if (round.result === 'P2') {
+      playerTwoWins += 1;
+    }
+  }
+
+  if (playerOneWins > playerTwoWins) {
+    return {
+      winnerLabel: 'Team T1 won the hand',
+      roundsPlayed: playedRounds.length,
+    };
+  }
+
+  if (playerTwoWins > playerOneWins) {
+    return {
+      winnerLabel: 'Team T2 won the hand',
+      roundsPlayed: playedRounds.length,
+    };
+  }
+
+  return {
+    winnerLabel: null,
+    roundsPlayed: playedRounds.length,
+  };
+}
+
 function formatRoundResult(result: string | null): string {
   if (!result) return '-';
   if (result === 'P1') return 'Team T1';
@@ -676,6 +740,7 @@ function getHandStatus(input: {
   canStartHand: boolean;
   myCardsCount: number;
   playedRoundsCount: number;
+  handOutcome: HandOutcome;
 }): { label: string; variant: 'neutral' | 'success' | 'warning' } {
   if (input.publicMatchState?.state === 'finished') {
     return {
@@ -685,8 +750,12 @@ function getHandStatus(input: {
   }
 
   if (input.currentPublicHand?.finished) {
+    const winnerSegment = input.handOutcome.winnerLabel
+      ? `${input.handOutcome.winnerLabel}. `
+      : '';
+
     return {
-      label: `Mão encerrada em ${input.playedRoundsCount} rodada(s). Você já pode iniciar a próxima mão.`,
+      label: `${winnerSegment}Hand finished in ${input.playedRoundsCount} round(s). You can start the next hand now.`,
       variant: 'success',
     };
   }

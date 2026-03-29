@@ -53,11 +53,12 @@ export function LobbyPage() {
       return;
     }
 
-    saveMatchSnapshot(snapshotMatchId, {
-      roomState: next.nextRoomState ?? roomState,
-      matchState: next.nextMatchState ?? privateMatchState ?? matchState,
-      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
-    });
+   saveMatchSnapshot(snapshotMatchId, {
+  roomState: next.nextRoomState ?? roomState,
+  publicMatchState: next.nextMatchState ?? matchState,
+  privateMatchState: next.nextMatchState ?? privateMatchState ?? matchState,
+  playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
+});
   }
 
   function handleConnect(): void {
