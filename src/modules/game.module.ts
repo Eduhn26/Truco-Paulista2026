@@ -23,6 +23,8 @@ import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/
 
 import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
 
+const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
+
 @Module({
   imports: [PrismaModule, AuthModule],
   providers: [
@@ -33,7 +35,11 @@ import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
     HeuristicBotAdapter,
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
     { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
-    { provide: BOT_DECISION_PORT, useClass: HeuristicBotAdapter },
+    {
+      provide: BOT_DECISION_PORT,
+      useFactory: (adapter: BotDecisionPort) => adapter,
+      inject: [DEFAULT_BOT_DECISION_ADAPTER],
+    },
     {
       provide: CreateMatchUseCase,
       useFactory: (repo: MatchRepository) => new CreateMatchUseCase(repo),
