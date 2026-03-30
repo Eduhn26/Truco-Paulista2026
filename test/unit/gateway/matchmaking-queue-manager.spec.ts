@@ -1,0 +1,226 @@
+import {
+  MatchmakingQueueManager,
+  type MatchmakingMode,
+} from '@game/gateway/matchmaking/matchmaking-queue-manager';
+
+function createJoinRequest(overrides?: {
+  socketId?: string;
+  userId?: string;
+  playerToken?: string;
+  mode?: MatchmakingMode;
+  rating?: number;
+}) {
+  return {
+    socketId: overrides?.socketId ?? 'socket-1',
+    userId: overrides?.userId ?? 'user-1',
+    playerToken: overrides?.playerToken ?? 'token-1',
+    mode: overrides?.mode ?? '1v1',
+    rating: overrides?.rating ?? 1000,
+  };
+}
+
+describe('MatchmakingQueueManager', () => {
+  it('stores a player in the correct queue mode', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    const result = queueManager.join(
+      createJoinRequest({
+        mode: '2v2',
+        socketId: 'socket-2',
+        userId: 'user-2',
+        playerToken: 'token-2',
+      }),
+    );
+
+    expect(result.entry.mode).toBe('2v2');
+    expect(result.snapshot).toEqual({
+      mode: '2v2',
+      size: 1,
+      playersWaiting: [
+        expect.objectContaining({
+          socketId: 'socket-2',
+          userId: 'user-2',
+          playerToken: 'token-2',
+          rating: 1000,
+        }),
+      ],
+    });
+  });
+
+  it('keeps 1v1 and 2v2 queues isolated', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    queueManager.join(
+      createJoinRequest({
+        mode: '1v1',
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+      }),
+    );
+
+    queueManager.join(
+      createJoinRequest({
+        mode: '2v2',
+        socketId: 'socket-2',
+        userId: 'user-2',
+        playerToken: 'token-2',
+      }),
+    );
+
+    expect(queueManager.getQueueSnapshot('1v1').size).toBe(1);
+    expect(queueManager.getQueueSnapshot('2v2').size).toBe(1);
+    expect(queueManager.getQueueSnapshot('1v1').playersWaiting[0]?.userId).toBe('user-1');
+    expect(queueManager.getQueueSnapshot('2v2').playersWaiting[0]?.userId).toBe('user-2');
+  });
+
+  it('replaces an existing queued player when the same playerToken joins again', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-old',
+        userId: 'user-1',
+        playerToken: 'token-1',
+        mode: '1v1',
+      }),
+    );
+
+    const result = queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-new',
+        userId: 'user-1',
+        playerToken: 'token-1',
+        mode: '2v2',
+        rating: 1200,
+      }),
+    );
+
+    expect(queueManager.getQueueSnapshot('1v1').size).toBe(0);
+    expect(queueManager.getQueueSnapshot('2v2').size).toBe(1);
+    expect(result.entry.socketId).toBe('socket-new');
+    expect(result.entry.mode).toBe('2v2');
+    expect(result.entry.rating).toBe(1200);
+  });
+
+  it('removes a queued player by socketId', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+      }),
+    );
+
+    const removed = queueManager.leaveBySocketId('socket-1');
+
+    expect(removed).toEqual(
+      expect.objectContaining({
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+      }),
+    );
+    expect(queueManager.getQueueSnapshot('1v1').size).toBe(0);
+  });
+
+  it('removes a queued player by playerToken', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+      }),
+    );
+
+    const removed = queueManager.leaveByPlayerToken('token-1');
+
+    expect(removed).toEqual(
+      expect.objectContaining({
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+      }),
+    );
+    expect(queueManager.isQueued('token-1')).toBe(false);
+  });
+
+  it('tracks whether a playerToken is already queued', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    expect(queueManager.isQueued('token-1')).toBe(false);
+
+    queueManager.join(
+      createJoinRequest({
+        playerToken: 'token-1',
+      }),
+    );
+
+    expect(queueManager.isQueued('token-1')).toBe(true);
+  });
+
+  it('returns null when leave is called for a missing socket', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    expect(queueManager.leaveBySocketId('missing-socket')).toBeNull();
+  });
+
+  it('rejects invalid join payloads', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    expect(() =>
+      queueManager.join(
+        createJoinRequest({
+          userId: '   ',
+        }),
+      ),
+    ).toThrow('userId must not be empty');
+
+    expect(() =>
+      queueManager.join(
+        createJoinRequest({
+          mode: '3v3' as never,
+        }),
+      ),
+    ).toThrow('mode must be either 1v1 or 2v2');
+
+    expect(() =>
+      queueManager.join(
+        createJoinRequest({
+          rating: -1,
+        }),
+      ),
+    ).toThrow('rating must be a non-negative integer');
+  });
+
+  it('can clear all queues explicitly', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-1',
+        userId: 'user-1',
+        playerToken: 'token-1',
+        mode: '1v1',
+      }),
+    );
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-2',
+        userId: 'user-2',
+        playerToken: 'token-2',
+        mode: '2v2',
+      }),
+    );
+
+    queueManager.clear();
+
+    expect(queueManager.getQueueSnapshot('1v1').size).toBe(0);
+    expect(queueManager.getQueueSnapshot('2v2').size).toBe(0);
+  });
+});

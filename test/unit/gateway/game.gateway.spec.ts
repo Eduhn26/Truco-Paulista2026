@@ -1,5 +1,17 @@
 import { GameGateway } from '../../../src/gateway/game.gateway';
 
+type GatewayServerMock = {
+  to: jest.Mock;
+};
+
+type GameGatewayServerAccess = {
+  server: GatewayServerMock;
+};
+
+type GameGatewayBotTurnAccess = {
+  processBotTurns(matchId: string): Promise<void>;
+};
+
 describe('GameGateway bot profile flow', () => {
   function createGateway() {
     const createMatchUseCase = { execute: jest.fn() };
@@ -37,7 +49,10 @@ describe('GameGateway bot profile flow', () => {
       botDecisionPort as never,
     );
 
-    (gateway as any).server = {
+    const gatewayServerAccess = gateway as unknown as GameGatewayServerAccess;
+    const gatewayBotTurnAccess = gateway as unknown as GameGatewayBotTurnAccess;
+
+    gatewayServerAccess.server = {
       to: jest.fn(() => ({
         emit: jest.fn(),
       })),
@@ -45,6 +60,7 @@ describe('GameGateway bot profile flow', () => {
 
     return {
       gateway,
+      gatewayBotTurnAccess,
       deps: {
         createMatchUseCase,
         startHandUseCase,
@@ -62,7 +78,7 @@ describe('GameGateway bot profile flow', () => {
   }
 
   it('passes the seat bot profile into BotDecisionPort during bot turn processing', async () => {
-    const { gateway, deps } = createGateway();
+    const { gatewayBotTurnAccess, deps } = createGateway();
 
     deps.roomManager.getState
       .mockReturnValueOnce({
@@ -131,7 +147,7 @@ describe('GameGateway bot profile flow', () => {
       card: '3P',
     });
 
-    await (gateway as any).processBotTurns('match-1');
+    await gatewayBotTurnAccess.processBotTurns('match-1');
 
     expect(deps.botDecisionPort.decide).toHaveBeenCalledWith({
       matchId: 'match-1',
@@ -157,7 +173,7 @@ describe('GameGateway bot profile flow', () => {
   });
 
   it('falls back to balanced when no bot profile is found for the seat', async () => {
-    const { gateway, deps } = createGateway();
+    const { gatewayBotTurnAccess, deps } = createGateway();
 
     deps.roomManager.getState
       .mockReturnValueOnce({
@@ -226,7 +242,7 @@ describe('GameGateway bot profile flow', () => {
       card: '4O',
     });
 
-    await (gateway as any).processBotTurns('match-1');
+    await gatewayBotTurnAccess.processBotTurns('match-1');
 
     expect(deps.botDecisionPort.decide).toHaveBeenCalledWith(
       expect.objectContaining({
