@@ -45,10 +45,7 @@ export class GetOrCreateUserUseCase {
 
   private normalizeInput(request: GetOrCreateUserRequestDto): CreateUserInput {
     const provider = this.requireNonEmptyString(request.provider, 'provider').toLowerCase();
-    const providerUserId = this.requireNonEmptyString(
-      request.providerUserId,
-      'providerUserId',
-    );
+    const providerUserId = this.requireNonEmptyString(request.providerUserId, 'providerUserId');
 
     return {
       provider,

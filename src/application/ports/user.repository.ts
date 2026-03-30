@@ -18,10 +18,7 @@ export type CreateUserInput = {
 export interface UserRepository {
   findById(userId: string): Promise<UserSnapshot | null>;
 
-  findByProviderIdentity(
-    provider: string,
-    providerUserId: string,
-  ): Promise<UserSnapshot | null>;
+  findByProviderIdentity(provider: string, providerUserId: string): Promise<UserSnapshot | null>;
 
   create(input: CreateUserInput): Promise<UserSnapshot>;
 }

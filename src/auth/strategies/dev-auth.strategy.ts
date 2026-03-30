@@ -3,7 +3,11 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Strategy } from 'passport-custom';
 import type { Request } from 'express';
 
-import { AuthService, type AuthenticatedUserDto, type DevIdentityInput } from '@game/auth/auth.service';
+import {
+  AuthService,
+  type AuthenticatedUserDto,
+  type DevIdentityInput,
+} from '@game/auth/auth.service';
 
 @Injectable()
 export class DevAuthStrategy extends PassportStrategy(Strategy, 'dev-auth') {

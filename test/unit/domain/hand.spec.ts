@@ -35,31 +35,31 @@ describe('Hand (Domain)', () => {
     expect(hand.getWinner()).toBe('P1');
   });
 
-it('creates new rounds until max 3 when the hand is still unresolved', () => {
-  const hand = new Hand(
-    '7',
-    [Card.from('7E'), Card.from('4O'), Card.from('3C')],
-    [Card.from('7C'), Card.from('4P'), Card.from('2E')],
-  );
+  it('creates new rounds until max 3 when the hand is still unresolved', () => {
+    const hand = new Hand(
+      '7',
+      [Card.from('7E'), Card.from('4O'), Card.from('3C')],
+      [Card.from('7C'), Card.from('4P'), Card.from('2E')],
+    );
 
-  hand.play('P1', Card.from('7E'));
-  hand.play('P2', Card.from('7C'));
+    hand.play('P1', Card.from('7E'));
+    hand.play('P2', Card.from('7C'));
 
-  expect(hand.getRoundsCount()).toBe(2);
-  expect(hand.isFinished()).toBe(false);
+    expect(hand.getRoundsCount()).toBe(2);
+    expect(hand.isFinished()).toBe(false);
 
-  hand.play('P1', Card.from('4O'));
-  hand.play('P2', Card.from('4P'));
+    hand.play('P1', Card.from('4O'));
+    hand.play('P2', Card.from('4P'));
 
-  expect(hand.getRoundsCount()).toBe(3);
-  expect(hand.isFinished()).toBe(false);
+    expect(hand.getRoundsCount()).toBe(3);
+    expect(hand.isFinished()).toBe(false);
 
-  hand.play('P1', Card.from('3C'));
-  hand.play('P2', Card.from('2E'));
+    hand.play('P1', Card.from('3C'));
+    hand.play('P2', Card.from('2E'));
 
-  expect(hand.getRoundsCount()).toBeLessThanOrEqual(3);
-  expect(hand.isFinished()).toBe(true);
-});
+    expect(hand.getRoundsCount()).toBeLessThanOrEqual(3);
+    expect(hand.isFinished()).toBe(true);
+  });
 
   it('throws when a player tries to play a card that is not in hand', () => {
     const hand = new Hand(

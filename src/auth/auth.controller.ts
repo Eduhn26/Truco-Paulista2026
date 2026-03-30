@@ -1,13 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Req,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
@@ -57,9 +48,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('bootstrap-user')
-  async bootstrapUser(
-    @Body() body: BootstrapUserBodyDto,
-  ): Promise<BootstrapUserResponseDto> {
+  async bootstrapUser(@Body() body: BootstrapUserBodyDto): Promise<BootstrapUserResponseDto> {
     const email = this.toOptionalString(body.email, 'email');
     const displayName = this.toOptionalString(body.displayName, 'displayName');
     const avatarUrl = this.toOptionalString(body.avatarUrl, 'avatarUrl');

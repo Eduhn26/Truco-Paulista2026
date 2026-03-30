@@ -1,6 +1,9 @@
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 
-function identity(userId: string, playerToken?: string): {
+function identity(
+  userId: string,
+  playerToken?: string,
+): {
   userId: string;
   playerToken: string;
 } {
@@ -33,9 +36,9 @@ describe('RoomManager (2v2)', () => {
     roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'));
     roomManager.join('match-1', 'socket-4', identity('user-4', 'token-4'));
 
-    expect(() =>
-      roomManager.join('match-1', 'socket-5', identity('user-5', 'token-5')),
-    ).toThrow('Room match-1 is full');
+    expect(() => roomManager.join('match-1', 'socket-5', identity('user-5', 'token-5'))).toThrow(
+      'Room match-1 is full',
+    );
   });
 
   it('assigns the next available seat after a disconnect leaves the previous seat empty', () => {
@@ -192,9 +195,9 @@ describe('RoomManager (1v1)', () => {
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
-    expect(() =>
-      roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3')),
-    ).toThrow('Room match-1 is full');
+    expect(() => roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'))).toThrow(
+      'Room match-1 is full',
+    );
   });
 
   it('only allows start when both 1v1 players are ready', () => {
@@ -285,11 +288,7 @@ describe('RoomManager (1v1)', () => {
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    const secondHuman = roomManager.join(
-      'match-1',
-      'socket-2',
-      identity('user-2', 'token-2'),
-    );
+    const secondHuman = roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
     const roomState = roomManager.getState('match-1');
 
@@ -409,11 +408,7 @@ describe('RoomManager bot fill (2v2)', () => {
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    const thirdHuman = roomManager.join(
-      'match-1',
-      'socket-3',
-      identity('user-3', 'token-3'),
-    );
+    const thirdHuman = roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'));
 
     expect(thirdHuman.seatId).toBe('T1B');
 

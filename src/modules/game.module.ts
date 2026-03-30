@@ -7,10 +7,7 @@ import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-cas
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
-import {
-  BOT_DECISION_PORT,
-  type BotDecisionPort,
-} from '@game/application/ports/bot-decision.port';
+import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import { AuthModule } from '@game/auth/auth.module';

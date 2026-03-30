@@ -52,9 +52,7 @@ export class AuthService {
     private readonly authTokenService: AuthTokenService,
   ) {}
 
-  async bootstrapUser(
-    request: GetOrCreateUserRequestDto,
-  ): Promise<GetOrCreateUserResponseDto> {
+  async bootstrapUser(request: GetOrCreateUserRequestDto): Promise<GetOrCreateUserResponseDto> {
     return this.getOrCreateUserUseCase.execute(request);
   }
 
@@ -81,9 +79,7 @@ export class AuthService {
     return result.user;
   }
 
-  async validateOrCreateGoogleUser(
-    input: GoogleIdentityInput,
-  ): Promise<AuthenticatedUserDto> {
+  async validateOrCreateGoogleUser(input: GoogleIdentityInput): Promise<AuthenticatedUserDto> {
     const request: GetOrCreateUserRequestDto = {
       provider: 'google',
       providerUserId: input.providerUserId,
@@ -106,9 +102,7 @@ export class AuthService {
     return result.user;
   }
 
-  async validateOrCreateGitHubUser(
-    input: GitHubIdentityInput,
-  ): Promise<AuthenticatedUserDto> {
+  async validateOrCreateGitHubUser(input: GitHubIdentityInput): Promise<AuthenticatedUserDto> {
     const request: GetOrCreateUserRequestDto = {
       provider: 'github',
       providerUserId: input.providerUserId,

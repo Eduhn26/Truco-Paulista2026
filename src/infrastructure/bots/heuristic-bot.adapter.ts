@@ -36,18 +36,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       this.compareCardStrength(left, right, context.viraRank),
     );
 
-    const opponentCard = this.getOpponentCard(
-      context.currentRound,
-      context.player.playerId,
-    );
+    const opponentCard = this.getOpponentCard(context.currentRound, context.player.playerId);
 
     const selectedCard = opponentCard
-      ? this.pickResponseCard(
-          orderedHand,
-          opponentCard,
-          context.viraRank,
-          context.profile,
-        )
+      ? this.pickResponseCard(orderedHand, opponentCard, context.viraRank, context.profile)
       : this.pickOpeningCard(orderedHand, context.profile);
 
     if (!selectedCard) {
@@ -63,13 +55,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     };
   }
 
-  private getOpponentCard(
-    currentRound: BotRoundView,
-    playerId: 'P1' | 'P2',
-  ): string | null {
-    return playerId === 'P1'
-      ? currentRound.playerTwoCard
-      : currentRound.playerOneCard;
+  private getOpponentCard(currentRound: BotRoundView, playerId: 'P1' | 'P2'): string | null {
+    return playerId === 'P1' ? currentRound.playerTwoCard : currentRound.playerOneCard;
   }
 
   private pickOpeningCard(hand: string[], profile: BotProfile): string {
@@ -86,9 +73,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     viraRank: Rank,
     profile: BotProfile,
   ): string {
-    const winningCards = hand.filter((candidate) =>
-      this.beats(candidate, opponentCard, viraRank),
-    );
+    const winningCards = hand.filter((candidate) => this.beats(candidate, opponentCard, viraRank));
 
     if (winningCards.length === 0) {
       return this.pickLosingCard(hand, profile);

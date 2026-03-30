@@ -36,9 +36,8 @@ function once<T>(socket: Socket, event: string, timeoutMs = TIMEOUT_MS): Promise
 }
 
 function logJson(label: string, data: unknown) {
-  // eslint-disable-next-line no-console
   console.log(label);
-  // eslint-disable-next-line no-console
+
   console.log(JSON.stringify(data, null, 2));
 }
 
@@ -67,7 +66,6 @@ function isMatchMode(value: string): value is MatchMode {
 }
 
 function printHelp() {
-  // eslint-disable-next-line no-console
   console.log(`
 Uso:
   npm run ws:client -- create
@@ -256,9 +254,7 @@ function parsePlayArg(arg: string): { rank: string; suit: string } | null {
   };
 }
 
-type ConnectIdentity =
-  | { kind: 'auth'; authToken: string }
-  | { kind: 'legacy'; token: string };
+type ConnectIdentity = { kind: 'auth'; authToken: string } | { kind: 'legacy'; token: string };
 
 function resolveConnectIdentity(args: Args): ConnectIdentity {
   const authTokenFromArgs = args.mode === 'help' ? undefined : args.authToken;
@@ -281,29 +277,22 @@ function resolveConnectIdentity(args: Args): ConnectIdentity {
 }
 
 async function connect(identity: ConnectIdentity): Promise<Socket> {
-  // eslint-disable-next-line no-console
   console.log(`[ws-client] Connecting to: ${baseUrl}`);
 
   if (identity.kind === 'auth') {
-    // eslint-disable-next-line no-console
     console.log('[ws-client] authMode=authToken');
   } else {
-    // eslint-disable-next-line no-console
     console.log(`[ws-client] authMode=legacyToken token=${identity.token}`);
   }
 
   const socket = io(baseUrl, {
-    auth:
-      identity.kind === 'auth'
-        ? { authToken: identity.authToken }
-        : { token: identity.token },
+    auth: identity.kind === 'auth' ? { authToken: identity.authToken } : { token: identity.token },
     transports: ['websocket', 'polling'],
     timeout: TIMEOUT_MS,
     reconnection: false,
   });
 
   socket.on('connect_error', (error: Error) => {
-    // eslint-disable-next-line no-console
     console.error('[ws-client] connect_error:', error.message);
   });
 
@@ -313,7 +302,6 @@ async function connect(identity: ConnectIdentity): Promise<Socket> {
 
   await once<void>(socket, 'connect');
 
-  // eslint-disable-next-line no-console
   console.log(`[ws-client] Connected: socketId=${socket.id}`);
 
   return socket;
@@ -332,14 +320,16 @@ async function createMatch(
   socket.emit('create-match', payload);
 
   const created = await once<CreatedPayload>(socket, 'created');
-  // eslint-disable-next-line no-console
+
   console.log(`[ws-client] created: matchId=${created.matchId}`);
   return created.matchId;
 }
 
 async function joinMatch(socket: Socket, matchId: string): Promise<void> {
   if (!matchId) {
-    throw new Error('join precisa de matchId: npm run ws:client -- join <matchId> [token|authToken]');
+    throw new Error(
+      'join precisa de matchId: npm run ws:client -- join <matchId> [token|authToken]',
+    );
   }
 
   const payload = { matchId };
@@ -347,7 +337,7 @@ async function joinMatch(socket: Socket, matchId: string): Promise<void> {
   socket.emit('join-match', payload);
 
   const joined = await once<JoinedPayload>(socket, 'joined');
-  // eslint-disable-next-line no-console
+
   console.log(`[ws-client] joined: matchId=${joined.matchId}`);
 }
 
@@ -374,10 +364,10 @@ async function main() {
   socket.on('ranking', (payload: unknown) => logJson('[event] ranking', payload));
 
   if (args.mode === 'create') {
-   matchId = await createMatch(socket, {
-  ...(args.pointsToWin === undefined ? {} : { pointsToWin: args.pointsToWin }),
-  ...(args.matchMode === undefined ? {} : { matchMode: args.matchMode }),
-});
+    matchId = await createMatch(socket, {
+      ...(args.pointsToWin === undefined ? {} : { pointsToWin: args.pointsToWin }),
+      ...(args.matchMode === undefined ? {} : { matchMode: args.matchMode }),
+    });
   } else {
     await joinMatch(socket, args.matchId);
     matchId = args.matchId;
@@ -415,7 +405,6 @@ async function main() {
     }
 
     if (!matchId) {
-      // eslint-disable-next-line no-console
       console.log('[ws-client] matchId ainda não disponível.');
       rl.prompt();
       return;
@@ -436,7 +425,6 @@ async function main() {
     if (cmd === 'start') {
       const viraRank = arg.toUpperCase();
       if (!viraRank) {
-        // eslint-disable-next-line no-console
         console.log('Uso: start <viraRank>');
         rl.prompt();
         return;
@@ -450,7 +438,6 @@ async function main() {
     if (cmd === 'play') {
       const parsed = parsePlayArg(arg);
       if (!parsed) {
-        // eslint-disable-next-line no-console
         console.log('Uso: play <card> (ex: play AP)');
         rl.prompt();
         return;
@@ -481,21 +468,19 @@ async function main() {
       return;
     }
 
-    // eslint-disable-next-line no-console
     console.log(`Comando desconhecido: ${cmd}. Digite "help".`);
     rl.prompt();
   });
 
   rl.on('close', () => {
     socket.disconnect();
-    // eslint-disable-next-line no-console
+
     console.log('[ws-client] bye');
     process.exit(0);
   });
 }
 
 main().catch((error) => {
-  // eslint-disable-next-line no-console
   console.error(error);
   process.exit(1);
 });

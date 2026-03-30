@@ -38,8 +38,7 @@ export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
     GitHubAuthGuard,
     {
       provide: GetOrCreateUserUseCase,
-      useFactory: (userRepository: UserRepository) =>
-        new GetOrCreateUserUseCase(userRepository),
+      useFactory: (userRepository: UserRepository) => new GetOrCreateUserUseCase(userRepository),
       inject: [USER_REPOSITORY],
     },
   ],
