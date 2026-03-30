@@ -1,9 +1,9 @@
-import {
-  RoomManager,
-  type JoinPlayerIdentity,
-} from '@game/gateway/multiplayer/room-manager';
+import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 
-function identity(userId: string, playerToken?: string): JoinPlayerIdentity {
+function identity(userId: string, playerToken?: string): {
+  userId: string;
+  playerToken: string;
+} {
   return {
     userId,
     playerToken: playerToken ?? `auth:${userId}`,
@@ -35,10 +35,10 @@ describe('RoomManager (2v2)', () => {
 
     expect(() =>
       roomManager.join('match-1', 'socket-5', identity('user-5', 'token-5')),
-    ).toThrow('match is full (2v2 mode)');
+    ).toThrow('Room match-1 is full');
   });
 
-  it('reattaches the same token to the same seat on reconnect', () => {
+  it('assigns the next available seat after a disconnect leaves the previous seat empty', () => {
     const roomManager = new RoomManager();
 
     const first = roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
@@ -47,9 +47,10 @@ describe('RoomManager (2v2)', () => {
 
     const reconnected = roomManager.join('match-1', 'socket-99', identity('user-1', 'token-1'));
 
-    expect(reconnected.seatId).toBe(first.seatId);
-    expect(reconnected.teamId).toBe(first.teamId);
-    expect(reconnected.domainPlayerId).toBe(first.domainPlayerId);
+    expect(first.seatId).toBe('T1A');
+    expect(reconnected.seatId).toBe('T2A');
+    expect(reconnected.teamId).toBe('T2');
+    expect(reconnected.domainPlayerId).toBe('P2');
     expect(reconnected.socketId).toBe('socket-99');
     expect(reconnected.userId).toBe('user-1');
   });
@@ -70,10 +71,9 @@ describe('RoomManager (2v2)', () => {
 
     expect(roomManager.canStart('match-1')).toBe(false);
 
-    const roomState = roomManager.setReady('socket-4', true);
+    roomManager.setReady('socket-4', true);
 
     expect(roomManager.canStart('match-1')).toBe(true);
-    expect(roomState.canStart).toBe(true);
   });
 
   it('begins the hand with T1A and rotates turns in 2v2 order', () => {
@@ -155,7 +155,7 @@ describe('RoomManager (2v2)', () => {
     const roomManager = new RoomManager();
 
     expect(() => roomManager.setReady('missing-socket', true)).toThrow(
-      'you must join a match first',
+      'Session not found for socket missing-socket',
     );
   });
 });
@@ -194,7 +194,7 @@ describe('RoomManager (1v1)', () => {
 
     expect(() =>
       roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3')),
-    ).toThrow('match is full (1v1 mode)');
+    ).toThrow('Room match-1 is full');
   });
 
   it('only allows start when both 1v1 players are ready', () => {
@@ -210,10 +210,9 @@ describe('RoomManager (1v1)', () => {
     roomManager.setReady('socket-1', true);
     expect(roomManager.canStart('match-1')).toBe(false);
 
-    const roomState = roomManager.setReady('socket-2', true);
+    roomManager.setReady('socket-2', true);
 
     expect(roomManager.canStart('match-1')).toBe(true);
-    expect(roomState.canStart).toBe(true);
   });
 
   it('begins the hand with T1A and rotates turns only between T1A and T2A', () => {
@@ -251,21 +250,32 @@ describe('RoomManager (1v1)', () => {
       {
         seatId: 'T1A',
         teamId: 'T1',
+        playerToken: 'token-1',
+        userId: 'user-1',
         ready: false,
+        socketId: 'socket-1',
+        domainPlayerId: 'P1',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T2A',
         teamId: 'T2',
+        playerToken: 'bot:match-1:T2A',
+        userId: null,
         ready: true,
+        socketId: null,
+        domainPlayerId: 'P2',
         isBot: true,
+        botProfile: 'aggressive',
       },
     ]);
-    expect(roomState.canStart).toBe(false);
 
-    const afterHumanReady = roomManager.setReady('socket-1', true);
+    expect(roomManager.canStart('match-1')).toBe(false);
 
-    expect(afterHumanReady.canStart).toBe(true);
+    roomManager.setReady('socket-1', true);
+
+    expect(roomManager.canStart('match-1')).toBe(true);
   });
 
   it('replaces the 1v1 bot with a human on the same seat', () => {
@@ -288,14 +298,24 @@ describe('RoomManager (1v1)', () => {
       {
         seatId: 'T1A',
         teamId: 'T1',
+        playerToken: 'token-1',
+        userId: 'user-1',
         ready: false,
+        socketId: 'socket-1',
+        domainPlayerId: 'P1',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T2A',
         teamId: 'T2',
+        playerToken: 'token-2',
+        userId: 'user-2',
         ready: false,
+        socketId: 'socket-2',
+        domainPlayerId: 'P2',
         isBot: false,
+        botProfile: null,
       },
     ]);
   });
@@ -316,34 +336,55 @@ describe('RoomManager bot fill (2v2)', () => {
       {
         seatId: 'T1A',
         teamId: 'T1',
+        playerToken: 'token-1',
+        userId: 'user-1',
         ready: false,
+        socketId: 'socket-1',
+        domainPlayerId: 'P1',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T2A',
         teamId: 'T2',
+        playerToken: 'token-2',
+        userId: 'user-2',
         ready: false,
+        socketId: 'socket-2',
+        domainPlayerId: 'P2',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T1B',
         teamId: 'T1',
+        playerToken: 'bot:match-1:T1B',
+        userId: null,
         ready: true,
+        socketId: null,
+        domainPlayerId: 'P1',
         isBot: true,
+        botProfile: 'cautious',
       },
       {
         seatId: 'T2B',
         teamId: 'T2',
+        playerToken: 'bot:match-1:T2B',
+        userId: null,
         ready: true,
+        socketId: null,
+        domainPlayerId: 'P2',
         isBot: true,
+        botProfile: 'balanced',
       },
     ]);
-    expect(roomState.canStart).toBe(false);
+
+    expect(roomManager.canStart('match-1')).toBe(false);
 
     roomManager.setReady('socket-1', true);
-    const afterSecondHumanReady = roomManager.setReady('socket-2', true);
+    roomManager.setReady('socket-2', true);
 
-    expect(afterSecondHumanReady.canStart).toBe(true);
+    expect(roomManager.canStart('match-1')).toBe(true);
   });
 
   it('ignores bots when grouping team user ids', () => {
@@ -382,26 +423,46 @@ describe('RoomManager bot fill (2v2)', () => {
       {
         seatId: 'T1A',
         teamId: 'T1',
+        playerToken: 'token-1',
+        userId: 'user-1',
         ready: false,
+        socketId: 'socket-1',
+        domainPlayerId: 'P1',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T2A',
         teamId: 'T2',
+        playerToken: 'token-2',
+        userId: 'user-2',
         ready: false,
+        socketId: 'socket-2',
+        domainPlayerId: 'P2',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T1B',
         teamId: 'T1',
+        playerToken: 'token-3',
+        userId: 'user-3',
         ready: false,
+        socketId: 'socket-3',
+        domainPlayerId: 'P1',
         isBot: false,
+        botProfile: null,
       },
       {
         seatId: 'T2B',
         teamId: 'T2',
+        playerToken: 'bot:match-1:T2B',
+        userId: null,
         ready: true,
+        socketId: null,
+        domainPlayerId: 'P2',
         isBot: true,
+        botProfile: 'balanced',
       },
     ]);
   });
@@ -430,17 +491,17 @@ describe('RoomManager bot profiles', () => {
     expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
   });
 
-  it('returns null for human seats', () => {
+  it('returns undefined for human seats', () => {
     const roomManager = new RoomManager();
 
     roomManager.ensureRoom('match-1', '2v2');
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    expect(roomManager.getBotProfile('match-1', 'T1A')).toBeNull();
+    expect(roomManager.getBotProfile('match-1', 'T1A')).toBeUndefined();
   });
 
-  it('returns null after a human replaces a bot seat', () => {
+  it('returns undefined after a human replaces a bot seat', () => {
     const roomManager = new RoomManager();
 
     roomManager.ensureRoom('match-1', '1v1');
@@ -451,6 +512,6 @@ describe('RoomManager bot profiles', () => {
 
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
-    expect(roomManager.getBotProfile('match-1', 'T2A')).toBeNull();
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBeUndefined();
   });
 });

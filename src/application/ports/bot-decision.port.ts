@@ -1,35 +1,48 @@
-import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
+import type { Rank } from '@game/domain/value-objects/rank';
 
 export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
 
-export type BotProfile = 'aggressive' | 'balanced' | 'cautious';
+export type BotProfile = 'balanced' | 'aggressive' | 'cautious';
 
-export type BotRoomPlayerView = {
-  seatId: string;
-  teamId: 'T1' | 'T2';
-  ready: boolean;
-  isBot: boolean;
+export type BotSeatId = 'T1A' | 'T2A' | 'T1B' | 'T2B';
+
+export const DEFAULT_BOT_PROFILE_BY_SEAT: Record<BotSeatId, BotProfile> = {
+  T1A: 'balanced',
+  T2A: 'aggressive',
+  T1B: 'cautious',
+  T2B: 'balanced',
 };
 
-export type BotRoomStateView = {
-  currentTurnSeatId: string | null;
-  players: BotRoomPlayerView[];
-};
-
-export type BotDecisionRequest = {
-  matchId: string;
-  state: ViewMatchStateResponseDto;
-  roomState: BotRoomStateView;
-  profile?: BotProfile;
-};
-
-export type BotDecision = {
-  seatId: string;
-  teamId: 'T1' | 'T2';
+export type BotPlayerView = {
   playerId: 'P1' | 'P2';
-  card: string;
+  hand: string[];
 };
+
+export type BotRoundView = {
+  playerOneCard: string | null;
+  playerTwoCard: string | null;
+  finished: boolean;
+  result: 'P1' | 'P2' | 'TIE' | null;
+};
+
+export type BotDecisionContext = {
+  matchId: string;
+  profile: BotProfile;
+  viraRank: Rank;
+  currentRound: BotRoundView | null;
+  player: BotPlayerView;
+};
+
+export type BotDecision =
+  | {
+      action: 'play-card';
+      card: string;
+    }
+  | {
+      action: 'pass';
+      reason: 'empty-hand' | 'missing-round' | 'unsupported-state';
+    };
 
 export interface BotDecisionPort {
-  decideNextMove(request: BotDecisionRequest): BotDecision | null;
+  decide(context: BotDecisionContext): BotDecision;
 }

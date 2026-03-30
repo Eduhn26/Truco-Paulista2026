@@ -4,7 +4,7 @@ describe('GameGateway bot profile flow', () => {
   function createGateway() {
     const createMatchUseCase = { execute: jest.fn() };
     const startHandUseCase = { execute: jest.fn() };
-    const playCardUseCase = { execute: jest.fn() };
+    const playCardUseCase = { execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }) };
     const viewMatchStateUseCase = { execute: jest.fn() };
     const getOrCreatePlayerProfileUseCase = { execute: jest.fn() };
     const updateRatingUseCase = { execute: jest.fn() };
@@ -15,11 +15,12 @@ describe('GameGateway bot profile flow', () => {
       getState: jest.fn(),
       getBotProfile: jest.fn(),
       advanceTurn: jest.fn(),
-      tryMarkRatingApplied: jest.fn(),
+      tryMarkRatingApplied: jest.fn().mockReturnValue(false),
       getTeamUserIds: jest.fn(),
+      getHumanSessions: jest.fn().mockReturnValue([]),
     };
     const botDecisionPort = {
-      decideNextMove: jest.fn(),
+      decide: jest.fn(),
     };
 
     const gateway = new GameGateway(
@@ -63,28 +64,43 @@ describe('GameGateway bot profile flow', () => {
   it('passes the seat bot profile into BotDecisionPort during bot turn processing', async () => {
     const { gateway, deps } = createGateway();
 
-    deps.roomManager.getState.mockReturnValue({
-      matchId: 'match-1',
-      mode: '2v2',
+    deps.roomManager.getState
+      .mockReturnValueOnce({
+        currentTurnSeatId: 'T1A',
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      })
+      .mockReturnValueOnce({
+        currentTurnSeatId: null,
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      });
+
+    deps.roomManager.getBotProfile.mockReturnValue('aggressive');
+
+    deps.roomManager.advanceTurn.mockReturnValue({
+      currentTurnSeatId: null,
       players: [
         {
           seatId: 'T1A',
           teamId: 'T1',
           ready: true,
-          isBot: false,
-        },
-        {
-          seatId: 'T2A',
-          teamId: 'T2',
-          ready: true,
           isBot: true,
         },
       ],
-      canStart: true,
-      currentTurnSeatId: 'T2A',
     });
-
-    deps.roomManager.getBotProfile.mockReturnValue('aggressive');
 
     deps.viewMatchStateUseCase.execute.mockResolvedValue({
       matchId: 'match-1',
@@ -96,8 +112,9 @@ describe('GameGateway bot profile flow', () => {
       currentHand: {
         viraRank: '4',
         finished: false,
-        playerOneHand: ['3E', 'AP'],
-        playerTwoHand: ['KO', '6P', '5C'],
+        viewerPlayerId: null,
+        playerOneHand: ['4O', 'AO', '3P'],
+        playerTwoHand: ['7O', 'KO', 'JC'],
         rounds: [
           {
             playerOneCard: null,
@@ -109,81 +126,76 @@ describe('GameGateway bot profile flow', () => {
       },
     });
 
-    deps.botDecisionPort.decideNextMove.mockReturnValue(null);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'play-card',
+      card: '3P',
+    });
 
     await (gateway as any).processBotTurns('match-1');
 
-    expect(deps.roomManager.getBotProfile).toHaveBeenCalledWith('match-1', 'T2A');
-    expect(deps.botDecisionPort.decideNextMove).toHaveBeenCalledWith({
+    expect(deps.botDecisionPort.decide).toHaveBeenCalledWith({
       matchId: 'match-1',
-      state: {
-        matchId: 'match-1',
-        state: 'in_progress',
-        score: {
-          playerOne: 0,
-          playerTwo: 0,
-        },
-        currentHand: {
-          viraRank: '4',
-          finished: false,
-          playerOneHand: ['3E', 'AP'],
-          playerTwoHand: ['KO', '6P', '5C'],
-          rounds: [
-            {
-              playerOneCard: null,
-              playerTwoCard: null,
-              result: null,
-              finished: false,
-            },
-          ],
-        },
-      },
       profile: 'aggressive',
-      roomState: {
-        currentTurnSeatId: 'T2A',
-        players: [
-          {
-            seatId: 'T1A',
-            teamId: 'T1',
-            ready: true,
-            isBot: false,
-          },
-          {
-            seatId: 'T2A',
-            teamId: 'T2',
-            ready: true,
-            isBot: true,
-          },
-        ],
+      viraRank: '4',
+      currentRound: {
+        playerOneCard: null,
+        playerTwoCard: null,
+        finished: false,
+        result: null,
       },
+      player: {
+        playerId: 'P1',
+        hand: ['4O', 'AO', '3P'],
+      },
+    });
+
+    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-1',
+      playerId: 'P1',
+      card: '3P',
     });
   });
 
   it('falls back to balanced when no bot profile is found for the seat', async () => {
     const { gateway, deps } = createGateway();
 
-    deps.roomManager.getState.mockReturnValue({
-      matchId: 'match-1',
-      mode: '1v1',
+    deps.roomManager.getState
+      .mockReturnValueOnce({
+        currentTurnSeatId: 'T1A',
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      })
+      .mockReturnValueOnce({
+        currentTurnSeatId: null,
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      });
+
+    deps.roomManager.getBotProfile.mockReturnValue(undefined);
+
+    deps.roomManager.advanceTurn.mockReturnValue({
+      currentTurnSeatId: null,
       players: [
         {
           seatId: 'T1A',
           teamId: 'T1',
           ready: true,
-          isBot: false,
-        },
-        {
-          seatId: 'T2A',
-          teamId: 'T2',
-          ready: true,
           isBot: true,
         },
       ],
-      canStart: true,
-      currentTurnSeatId: 'T2A',
     });
-
-    deps.roomManager.getBotProfile.mockReturnValue(null);
 
     deps.viewMatchStateUseCase.execute.mockResolvedValue({
       matchId: 'match-1',
@@ -195,8 +207,9 @@ describe('GameGateway bot profile flow', () => {
       currentHand: {
         viraRank: '4',
         finished: false,
-        playerOneHand: ['3E', 'AP'],
-        playerTwoHand: ['KO', '6P', '5C'],
+        viewerPlayerId: null,
+        playerOneHand: ['4O', 'AO', '3P'],
+        playerTwoHand: ['7O', 'KO', 'JC'],
         rounds: [
           {
             playerOneCard: null,
@@ -208,14 +221,23 @@ describe('GameGateway bot profile flow', () => {
       },
     });
 
-    deps.botDecisionPort.decideNextMove.mockReturnValue(null);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'play-card',
+      card: '4O',
+    });
 
     await (gateway as any).processBotTurns('match-1');
 
-    expect(deps.botDecisionPort.decideNextMove).toHaveBeenCalledWith(
+    expect(deps.botDecisionPort.decide).toHaveBeenCalledWith(
       expect.objectContaining({
         profile: 'balanced',
       }),
     );
+
+    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-1',
+      playerId: 'P1',
+      card: '4O',
+    });
   });
 });
