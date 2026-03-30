@@ -2,6 +2,7 @@ import { GameGateway } from '../../../src/gateway/game.gateway';
 
 type GatewayServerMock = {
   to: jest.Mock;
+  emit: jest.Mock;
 };
 
 type GameGatewayServerAccess = {
@@ -12,24 +13,82 @@ type GameGatewayBotTurnAccess = {
   processBotTurns(matchId: string): Promise<void>;
 };
 
+type TestSocket = {
+  id: string;
+  handshake: {
+    auth?: Record<string, unknown>;
+  };
+  join: jest.Mock<Promise<void>, [string]>;
+  emit: jest.Mock<void, [string, unknown]>;
+  disconnect: jest.Mock<void, [boolean?]>;
+};
+
+type PlayerProfileResult = {
+  profile: {
+    id: string;
+    rating: number;
+  };
+};
+
+function createSocket(options?: { id?: string; authToken?: string; token?: string }): TestSocket {
+  const auth: Record<string, unknown> = {};
+
+  if (options?.authToken) {
+    auth['authToken'] = options.authToken;
+  }
+
+  if (options?.token) {
+    auth['token'] = options.token;
+  }
+
+  return {
+    id: options?.id ?? 'socket-1',
+    handshake: {
+      auth,
+    },
+    join: jest.fn().mockResolvedValue(undefined),
+    emit: jest.fn(),
+    disconnect: jest.fn(),
+  };
+}
+
 describe('GameGateway bot profile flow', () => {
   function createGateway() {
     const createMatchUseCase = { execute: jest.fn() };
     const startHandUseCase = { execute: jest.fn() };
     const playCardUseCase = { execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }) };
     const viewMatchStateUseCase = { execute: jest.fn() };
-    const getOrCreatePlayerProfileUseCase = { execute: jest.fn() };
+    const getOrCreatePlayerProfileUseCase = {
+      execute: jest.fn<Promise<PlayerProfileResult>, [{ userId: string }]>(),
+    };
     const updateRatingUseCase = { execute: jest.fn() };
     const getRankingUseCase = { execute: jest.fn() };
-    const getOrCreateUserUseCase = { execute: jest.fn() };
-    const authTokenService = { verifyToken: jest.fn() };
+    const getOrCreateUserUseCase = {
+      execute: jest.fn().mockResolvedValue({
+        user: { id: 'legacy-user-1' },
+      }),
+    };
+    const authTokenService = {
+      verifyToken: jest.fn().mockReturnValue({
+        sub: 'auth-user-1',
+      }),
+    };
     const roomManager = {
+      ensureRoom: jest.fn(),
+      join: jest.fn(),
       getState: jest.fn(),
       getBotProfile: jest.fn(),
       advanceTurn: jest.fn(),
       tryMarkRatingApplied: jest.fn().mockReturnValue(false),
       getTeamUserIds: jest.fn(),
       getHumanSessions: jest.fn().mockReturnValue([]),
+      getSessionBySocketId: jest.fn(),
+      leave: jest.fn(),
+      fillMissingSeatsWithBots: jest.fn(),
+      setReady: jest.fn(),
+      canStart: jest.fn(),
+      beginHand: jest.fn(),
+      isPlayersTurn: jest.fn(),
     };
     const botDecisionPort = {
       decide: jest.fn(),
@@ -56,6 +115,7 @@ describe('GameGateway bot profile flow', () => {
       to: jest.fn(() => ({
         emit: jest.fn(),
       })),
+      emit: jest.fn(),
     };
 
     return {
@@ -74,6 +134,7 @@ describe('GameGateway bot profile flow', () => {
         roomManager,
         botDecisionPort,
       },
+      server: gatewayServerAccess.server,
     };
   }
 
@@ -254,6 +315,307 @@ describe('GameGateway bot profile flow', () => {
       matchId: 'match-1',
       playerId: 'P1',
       card: '4O',
+    });
+  });
+
+  it('joins the public queue using authenticated user rating', async () => {
+    const { gateway, deps, server } = createGateway();
+    const socket = createSocket({
+      id: 'socket-auth-1',
+      authToken: 'auth-token-1',
+    });
+
+    deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValue({
+      profile: {
+        id: 'profile-1',
+        rating: 1320,
+      },
+    });
+
+    const response = await gateway.handleJoinQueue(socket as never, {
+      mode: '1v1',
+    });
+
+    expect(deps.authTokenService.verifyToken).toHaveBeenCalledWith('auth-token-1');
+    expect(deps.getOrCreatePlayerProfileUseCase.execute).toHaveBeenCalledWith({
+      userId: 'auth-user-1',
+    });
+
+    expect(response).toEqual({
+      event: 'queue-joined',
+      data: {
+        mode: '1v1',
+        size: 1,
+        playersWaiting: [
+          expect.objectContaining({
+            socketId: 'socket-auth-1',
+            userId: 'auth-user-1',
+            playerToken: 'auth:auth-user-1',
+            rating: 1320,
+          }),
+        ],
+      },
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith(
+      'queue-joined',
+      expect.objectContaining({
+        mode: '1v1',
+        size: 1,
+      }),
+    );
+
+    expect(server.emit).toHaveBeenCalledWith(
+      'queue-state',
+      expect.objectContaining({
+        mode: '1v1',
+        size: 1,
+      }),
+    );
+  });
+
+  it('joins the public queue using legacy token identity fallback', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-legacy-1',
+      token: 'legacy-token-1',
+    });
+
+    deps.getOrCreateUserUseCase.execute.mockResolvedValue({
+      user: { id: 'legacy-user-77' },
+    });
+
+    deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValue({
+      profile: {
+        id: 'profile-legacy-1',
+        rating: 980,
+      },
+    });
+
+    const response = await gateway.handleJoinQueue(socket as never, {
+      mode: '2v2',
+    });
+
+    expect(deps.getOrCreateUserUseCase.execute).toHaveBeenCalledWith({
+      provider: 'legacy-socket',
+      providerUserId: 'legacy-token-1',
+      displayName: 'Legacy legacy-token-1',
+    });
+
+    expect(response).toEqual({
+      event: 'queue-joined',
+      data: {
+        mode: '2v2',
+        size: 1,
+        playersWaiting: [
+          expect.objectContaining({
+            socketId: 'socket-legacy-1',
+            userId: 'legacy-user-77',
+            playerToken: 'legacy-token-1',
+            rating: 980,
+          }),
+        ],
+      },
+    });
+  });
+
+  it('rejects queue join when player is already assigned to a room', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-room-1',
+      authToken: 'auth-token-2',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-1',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    const response = await gateway.handleJoinQueue(socket as never, {
+      mode: '1v1',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        message: 'Player is already assigned to a room.',
+      },
+    });
+
+    expect(deps.getOrCreatePlayerProfileUseCase.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects queue join when mode is invalid', async () => {
+    const { gateway } = createGateway();
+    const socket = createSocket({
+      id: 'socket-invalid-mode',
+      authToken: 'auth-token-3',
+    });
+
+    const response = await gateway.handleJoinQueue(socket as never, {
+      mode: '3v3',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        message: 'Invalid payload: mode must be either "1v1" or "2v2".',
+      },
+    });
+  });
+
+  it('returns queue snapshot for the requested mode', async () => {
+    const { gateway, deps } = createGateway();
+    const firstSocket = createSocket({
+      id: 'socket-state-1',
+      authToken: 'auth-token-state-1',
+    });
+    const secondSocket = createSocket({
+      id: 'socket-state-2',
+      authToken: 'auth-token-state-2',
+    });
+
+    deps.authTokenService.verifyToken
+      .mockReturnValueOnce({ sub: 'auth-user-state-1' })
+      .mockReturnValueOnce({ sub: 'auth-user-state-2' });
+
+    deps.getOrCreatePlayerProfileUseCase.execute
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-state-1',
+          rating: 1100,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-state-2',
+          rating: 1150,
+        },
+      });
+
+    await gateway.handleJoinQueue(firstSocket as never, { mode: '1v1' });
+    await gateway.handleJoinQueue(secondSocket as never, { mode: '1v1' });
+
+    const response = gateway.handleGetQueueState(createSocket() as never, {
+      mode: '1v1',
+    });
+
+    expect(response).toEqual({
+      event: 'queue-state',
+      data: {
+        mode: '1v1',
+        size: 2,
+        playersWaiting: [
+          expect.objectContaining({
+            socketId: 'socket-state-1',
+            userId: 'auth-user-state-1',
+            rating: 1100,
+          }),
+          expect.objectContaining({
+            socketId: 'socket-state-2',
+            userId: 'auth-user-state-2',
+            rating: 1150,
+          }),
+        ],
+      },
+    });
+  });
+
+  it('leaves queue and broadcasts updated snapshot', async () => {
+    const { gateway, deps, server } = createGateway();
+    const socket = createSocket({
+      id: 'socket-leave-1',
+      authToken: 'auth-token-leave-1',
+    });
+
+    deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValue({
+      profile: {
+        id: 'profile-leave-1',
+        rating: 1250,
+      },
+    });
+
+    await gateway.handleJoinQueue(socket as never, { mode: '2v2' });
+
+    const response = gateway.handleLeaveQueue(socket as never);
+
+    expect(response).toEqual({
+      event: 'queue-left',
+      data: {
+        left: true,
+        mode: '2v2',
+        snapshot: {
+          mode: '2v2',
+          size: 0,
+          playersWaiting: [],
+        },
+      },
+    });
+
+    expect(server.emit).toHaveBeenLastCalledWith('queue-state', {
+      mode: '2v2',
+      size: 0,
+      playersWaiting: [],
+    });
+  });
+
+  it('returns left false when socket is not queued', () => {
+    const { gateway } = createGateway();
+    const socket = createSocket({
+      id: 'socket-not-queued',
+      authToken: 'auth-token-not-queued',
+    });
+
+    const response = gateway.handleLeaveQueue(socket as never);
+
+    expect(response).toEqual({
+      event: 'queue-left',
+      data: {
+        left: false,
+      },
+    });
+  });
+
+  it('removes queued player on disconnect before room cleanup', async () => {
+    const { gateway, deps, server } = createGateway();
+    const socket = createSocket({
+      id: 'socket-disconnect-1',
+      authToken: 'auth-token-disconnect-1',
+    });
+
+    deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValue({
+      profile: {
+        id: 'profile-disconnect-1',
+        rating: 1400,
+      },
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue(undefined);
+    deps.roomManager.leave.mockReturnValue(null);
+
+    await gateway.handleJoinQueue(socket as never, { mode: '1v1' });
+
+    gateway.handleDisconnect(socket as never);
+
+    expect(server.emit).toHaveBeenLastCalledWith('queue-state', {
+      mode: '1v1',
+      size: 0,
+      playersWaiting: [],
+    });
+
+    const queueState = gateway.handleGetQueueState(createSocket() as never, {
+      mode: '1v1',
+    });
+
+    expect(queueState).toEqual({
+      event: 'queue-state',
+      data: {
+        mode: '1v1',
+        size: 0,
+        playersWaiting: [],
+      },
     });
   });
 });
