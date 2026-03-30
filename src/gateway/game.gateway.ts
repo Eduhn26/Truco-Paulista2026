@@ -38,6 +38,11 @@ import {
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
+import {
+  MatchmakingQueueManager,
+  type MatchmakingMode,
+  type QueueSnapshot,
+} from './matchmaking/matchmaking-queue-manager';
 import { RoomManager } from './multiplayer/room-manager';
 
 type ErrorResponseDto = { message: string };
@@ -76,6 +81,20 @@ type GetRankingPayload = {
   limit?: unknown;
 };
 
+type JoinQueuePayload = {
+  mode?: unknown;
+};
+
+type GetQueueStatePayload = {
+  mode?: unknown;
+};
+
+type QueueLeftResponseDto = {
+  left: boolean;
+  mode?: MatchmakingMode;
+  snapshot?: QueueSnapshot;
+};
+
 type GatewayErrorType =
   | 'validation_error'
   | 'transport_error'
@@ -94,6 +113,15 @@ type GatewayLogContext = {
     | 'join_match_requested'
     | 'join_match_succeeded'
     | 'join_match_rejected'
+    | 'join_queue_requested'
+    | 'join_queue_succeeded'
+    | 'join_queue_rejected'
+    | 'leave_queue_requested'
+    | 'leave_queue_succeeded'
+    | 'leave_queue_rejected'
+    | 'get_queue_state_requested'
+    | 'get_queue_state_succeeded'
+    | 'get_queue_state_rejected'
     | 'set_ready_requested'
     | 'set_ready_succeeded'
     | 'set_ready_rejected'
@@ -121,6 +149,9 @@ type GatewayLogContext = {
   viraRank?: string;
   card?: string;
   limit?: number;
+  mode?: MatchmakingMode;
+  rating?: number;
+  queueSize?: number;
   errorType?: GatewayErrorType;
   errorMessage?: string;
 };
@@ -150,6 +181,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly server!: Server;
 
   private readonly logger = new Logger(GameGateway.name);
+  private readonly matchmakingQueueManager = new MatchmakingQueueManager();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -296,6 +328,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null as never;
   }
 
+  private normalizeRequiredQueueMode(value: unknown): MatchmakingMode | null {
+    const mode = this.normalizeMode(value);
+
+    if (mode === '1v1' || mode === '2v2') {
+      return mode;
+    }
+
+    return null;
+  }
+
   private resolveViewerPlayerId(socketId: string, matchId: string): 'P1' | 'P2' | undefined {
     const session = this.roomManager.getSessionBySocketId(socketId);
 
@@ -357,6 +399,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private fillBotsAndBroadcast(matchId: string): void {
     this.roomManager.fillMissingSeatsWithBots(matchId);
     this.emitRoomState(matchId);
+  }
+
+  private emitQueueState(snapshot: QueueSnapshot): void {
+    this.server.emit('queue-state', snapshot);
+  }
+
+  private removeFromQueueBySocketId(socketId: string): QueueSnapshot | null {
+    const removed = this.matchmakingQueueManager.leaveBySocketId(socketId);
+
+    if (!removed) {
+      return null;
+    }
+
+    const snapshot = this.matchmakingQueueManager.getQueueSnapshot(removed.mode);
+    this.emitQueueState(snapshot);
+
+    return snapshot;
   }
 
   private resolveBotProfile(matchId: string, seatId: string | null): BotProfile {
@@ -568,6 +627,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(socket: Socket): void {
+    this.removeFromQueueBySocketId(socket.id);
+
     const existingSession = this.roomManager.getSessionBySocketId(socket.id);
     const result = this.roomManager.leave(socket.id);
 
@@ -661,6 +722,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await socket.join(matchId);
       const session = this.roomManager.join(matchId, socket.id, identity);
 
+      this.removeFromQueueBySocketId(socket.id);
+
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
@@ -734,6 +797,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await socket.join(matchId);
       const session = this.roomManager.join(matchId, socket.id, identity);
 
+      this.removeFromQueueBySocketId(socket.id);
+
       socket.emit('player-assigned', {
         matchId,
         seatId: session.seatId,
@@ -762,6 +827,179 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { event: 'joined', data: { matchId } };
     } catch (error) {
       return this.rejectFromError('join_match_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('join-queue')
+  async handleJoinQueue(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: JoinQueuePayload,
+  ): Promise<WsResponse<QueueSnapshot> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'join_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const existingSession = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (existingSession) {
+        return this.reject(
+          'join_queue_rejected',
+          'Player is already assigned to a room.',
+          {
+            socketId: socket.id,
+            matchId: existingSession.matchId,
+            seatId: existingSession.seatId,
+            teamId: existingSession.teamId,
+            playerId: existingSession.domainPlayerId,
+          },
+          'transport_error',
+        );
+      }
+
+      const mode = this.normalizeRequiredQueueMode(payload?.mode);
+
+      if (!mode) {
+        return this.reject(
+          'join_queue_rejected',
+          'Invalid payload: mode must be either "1v1" or "2v2".',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      const identity = await this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
+
+      const result = this.matchmakingQueueManager.join({
+        socketId: socket.id,
+        userId: identity.userId,
+        playerToken: identity.playerToken,
+        mode,
+        rating: profileResult.profile.rating,
+      });
+
+      socket.emit('queue-joined', result.snapshot);
+      this.emitQueueState(result.snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'join_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+        mode,
+        rating: profileResult.profile.rating,
+        queueSize: result.snapshot.size,
+      });
+
+      return { event: 'queue-joined', data: result.snapshot };
+    } catch (error) {
+      return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('leave-queue')
+  handleLeaveQueue(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<QueueLeftResponseDto> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'leave_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const removed = this.matchmakingQueueManager.leaveBySocketId(socket.id);
+
+      if (!removed) {
+        this.logGateway('debug', {
+          layer: 'gateway',
+          event: 'leave_queue_succeeded',
+          status: 'succeeded',
+          socketId: socket.id,
+          queueSize: 0,
+        });
+
+        return {
+          event: 'queue-left',
+          data: { left: false },
+        };
+      }
+
+      const snapshot = this.matchmakingQueueManager.getQueueSnapshot(removed.mode);
+      this.emitQueueState(snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'leave_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
+        mode: removed.mode,
+        queueSize: snapshot.size,
+      });
+
+      return {
+        event: 'queue-left',
+        data: {
+          left: true,
+          mode: removed.mode,
+          snapshot,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('leave_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('get-queue-state')
+  handleGetQueueState(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetQueueStatePayload,
+  ): WsResponse<QueueSnapshot> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_queue_state_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const mode = this.normalizeRequiredQueueMode(payload?.mode);
+
+      if (!mode) {
+        return this.reject(
+          'get_queue_state_rejected',
+          'Invalid payload: mode must be either "1v1" or "2v2".',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      const snapshot = this.matchmakingQueueManager.getQueueSnapshot(mode);
+
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_queue_state_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        mode,
+        queueSize: snapshot.size,
+      });
+
+      return {
+        event: 'queue-state',
+        data: snapshot,
+      };
+    } catch (error) {
+      return this.rejectFromError('get_queue_state_rejected', error, { socketId: socket.id });
     }
   }
 
