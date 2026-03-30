@@ -475,53 +475,62 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const decision = this.botDecisionPort.decide(botTurnContext.context);
+      const shouldContinue = await this.executeBotTurn(matchId, botTurnContext);
 
-      if (decision.action !== 'play-card') {
-        return;
-      }
-
-      const dto: PlayCardRequestDto = {
-        matchId,
-        playerId: botTurnContext.playerId,
-        card: decision.card,
-      };
-
-      await this.playCardUseCase.execute(dto);
-
-      const nextRoomState = this.roomManager.advanceTurn(matchId);
-      this.server.to(matchId).emit('room-state', nextRoomState);
-
-      this.server.to(matchId).emit('card-played', {
-        matchId,
-        playerId: botTurnContext.playerId,
-        seatId: botTurnContext.seatId,
-        teamId: botTurnContext.teamId,
-        card: decision.card,
-        currentTurnSeatId: nextRoomState.currentTurnSeatId,
-        isBot: true,
-      });
-
-      const updatedState = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'play_card_succeeded',
-        status: 'succeeded',
-        matchId,
-        seatId: botTurnContext.seatId,
-        teamId: botTurnContext.teamId,
-        playerId: botTurnContext.playerId,
-        card: decision.card,
-      });
-
-      await this.finalizeMatchIfFinished(matchId, updatedState);
-
-      if (updatedState.state !== 'in_progress') {
+      if (!shouldContinue) {
         return;
       }
     }
+  }
+
+  private async executeBotTurn(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+  ): Promise<boolean> {
+    const decision = this.botDecisionPort.decide(botTurnContext.context);
+
+    if (decision.action !== 'play-card') {
+      return false;
+    }
+
+    const dto: PlayCardRequestDto = {
+      matchId,
+      playerId: botTurnContext.playerId,
+      card: decision.card,
+    };
+
+    await this.playCardUseCase.execute(dto);
+
+    const nextRoomState = this.roomManager.advanceTurn(matchId);
+    this.server.to(matchId).emit('room-state', nextRoomState);
+
+    this.server.to(matchId).emit('card-played', {
+      matchId,
+      playerId: botTurnContext.playerId,
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      card: decision.card,
+      currentTurnSeatId: nextRoomState.currentTurnSeatId,
+      isBot: true,
+    });
+
+    const updatedState = await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'play_card_succeeded',
+      status: 'succeeded',
+      matchId,
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+      card: decision.card,
+    });
+
+    await this.finalizeMatchIfFinished(matchId, updatedState);
+
+    return updatedState.state === 'in_progress';
   }
 
   handleConnection(socket: Socket): void {
