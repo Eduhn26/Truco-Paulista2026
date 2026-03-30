@@ -4,6 +4,15 @@ export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
 
 export type BotProfile = 'balanced' | 'aggressive' | 'cautious';
 
+export type BotSeatId = 'T1A' | 'T2A' | 'T1B' | 'T2B';
+
+export const DEFAULT_BOT_PROFILE_BY_SEAT: Record<BotSeatId, BotProfile> = {
+  T1A: 'balanced',
+  T2A: 'aggressive',
+  T1B: 'cautious',
+  T2B: 'balanced',
+};
+
 export type BotPlayerView = {
   seatId: string;
   teamId: 'T1' | 'T2';
