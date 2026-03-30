@@ -62,7 +62,7 @@ describe('HeuristicBotAdapter', () => {
     });
   });
 
-  it('opens with the weakest card for balanced profile', () => {
+  it('opens with the middle card for balanced profile', () => {
     const decision = adapter.decide(
       createContext({
         profile: 'balanced',
@@ -83,7 +83,7 @@ describe('HeuristicBotAdapter', () => {
 
     expect(decision).toEqual({
       action: 'play-card',
-      card: '4O',
+      card: 'AO',
     });
   });
 
@@ -162,7 +162,7 @@ describe('HeuristicBotAdapter', () => {
     });
   });
 
-  it('discards the weakest card when it cannot win and profile is balanced', () => {
+  it('discards the middle card when it cannot win and profile is balanced', () => {
     const decision = adapter.decide(
       createContext({
         profile: 'balanced',
@@ -183,7 +183,7 @@ describe('HeuristicBotAdapter', () => {
 
     expect(decision).toEqual({
       action: 'play-card',
-      card: '4O',
+      card: '6C',
     });
   });
 

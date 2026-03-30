@@ -11,6 +11,8 @@ import { compareCards } from '@game/domain/services/truco-rules';
 import { Card } from '@game/domain/value-objects/card';
 import type { Rank } from '@game/domain/value-objects/rank';
 
+type CardSelectionStrategy = 'weakest' | 'middle' | 'strongest';
+
 @Injectable()
 export class HeuristicBotAdapter implements BotDecisionPort {
   decide(context: BotDecisionContext): BotDecision {
@@ -71,11 +73,11 @@ export class HeuristicBotAdapter implements BotDecisionPort {
   }
 
   private pickOpeningCard(hand: string[], profile: BotProfile): string {
-    if (profile === 'aggressive') {
-      return hand[hand.length - 1]!;
-    }
-
-    return hand[0]!;
+    return this.pickCardByProfile(hand, profile, {
+      aggressive: 'strongest',
+      balanced: 'middle',
+      cautious: 'weakest',
+    });
   }
 
   private pickResponseCard(
@@ -92,19 +94,37 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return this.pickLosingCard(hand, profile);
     }
 
-    if (profile === 'aggressive') {
-      return winningCards[winningCards.length - 1]!;
-    }
-
-    return winningCards[0]!;
+    return this.pickCardByProfile(winningCards, profile, {
+      aggressive: 'strongest',
+      balanced: 'weakest',
+      cautious: 'weakest',
+    });
   }
 
   private pickLosingCard(hand: string[], profile: BotProfile): string {
-    if (profile === 'aggressive') {
-      return hand[hand.length - 1]!;
+    return this.pickCardByProfile(hand, profile, {
+      aggressive: 'strongest',
+      balanced: 'middle',
+      cautious: 'weakest',
+    });
+  }
+
+  private pickCardByProfile(
+    cards: string[],
+    profile: BotProfile,
+    strategyByProfile: Record<BotProfile, CardSelectionStrategy>,
+  ): string {
+    const strategy = strategyByProfile[profile];
+
+    if (strategy === 'strongest') {
+      return cards[cards.length - 1]!;
     }
 
-    return hand[0]!;
+    if (strategy === 'middle') {
+      return cards[Math.floor((cards.length - 1) / 2)]!;
+    }
+
+    return cards[0]!;
   }
 
   private beats(candidate: string, opponentCard: string, viraRank: Rank): boolean {
