@@ -1,3 +1,7 @@
+import type { Rank } from '@game/domain/value-objects/rank';
+
+export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
+
 export type BotProfile = 'balanced' | 'aggressive' | 'cautious';
 
 export type BotPlayerView = {
@@ -17,7 +21,7 @@ export type BotRoundView = {
 export type BotDecisionContext = {
   matchId: string;
   profile: BotProfile;
-  viraRank: string;
+  viraRank: Rank;
   currentRound: BotRoundView | null;
   player: BotPlayerView;
 };

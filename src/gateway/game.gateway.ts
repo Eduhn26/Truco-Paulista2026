@@ -30,8 +30,10 @@ import type { StartHandRequestDto } from '@game/application/dtos/requests/start-
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
 import {
   BOT_DECISION_PORT,
+  type BotDecisionContext,
   type BotDecisionPort,
   type BotProfile,
+  type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
@@ -133,6 +135,13 @@ type ResolvedHandshakeIdentity = {
   playerToken: string;
 };
 
+type BotTurnDecisionContext = {
+  seatId: string;
+  teamId: 'T1' | 'T2';
+  playerId: 'P1' | 'P2';
+  context: BotDecisionContext;
+};
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -155,7 +164,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly roomManager: RoomManager,
     @Inject(BOT_DECISION_PORT)
     private readonly botDecisionPort: BotDecisionPort,
-  ) { }
+  ) {}
 
   private formatGatewayLog(context: GatewayLogContext): string {
     return JSON.stringify({
@@ -358,6 +367,68 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.roomManager.getBotProfile(matchId, seatId as never) ?? 'balanced';
   }
 
+  private getCurrentBotRoundView(state: ViewMatchStateResponseDto): BotRoundView | null {
+    const rounds = state.currentHand?.rounds;
+
+    if (!rounds || rounds.length === 0) {
+      return null;
+    }
+
+    const currentRound = rounds[rounds.length - 1];
+
+    if (!currentRound) {
+      return null;
+    }
+
+    return {
+      playerOneCard: currentRound.playerOneCard,
+      playerTwoCard: currentRound.playerTwoCard,
+      finished: currentRound.finished,
+      result: currentRound.result,
+    };
+  }
+
+  private buildBotDecisionContext(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+  ): BotTurnDecisionContext | null {
+    const roomState = this.roomManager.getState(matchId);
+    const currentTurnSeatId = roomState.currentTurnSeatId;
+    const currentHand = state.currentHand;
+
+    if (!currentTurnSeatId || !currentHand) {
+      return null;
+    }
+
+    const currentSeat = roomState.players.find((player) => player.seatId === currentTurnSeatId);
+
+    if (!currentSeat || !currentSeat.isBot) {
+      return null;
+    }
+
+    const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
+    const hand =
+      playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
+
+    return {
+      seatId: currentSeat.seatId,
+      teamId: currentSeat.teamId,
+      playerId,
+      context: {
+        matchId,
+        profile: this.resolveBotProfile(matchId, currentSeat.seatId),
+        viraRank: currentHand.viraRank,
+        currentRound: this.getCurrentBotRoundView(state),
+        player: {
+          seatId: currentSeat.seatId,
+          teamId: currentSeat.teamId,
+          playerId,
+          hand,
+        },
+      },
+    };
+  }
+
   private async finalizeMatchIfFinished(
     matchId: string,
     state: ViewMatchStateResponseDto,
@@ -397,32 +468,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async processBotTurns(matchId: string): Promise<void> {
     while (true) {
-      const roomState = this.roomManager.getState(matchId);
       const state = await this.getAuthoritativeMatchState(matchId);
+      const botTurnContext = this.buildBotDecisionContext(matchId, state);
 
-      const pendingBotMove = this.botDecisionPort.decideNextMove({
-        matchId,
-        state,
-        profile: this.resolveBotProfile(matchId, roomState.currentTurnSeatId),
-        roomState: {
-          currentTurnSeatId: roomState.currentTurnSeatId,
-          players: roomState.players.map((player) => ({
-            seatId: player.seatId,
-            teamId: player.teamId,
-            ready: player.ready,
-            isBot: player.isBot,
-          })),
-        },
-      });
+      if (!botTurnContext) {
+        return;
+      }
 
-      if (!pendingBotMove) {
+      const decision = this.botDecisionPort.decide(botTurnContext.context);
+
+      if (decision.action !== 'play-card') {
         return;
       }
 
       const dto: PlayCardRequestDto = {
         matchId,
-        playerId: pendingBotMove.playerId,
-        card: pendingBotMove.card,
+        playerId: botTurnContext.playerId,
+        card: decision.card,
       };
 
       await this.playCardUseCase.execute(dto);
@@ -432,10 +494,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(matchId).emit('card-played', {
         matchId,
-        playerId: pendingBotMove.playerId,
-        seatId: pendingBotMove.seatId,
-        teamId: pendingBotMove.teamId,
-        card: pendingBotMove.card,
+        playerId: botTurnContext.playerId,
+        seatId: botTurnContext.seatId,
+        teamId: botTurnContext.teamId,
+        card: decision.card,
         currentTurnSeatId: nextRoomState.currentTurnSeatId,
         isBot: true,
       });
@@ -448,10 +510,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         event: 'play_card_succeeded',
         status: 'succeeded',
         matchId,
-        seatId: pendingBotMove.seatId,
-        teamId: pendingBotMove.teamId,
-        playerId: pendingBotMove.playerId,
-        card: pendingBotMove.card,
+        seatId: botTurnContext.seatId,
+        teamId: botTurnContext.teamId,
+        playerId: botTurnContext.playerId,
+        card: decision.card,
       });
 
       await this.finalizeMatchIfFinished(matchId, updatedState);

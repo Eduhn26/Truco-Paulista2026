@@ -2,78 +2,72 @@ import { Injectable } from '@nestjs/common';
 
 import type {
   BotDecision,
+  BotDecisionContext,
   BotDecisionPort,
-  BotDecisionRequest,
   BotProfile,
+  BotRoundView,
 } from '@game/application/ports/bot-decision.port';
 import { compareCards } from '@game/domain/services/truco-rules';
-import type { Rank } from '@game/domain/value-objects/rank';
 import { Card } from '@game/domain/value-objects/card';
-
-type CurrentRoundView = {
-  playerOneCard: string | null;
-  playerTwoCard: string | null;
-  result: 'P1' | 'P2' | 'TIE' | null;
-  finished: boolean;
-};
+import type { Rank } from '@game/domain/value-objects/rank';
 
 @Injectable()
 export class HeuristicBotAdapter implements BotDecisionPort {
-  decideNextMove(request: BotDecisionRequest): BotDecision | null {
-    const currentTurnSeatId = request.roomState.currentTurnSeatId;
-    const currentHand = request.state.currentHand;
-
-    if (!currentTurnSeatId || !currentHand) {
-      return null;
-    }
-
-    const currentSeat = request.roomState.players.find(
-      (player) => player.seatId === currentTurnSeatId,
-    );
-
-    if (!currentSeat || !currentSeat.isBot) {
-      return null;
-    }
-
-    const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
-    const hand =
-      playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
+  decide(context: BotDecisionContext): BotDecision {
+    const hand = context.player.hand;
 
     if (hand.length === 0) {
-      return null;
+      return {
+        action: 'pass',
+        reason: 'empty-hand',
+      };
     }
 
-    const currentRound = this.getCurrentRound(currentHand.rounds);
-    const opponentCard =
-      playerId === 'P1' ? currentRound?.playerTwoCard : currentRound?.playerOneCard;
+    if (!context.currentRound) {
+      return {
+        action: 'pass',
+        reason: 'missing-round',
+      };
+    }
 
-    const profile = request.profile ?? 'balanced';
     const orderedHand = [...hand].sort((left, right) =>
-      this.compareCardStrength(left, right, currentHand.viraRank),
+      this.compareCardStrength(left, right, context.viraRank),
+    );
+
+    const opponentCard = this.getOpponentCard(
+      context.currentRound,
+      context.player.playerId,
     );
 
     const selectedCard = opponentCard
-      ? this.pickResponseCard(orderedHand, opponentCard, currentHand.viraRank, profile)
-      : this.pickOpeningCard(orderedHand, profile);
+      ? this.pickResponseCard(
+          orderedHand,
+          opponentCard,
+          context.viraRank,
+          context.profile,
+        )
+      : this.pickOpeningCard(orderedHand, context.profile);
 
     if (!selectedCard) {
-      return null;
+      return {
+        action: 'pass',
+        reason: 'unsupported-state',
+      };
     }
 
     return {
-      seatId: currentSeat.seatId,
-      teamId: currentSeat.teamId,
-      playerId,
+      action: 'play-card',
       card: selectedCard,
     };
   }
 
-  private getCurrentRound(rounds: CurrentRoundView[]): CurrentRoundView | null {
-    if (rounds.length === 0) {
-      return null;
-    }
-
-    return rounds[rounds.length - 1] ?? null;
+  private getOpponentCard(
+    currentRound: BotRoundView,
+    playerId: 'P1' | 'P2',
+  ): string | null {
+    return playerId === 'P1'
+      ? currentRound.playerTwoCard
+      : currentRound.playerOneCard;
   }
 
   private pickOpeningCard(hand: string[], profile: BotProfile): string {

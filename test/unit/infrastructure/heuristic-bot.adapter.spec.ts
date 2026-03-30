@@ -1,281 +1,214 @@
+import type { BotDecisionContext } from '../../../src/application/ports/bot-decision.port';
 import { HeuristicBotAdapter } from '../../../src/infrastructure/bots/heuristic-bot.adapter';
-import type { BotDecisionRequest } from '../../../src/application/ports/bot-decision.port';
-
-function makeRequest(
-  overrides?: Partial<BotDecisionRequest>,
-): BotDecisionRequest {
-  return {
-    matchId: 'match-1',
-    state: {
-      matchId: 'match-1',
-      state: 'in_progress',
-      score: {
-        playerOne: 0,
-        playerTwo: 0,
-      },
-      currentHand: {
-        viraRank: '4',
-        finished: false,
-        viewerPlayerId: null,
-        playerOneHand: ['7P', '3E', 'AP'],
-        playerTwoHand: ['5C', '6P', 'KO'],
-        rounds: [
-          {
-            playerOneCard: null,
-            playerTwoCard: null,
-            result: null,
-            finished: false,
-          },
-        ],
-      },
-    },
-    roomState: {
-      currentTurnSeatId: 'T2A',
-      players: [
-        {
-          seatId: 'T1A',
-          teamId: 'T1',
-          ready: true,
-          isBot: false,
-        },
-        {
-          seatId: 'T2A',
-          teamId: 'T2',
-          ready: true,
-          isBot: true,
-        },
-      ],
-    },
-    ...overrides,
-  };
-}
 
 describe('HeuristicBotAdapter', () => {
-  it('returns null when it is not a bot turn', () => {
-    const adapter = new HeuristicBotAdapter();
+  let adapter: HeuristicBotAdapter;
 
-    const decision = adapter.decideNextMove(
-      makeRequest({
-        roomState: {
-          currentTurnSeatId: 'T1A',
-          players: [
-            {
-              seatId: 'T1A',
-              teamId: 'T1',
-              ready: true,
-              isBot: false,
-            },
-            {
-              seatId: 'T2A',
-              teamId: 'T2',
-              ready: true,
-              isBot: true,
-            },
-          ],
+  beforeEach(() => {
+    adapter = new HeuristicBotAdapter();
+  });
+
+  function createContext(
+    overrides: Partial<BotDecisionContext> = {},
+  ): BotDecisionContext {
+    return {
+      matchId: 'match-1',
+      profile: 'balanced',
+      viraRank: '4',
+      currentRound: {
+        playerOneCard: null,
+        playerTwoCard: null,
+        finished: false,
+        result: null,
+      },
+      player: {
+        seatId: 'T1A',
+        teamId: 'T1',
+        playerId: 'P1',
+        hand: ['4O', 'AO', '3P'],
+      },
+      ...overrides,
+    };
+  }
+
+  it('returns pass when the bot hand is empty', () => {
+    const decision = adapter.decide(
+      createContext({
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: [],
         },
       }),
     );
 
-    expect(decision).toBeNull();
+    expect(decision).toEqual({
+      action: 'pass',
+      reason: 'empty-hand',
+    });
   });
 
-  it('balanced profile plays the lowest card when opening the round', () => {
-    const adapter = new HeuristicBotAdapter();
+  it('returns pass when there is no current round', () => {
+    const decision = adapter.decide(
+      createContext({
+        currentRound: null,
+      }),
+    );
 
-    const decision = adapter.decideNextMove(
-      makeRequest({
+    expect(decision).toEqual({
+      action: 'pass',
+      reason: 'missing-round',
+    });
+  });
+
+  it('opens with the weakest card for balanced profile', () => {
+    const decision = adapter.decide(
+      createContext({
         profile: 'balanced',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['4O', 'AO', '3P'],
+        },
       }),
     );
 
-    expect(decision).not.toBeNull();
     expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
-      card: '6P',
+      action: 'play-card',
+      card: '4O',
     });
   });
 
-  it('aggressive profile plays the highest card when opening the round', () => {
-    const adapter = new HeuristicBotAdapter();
-
-    const decision = adapter.decideNextMove(
-      makeRequest({
+  it('opens with the strongest card for aggressive profile', () => {
+    const decision = adapter.decide(
+      createContext({
         profile: 'aggressive',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['4O', 'AO', '3P'],
+        },
       }),
     );
 
-    expect(decision).not.toBeNull();
     expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
-      card: '5C',
+      action: 'play-card',
+      card: '3P',
     });
   });
 
-  it('balanced profile plays the lowest winning card when responding', () => {
-    const adapter = new HeuristicBotAdapter();
-
-    const decision = adapter.decideNextMove(
-      makeRequest({
+  it('responds with the weakest winning card for balanced profile', () => {
+    const decision = adapter.decide(
+      createContext({
         profile: 'balanced',
-        state: {
-          matchId: 'match-1',
-          state: 'in_progress',
-          score: {
-            playerOne: 0,
-            playerTwo: 0,
-          },
-          currentHand: {
-            viraRank: '4',
-            finished: false,
-            viewerPlayerId: null,
-            playerOneHand: ['7P', '3E'],
-            playerTwoHand: ['KO', '6P', '5C'],
-            rounds: [
-              {
-                playerOneCard: 'KO',
-                playerTwoCard: null,
-                result: null,
-                finished: false,
-              },
-            ],
-          },
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: '7O',
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['KO', 'AO', '3P'],
         },
       }),
     );
 
-    expect(decision).not.toBeNull();
     expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
-      card: '5C',
-    });
-  });
-
-  it('aggressive profile plays the highest winning card when responding', () => {
-    const adapter = new HeuristicBotAdapter();
-
-    const decision = adapter.decideNextMove(
-      makeRequest({
-        profile: 'aggressive',
-        state: {
-          matchId: 'match-1',
-          state: 'in_progress',
-          score: {
-            playerOne: 0,
-            playerTwo: 0,
-          },
-          currentHand: {
-            viraRank: '4',
-            finished: false,
-            viewerPlayerId: null,
-            playerOneHand: ['7P', '3E'],
-            playerTwoHand: ['KO', '6P', '5C'],
-            rounds: [
-              {
-                playerOneCard: 'KO',
-                playerTwoCard: null,
-                result: null,
-                finished: false,
-              },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(decision).not.toBeNull();
-    expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
-      card: '5C',
-    });
-  });
-
-  it('cautious profile throws away the lowest card when no winning response exists', () => {
-    const adapter = new HeuristicBotAdapter();
-
-    const decision = adapter.decideNextMove(
-      makeRequest({
-        profile: 'cautious',
-        state: {
-          matchId: 'match-1',
-          state: 'in_progress',
-          score: {
-            playerOne: 0,
-            playerTwo: 0,
-          },
-          currentHand: {
-            viraRank: '4',
-            finished: false,
-            viewerPlayerId: null,
-            playerOneHand: ['3E', 'AP'],
-            playerTwoHand: ['7C', 'KO', '5C'],
-            rounds: [
-              {
-                playerOneCard: '3E',
-                playerTwoCard: null,
-                result: null,
-                finished: false,
-              },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(decision).not.toBeNull();
-    expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
-      card: '5C',
-    });
-  });
-
-  it('aggressive profile throws away the highest card when no winning response exists', () => {
-    const adapter = new HeuristicBotAdapter();
-
-    const decision = adapter.decideNextMove(
-      makeRequest({
-        profile: 'aggressive',
-        state: {
-          matchId: 'match-1',
-          state: 'in_progress',
-          score: {
-            playerOne: 0,
-            playerTwo: 0,
-          },
-          currentHand: {
-            viraRank: '4',
-            finished: false,
-            viewerPlayerId: null,
-            playerOneHand: ['3E', 'AP'],
-            playerTwoHand: ['7C', 'KO', '6P'],
-            rounds: [
-              {
-                playerOneCard: '3E',
-                playerTwoCard: null,
-                result: null,
-                finished: false,
-              },
-            ],
-          },
-        },
-      }),
-    );
-
-    expect(decision).not.toBeNull();
-    expect(decision).toEqual({
-      seatId: 'T2A',
-      teamId: 'T2',
-      playerId: 'P2',
+      action: 'play-card',
       card: 'KO',
+    });
+  });
+
+  it('responds with the strongest winning card for aggressive profile', () => {
+    const decision = adapter.decide(
+      createContext({
+        profile: 'aggressive',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: '7O',
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['KO', 'AO', '3P'],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      action: 'play-card',
+      card: '3P',
+    });
+  });
+
+  it('discards the weakest card when it cannot win and profile is balanced', () => {
+    const decision = adapter.decide(
+      createContext({
+        profile: 'balanced',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: '3O',
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['4O', '6C', '7P'],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      action: 'play-card',
+      card: '4O',
+    });
+  });
+
+  it('discards the strongest card when it cannot win and profile is aggressive', () => {
+    const decision = adapter.decide(
+      createContext({
+        profile: 'aggressive',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: '3O',
+          finished: false,
+          result: null,
+        },
+        player: {
+          seatId: 'T1A',
+          teamId: 'T1',
+          playerId: 'P1',
+          hand: ['4O', '6C', '7P'],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      action: 'play-card',
+      card: '7P',
     });
   });
 });
