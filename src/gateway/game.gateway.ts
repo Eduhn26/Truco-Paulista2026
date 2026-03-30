@@ -420,10 +420,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         viraRank: currentHand.viraRank,
         currentRound: this.getCurrentBotRoundView(state),
         player: {
-          seatId: currentSeat.seatId,
-          teamId: currentSeat.teamId,
-          playerId,
-          hand,
+        playerId,
+        hand,
         },
       },
     };

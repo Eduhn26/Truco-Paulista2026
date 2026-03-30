@@ -144,8 +144,6 @@ describe('GameGateway bot profile flow', () => {
         result: null,
       },
       player: {
-        seatId: 'T1A',
-        teamId: 'T1',
         playerId: 'P1',
         hand: ['4O', 'AO', '3P'],
       },

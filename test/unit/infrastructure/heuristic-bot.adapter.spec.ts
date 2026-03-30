@@ -22,8 +22,6 @@ describe('HeuristicBotAdapter', () => {
         result: null,
       },
       player: {
-        seatId: 'T1A',
-        teamId: 'T1',
         playerId: 'P1',
         hand: ['4O', 'AO', '3P'],
       },
@@ -35,8 +33,6 @@ describe('HeuristicBotAdapter', () => {
     const decision = adapter.decide(
       createContext({
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: [],
         },
@@ -73,8 +69,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', 'AO', '3P'],
         },
@@ -98,8 +92,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', 'AO', '3P'],
         },
@@ -123,8 +115,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', 'AO', '3P'],
         },
@@ -148,8 +138,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['KO', 'AO', '3P'],
         },
@@ -173,8 +161,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['KO', 'AO', '3P'],
         },
@@ -198,8 +184,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['KO', 'AO', '3P'],
         },
@@ -223,8 +207,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', '5C', '7P'],
         },
@@ -248,8 +230,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', '6C', '7P'],
         },
@@ -273,8 +253,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', '6C', '7P'],
         },
@@ -298,8 +276,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', '6C', '7P'],
         },
@@ -323,8 +299,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', '5C', '6E', '7P', 'QO'],
         },
@@ -348,8 +322,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['4O', 'AO'],
         },
@@ -373,8 +345,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T1A',
-          teamId: 'T1',
           playerId: 'P1',
           hand: ['AO'],
         },
@@ -398,8 +368,6 @@ describe('HeuristicBotAdapter', () => {
           result: null,
         },
         player: {
-          seatId: 'T2A',
-          teamId: 'T2',
           playerId: 'P2',
           hand: ['KO', 'AO', '3P'],
         },

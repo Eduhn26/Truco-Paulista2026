@@ -14,8 +14,6 @@ export const DEFAULT_BOT_PROFILE_BY_SEAT: Record<BotSeatId, BotProfile> = {
 };
 
 export type BotPlayerView = {
-  seatId: string;
-  teamId: 'T1' | 'T2';
   playerId: 'P1' | 'P2';
   hand: string[];
 };
@@ -42,12 +40,7 @@ export type BotDecision =
     }
   | {
       action: 'pass';
-      reason:
-        | 'not-bot-turn'
-        | 'no-current-hand'
-        | 'empty-hand'
-        | 'missing-round'
-        | 'unsupported-state';
+      reason: 'empty-hand' | 'missing-round' | 'unsupported-state';
     };
 
 export interface BotDecisionPort {
