@@ -46,6 +46,27 @@ export type PendingFallbackState = {
   timedOutAt: number;
 };
 
+export type MatchmakingObservabilitySnapshot = {
+  generatedAt: number;
+  queues: Record<
+    MatchmakingMode,
+    {
+      waiting: number;
+      playersWaiting: Array<{
+        socketId: string;
+        userId: string;
+        rating: number;
+        joinedAt: number;
+      }>;
+    }
+  >;
+  pendingFallbacks: {
+    total: number;
+    byMode: Record<MatchmakingMode, number>;
+    players: PendingFallbackState[];
+  };
+};
+
 const SUPPORTED_MODES: MatchmakingMode[] = ['1v1', '2v2'];
 
 export class MatchmakingQueueManager {
@@ -180,6 +201,60 @@ export class MatchmakingQueueManager {
 
     this.pendingFallbackBySocketId.delete(normalizedSocketId);
     return { ...existing };
+  }
+
+  countPendingFallbacks(): number {
+    return this.pendingFallbackBySocketId.size;
+  }
+
+  getObservabilitySnapshot(now = Date.now()): MatchmakingObservabilitySnapshot {
+    const queueSnapshots: MatchmakingObservabilitySnapshot['queues'] = {
+      '1v1': {
+        waiting: 0,
+        playersWaiting: [],
+      },
+      '2v2': {
+        waiting: 0,
+        playersWaiting: [],
+      },
+    };
+
+    for (const mode of SUPPORTED_MODES) {
+      const snapshot = this.getQueueSnapshot(mode);
+
+      queueSnapshots[mode] = {
+        waiting: snapshot.size,
+        playersWaiting: snapshot.playersWaiting.map((player) => ({
+          socketId: player.socketId,
+          userId: player.userId,
+          rating: player.rating,
+          joinedAt: player.joinedAt,
+        })),
+      };
+    }
+
+    const fallbackPlayers = Array.from(this.pendingFallbackBySocketId.values()).map((fallback) => ({
+      ...fallback,
+    }));
+
+    const fallbackByMode: Record<MatchmakingMode, number> = {
+      '1v1': 0,
+      '2v2': 0,
+    };
+
+    for (const fallback of fallbackPlayers) {
+      fallbackByMode[fallback.mode] += 1;
+    }
+
+    return {
+      generatedAt: now,
+      queues: queueSnapshots,
+      pendingFallbacks: {
+        total: fallbackPlayers.length,
+        byMode: fallbackByMode,
+        players: fallbackPlayers.sort((left, right) => left.timedOutAt - right.timedOutAt),
+      },
+    };
   }
 
   isQueued(playerToken: string): boolean {

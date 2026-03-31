@@ -209,6 +209,157 @@ describe('MatchmakingQueueManager', () => {
     });
   });
 
+  it('registers and clears pending fallback after timeout', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    const joinResult = queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-timeout-1',
+        userId: 'user-timeout-1',
+        playerToken: 'token-timeout-1',
+        mode: '1v1',
+        rating: 1337,
+      }),
+    );
+
+    const fallback = queueManager.registerPendingFallback(joinResult.entry, 12_345);
+
+    expect(fallback).toEqual({
+      socketId: 'socket-timeout-1',
+      userId: 'user-timeout-1',
+      playerToken: 'token-timeout-1',
+      mode: '1v1',
+      rating: 1337,
+      timedOutAt: 12_345,
+    });
+
+    expect(queueManager.countPendingFallbacks()).toBe(1);
+
+    expect(queueManager.getPendingFallbackBySocketId('socket-timeout-1')).toEqual({
+      socketId: 'socket-timeout-1',
+      userId: 'user-timeout-1',
+      playerToken: 'token-timeout-1',
+      mode: '1v1',
+      rating: 1337,
+      timedOutAt: 12_345,
+    });
+
+    expect(queueManager.clearPendingFallbackBySocketId('socket-timeout-1')).toEqual({
+      socketId: 'socket-timeout-1',
+      userId: 'user-timeout-1',
+      playerToken: 'token-timeout-1',
+      mode: '1v1',
+      rating: 1337,
+      timedOutAt: 12_345,
+    });
+
+    expect(queueManager.getPendingFallbackBySocketId('socket-timeout-1')).toBeNull();
+    expect(queueManager.countPendingFallbacks()).toBe(0);
+  });
+
+  it('clears pending fallback automatically when the player rejoins the queue', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    const joinResult = queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-timeout-2',
+        userId: 'user-timeout-2',
+        playerToken: 'token-timeout-2',
+        mode: '2v2',
+        rating: 1500,
+      }),
+    );
+
+    queueManager.registerPendingFallback(joinResult.entry, 5_000);
+
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-timeout-2',
+        userId: 'user-timeout-2',
+        playerToken: 'token-timeout-2',
+        mode: '2v2',
+        rating: 1500,
+      }),
+    );
+
+    expect(queueManager.getPendingFallbackBySocketId('socket-timeout-2')).toBeNull();
+  });
+
+  it('builds an observability snapshot with queue counts and pending fallback totals', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    jest.spyOn(Date, 'now').mockReturnValueOnce(1_000);
+    const firstJoin = queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-obs-1',
+        userId: 'user-obs-1',
+        playerToken: 'token-obs-1',
+        mode: '1v1',
+        rating: 1200,
+      }),
+    );
+
+    jest.spyOn(Date, 'now').mockReturnValueOnce(2_000);
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-obs-2',
+        userId: 'user-obs-2',
+        playerToken: 'token-obs-2',
+        mode: '2v2',
+        rating: 1300,
+      }),
+    );
+
+    queueManager.registerPendingFallback(firstJoin.entry, 9_999);
+
+    const snapshot = queueManager.getObservabilitySnapshot(12_345);
+
+    expect(snapshot).toEqual({
+      generatedAt: 12_345,
+      queues: {
+        '1v1': {
+          waiting: 1,
+          playersWaiting: [
+            {
+              socketId: 'socket-obs-1',
+              userId: 'user-obs-1',
+              rating: 1200,
+              joinedAt: 1_000,
+            },
+          ],
+        },
+        '2v2': {
+          waiting: 1,
+          playersWaiting: [
+            {
+              socketId: 'socket-obs-2',
+              userId: 'user-obs-2',
+              rating: 1300,
+              joinedAt: 2_000,
+            },
+          ],
+        },
+      },
+      pendingFallbacks: {
+        total: 1,
+        byMode: {
+          '1v1': 1,
+          '2v2': 0,
+        },
+        players: [
+          {
+            socketId: 'socket-obs-1',
+            userId: 'user-obs-1',
+            playerToken: 'token-obs-1',
+            mode: '1v1',
+            rating: 1200,
+            timedOutAt: 9_999,
+          },
+        ],
+      },
+    });
+  });
+
   it('tracks whether a playerToken is already queued', () => {
     const queueManager = new MatchmakingQueueManager();
 
@@ -286,9 +437,22 @@ describe('MatchmakingQueueManager', () => {
       }),
     );
 
+    queueManager.registerPendingFallback(
+      {
+        socketId: 'socket-3',
+        userId: 'user-3',
+        playerToken: 'token-3',
+        mode: '1v1',
+        rating: 999,
+        joinedAt: 1,
+      },
+      10,
+    );
+
     queueManager.clear();
 
     expect(queueManager.getQueueSnapshot('1v1').size).toBe(0);
     expect(queueManager.getQueueSnapshot('2v2').size).toBe(0);
+    expect(queueManager.getPendingFallbackBySocketId('socket-3')).toBeNull();
   });
 });
