@@ -37,10 +37,20 @@ export type QueueExpirationResult = {
   snapshot: QueueSnapshot;
 };
 
+export type PendingFallbackState = {
+  socketId: string;
+  userId: string;
+  playerToken: string;
+  mode: MatchmakingMode;
+  rating: number;
+  timedOutAt: number;
+};
+
 const SUPPORTED_MODES: MatchmakingMode[] = ['1v1', '2v2'];
 
 export class MatchmakingQueueManager {
   private readonly queues = new Map<MatchmakingMode, QueueEntry[]>();
+  private readonly pendingFallbackBySocketId = new Map<string, PendingFallbackState>();
 
   constructor() {
     for (const mode of SUPPORTED_MODES) {
@@ -53,6 +63,8 @@ export class MatchmakingQueueManager {
 
     this.removeBySocketId(normalizedRequest.socketId);
     this.removeByPlayerToken(normalizedRequest.playerToken);
+    this.clearPendingFallbackBySocketId(normalizedRequest.socketId);
+    this.clearPendingFallbackByPlayerToken(normalizedRequest.playerToken);
 
     const entry: QueueEntry = {
       ...normalizedRequest,
@@ -136,6 +148,40 @@ export class MatchmakingQueueManager {
     };
   }
 
+  registerPendingFallback(entry: QueueEntry, timedOutAt = Date.now()): PendingFallbackState {
+    const fallback: PendingFallbackState = {
+      socketId: entry.socketId,
+      userId: entry.userId,
+      playerToken: entry.playerToken,
+      mode: entry.mode,
+      rating: entry.rating,
+      timedOutAt,
+    };
+
+    this.pendingFallbackBySocketId.set(entry.socketId, fallback);
+
+    return { ...fallback };
+  }
+
+  getPendingFallbackBySocketId(socketId: string): PendingFallbackState | null {
+    const normalizedSocketId = this.normalizeSocketId(socketId);
+    const fallback = this.pendingFallbackBySocketId.get(normalizedSocketId);
+
+    return fallback ? { ...fallback } : null;
+  }
+
+  clearPendingFallbackBySocketId(socketId: string): PendingFallbackState | null {
+    const normalizedSocketId = this.normalizeSocketId(socketId);
+    const existing = this.pendingFallbackBySocketId.get(normalizedSocketId);
+
+    if (!existing) {
+      return null;
+    }
+
+    this.pendingFallbackBySocketId.delete(normalizedSocketId);
+    return { ...existing };
+  }
+
   isQueued(playerToken: string): boolean {
     const normalizedPlayerToken = this.normalizePlayerToken(playerToken);
 
@@ -170,6 +216,8 @@ export class MatchmakingQueueManager {
     for (const mode of SUPPORTED_MODES) {
       this.getQueueOrThrow(mode).length = 0;
     }
+
+    this.pendingFallbackBySocketId.clear();
   }
 
   private getQueueOrThrow(mode: MatchmakingMode): QueueEntry[] {
@@ -193,6 +241,14 @@ export class MatchmakingQueueManager {
     for (const mode of SUPPORTED_MODES) {
       const queue = this.getQueueOrThrow(mode);
       this.removeFromQueue(queue, (entry) => entry.playerToken === playerToken);
+    }
+  }
+
+  private clearPendingFallbackByPlayerToken(playerToken: string): void {
+    for (const [socketId, fallback] of this.pendingFallbackBySocketId.entries()) {
+      if (fallback.playerToken === playerToken) {
+        this.pendingFallbackBySocketId.delete(socketId);
+      }
     }
   }
 

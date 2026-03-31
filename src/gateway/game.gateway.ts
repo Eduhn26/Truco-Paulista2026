@@ -41,6 +41,7 @@ import { DomainError } from '@game/domain/exceptions/domain-error';
 import {
   MatchmakingQueueManager,
   type MatchmakingMode,
+  type PendingFallbackState,
   type QueueSnapshot,
 } from './matchmaking/matchmaking-queue-manager';
 import {
@@ -109,6 +110,31 @@ type MatchFoundResponseDto = {
   }>;
 };
 
+type FallbackStateResponseDto = {
+  hasPendingFallback: boolean;
+  fallback?: {
+    mode: MatchmakingMode;
+    rating: number;
+    timedOutAt: number;
+    availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'];
+  };
+};
+
+type ContinueQueueResponseDto = {
+  resumed: boolean;
+  snapshot?: QueueSnapshot;
+  matchFound?: MatchFoundResponseDto;
+};
+
+type BotMatchCreatedResponseDto = {
+  matchId: string;
+  mode: MatchmakingMode;
+};
+
+type DeclineFallbackResponseDto = {
+  declined: boolean;
+};
+
 type GatewayErrorType =
   | 'validation_error'
   | 'transport_error'
@@ -131,6 +157,17 @@ type GatewayLogContext = {
     | 'join_queue_succeeded'
     | 'join_queue_rejected'
     | 'queue_timeout'
+    | 'get_fallback_state_requested'
+    | 'get_fallback_state_succeeded'
+    | 'continue_queue_requested'
+    | 'continue_queue_succeeded'
+    | 'continue_queue_rejected'
+    | 'start_bot_match_requested'
+    | 'start_bot_match_succeeded'
+    | 'start_bot_match_rejected'
+    | 'decline_fallback_requested'
+    | 'decline_fallback_succeeded'
+    | 'decline_fallback_rejected'
     | 'match_found'
     | 'leave_queue_requested'
     | 'leave_queue_succeeded'
@@ -428,6 +465,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(socketId).emit('queue-timeout', {
       mode,
       reason: 'timeout',
+      availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'],
     });
   }
 
@@ -439,6 +477,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     for (const removed of result.removed) {
+      this.matchmakingQueueManager.registerPendingFallback(removed);
       this.emitQueueTimeout(mode, removed.socketId);
 
       this.logGateway('log', {
@@ -485,6 +524,48 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return socketRegistry.get(socketId) ?? null;
   }
+
+  private getFallbackStateResponse(socketId: string): FallbackStateResponseDto {
+    const fallback = this.matchmakingQueueManager.getPendingFallbackBySocketId(socketId);
+
+    if (!fallback) {
+      return { hasPendingFallback: false };
+    }
+
+    return {
+      hasPendingFallback: true,
+      fallback: {
+        mode: fallback.mode,
+        rating: fallback.rating,
+        timedOutAt: fallback.timedOutAt,
+        availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'],
+      },
+    };
+  }
+
+  private async assignSocketToMatch(
+    matchId: string,
+    socket: Socket,
+    identity: ResolvedHandshakeIdentity,
+  ): Promise<void> {
+    await socket.join(matchId);
+
+    const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+      userId: identity.userId,
+    });
+
+    const session = this.roomManager.join(matchId, socket.id, identity);
+
+    socket.emit('player-assigned', {
+      matchId,
+      seatId: session.seatId,
+      teamId: session.teamId,
+      playerId: session.domainPlayerId,
+      playerToken: identity.playerToken,
+      profileId: profileResult.profile.id,
+    });
+  }
+
   private async assignQueuedPlayersToMatch(matchId: string, pair: MatchmakingPair): Promise<void> {
     for (const player of pair.players) {
       const socket = this.getSocketById(player.socketId);
@@ -493,28 +574,40 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         continue;
       }
 
-      await socket.join(matchId);
-
       const identity: ResolvedHandshakeIdentity = {
         userId: player.userId,
         playerToken: player.playerToken,
       };
 
-      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
-        userId: player.userId,
-      });
-
-      const session = this.roomManager.join(matchId, socket.id, identity);
-
-      socket.emit('player-assigned', {
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerToken: identity.playerToken,
-        profileId: profileResult.profile.id,
-      });
+      await this.assignSocketToMatch(matchId, socket, identity);
     }
+  }
+
+  private async createBotFallbackMatch(
+    socket: Socket,
+    fallback: PendingFallbackState,
+  ): Promise<BotMatchCreatedResponseDto> {
+    const result = await this.createMatchUseCase.execute({
+      mode: fallback.mode,
+    });
+
+    const matchId = result.matchId;
+
+    this.roomManager.ensureRoom(matchId, fallback.mode);
+
+    await this.assignSocketToMatch(matchId, socket, {
+      userId: fallback.userId,
+      playerToken: fallback.playerToken,
+    });
+
+    this.fillBotsAndBroadcast(matchId);
+    await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
+
+    return {
+      matchId,
+      mode: fallback.mode,
+    };
   }
 
   private async tryCreateMatchFromQueue(
@@ -540,6 +633,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     for (const player of pair.players) {
       this.matchmakingQueueManager.leaveBySocketId(player.socketId);
+      this.matchmakingQueueManager.clearPendingFallbackBySocketId(player.socketId);
     }
 
     const queueSnapshot = this.matchmakingQueueManager.getQueueSnapshot(pair.mode);
@@ -877,19 +971,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.roomManager.ensureRoom(matchId, dto.mode ?? '2v2');
 
-      await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity);
+      await this.assignSocketToMatch(matchId, socket, identity);
 
       this.removeFromQueueBySocketId(socket.id);
-
-      socket.emit('player-assigned', {
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerToken: identity.playerToken,
-        profileId: profileResult.profile.id,
-      });
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
@@ -901,18 +985,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'succeeded',
         socketId: socket.id,
         matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
         playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       };
 
-      if (dto.pointsToWin !== undefined) {
-        successLog.pointsToWin = dto.pointsToWin;
+      if (pointsToWin !== undefined) {
+        successLog.pointsToWin = pointsToWin;
+      }
+
+      if (dto.mode !== undefined) {
+        successLog.mode = dto.mode;
       }
 
       this.logGateway('log', successLog);
-
       return { event: 'created', data: result };
     } catch (error) {
       return this.rejectFromError('create_match_rejected', error, { socketId: socket.id });
@@ -933,10 +1017,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const identity = await this.resolveHandshakeIdentity(socket);
-      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
-        userId: identity.userId,
-      });
-
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
@@ -952,19 +1032,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity);
+      await this.assignSocketToMatch(matchId, socket, identity);
 
       this.removeFromQueueBySocketId(socket.id);
-
-      socket.emit('player-assigned', {
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerToken: identity.playerToken,
-        profileId: profileResult.profile.id,
-      });
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
@@ -976,9 +1046,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'succeeded',
         socketId: socket.id,
         matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
         playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       });
 
@@ -1067,6 +1134,189 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { event: 'queue-joined', data: result.snapshot };
     } catch (error) {
       return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('get-fallback-state')
+  handleGetFallbackState(@ConnectedSocket() socket: Socket): WsResponse<FallbackStateResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_fallback_state_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    const response = this.getFallbackStateResponse(socket.id);
+
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_fallback_state_succeeded',
+      status: 'succeeded',
+      socketId: socket.id,
+      ...(response.fallback
+        ? { mode: response.fallback.mode, rating: response.fallback.rating }
+        : {}),
+    });
+
+    return {
+      event: 'fallback-state',
+      data: response,
+    };
+  }
+
+  @SubscribeMessage('continue-queue')
+  async handleContinueQueue(
+    @ConnectedSocket() socket: Socket,
+  ): Promise<WsResponse<ContinueQueueResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'continue_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'continue_queue_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const result = this.matchmakingQueueManager.join({
+        socketId: fallback.socketId,
+        userId: fallback.userId,
+        playerToken: fallback.playerToken,
+        mode: fallback.mode,
+        rating: fallback.rating,
+      });
+
+      socket.emit('queue-resumed', result.snapshot);
+      this.emitQueueState(result.snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'continue_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+        mode: fallback.mode,
+        rating: fallback.rating,
+        queueSize: result.snapshot.size,
+      });
+
+      const matchFound = await this.tryCreateMatchFromQueue(fallback.mode);
+
+      if (matchFound) {
+        return {
+          event: 'queue-resumed',
+          data: {
+            resumed: true,
+            matchFound,
+          },
+        };
+      }
+
+      return {
+        event: 'queue-resumed',
+        data: {
+          resumed: true,
+          snapshot: result.snapshot,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('continue_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('start-bot-match')
+  async handleStartBotMatch(
+    @ConnectedSocket() socket: Socket,
+  ): Promise<WsResponse<BotMatchCreatedResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'start_bot_match_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'start_bot_match_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const botMatch = await this.createBotFallbackMatch(socket, fallback);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'start_bot_match_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId: botMatch.matchId,
+        mode: botMatch.mode,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+      });
+
+      return {
+        event: 'bot-match-created',
+        data: botMatch,
+      };
+    } catch (error) {
+      return this.rejectFromError('start_bot_match_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('decline-fallback')
+  handleDeclineFallback(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<DeclineFallbackResponseDto> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'decline_fallback_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'decline_fallback_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'decline_fallback_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        mode: fallback.mode,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+      });
+
+      return {
+        event: 'fallback-declined',
+        data: {
+          declined: true,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('decline_fallback_rejected', error, { socketId: socket.id });
     }
   }
 
