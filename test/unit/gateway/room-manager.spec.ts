@@ -161,6 +161,43 @@ describe('RoomManager (2v2)', () => {
       'Session not found for socket missing-socket',
     );
   });
+
+  it('keeps queue-created 2v2 matches blocked until all assigned humans are ready', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-2v2', '2v2');
+
+    roomManager.join('queue-match-2v2', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('queue-match-2v2', 'socket-2', identity('user-2', 'token-2'));
+    roomManager.join('queue-match-2v2', 'socket-3', identity('user-3', 'token-3'));
+    roomManager.join('queue-match-2v2', 'socket-4', identity('user-4', 'token-4'));
+
+    const initialState = roomManager.getState('queue-match-2v2');
+
+    expect(initialState.mode).toBe('2v2');
+    expect(initialState.currentTurnSeatId).toBeNull();
+    expect(initialState.players.map((player) => player.ready)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(roomManager.canStart('queue-match-2v2')).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    roomManager.setReady('socket-2', true);
+    roomManager.setReady('socket-3', true);
+
+    expect(roomManager.canStart('queue-match-2v2')).toBe(false);
+
+    roomManager.setReady('socket-4', true);
+
+    expect(roomManager.canStart('queue-match-2v2')).toBe(true);
+
+    const started = roomManager.beginHand('queue-match-2v2');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+  });
 });
 
 describe('RoomManager (1v1)', () => {
@@ -317,6 +354,48 @@ describe('RoomManager (1v1)', () => {
         botProfile: null,
       },
     ]);
+  });
+
+  it('keeps queue-created 1v1 matches blocked until both assigned humans are ready', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-1v1', '1v1');
+
+    const first = roomManager.join('queue-match-1v1', 'socket-1', identity('user-1', 'token-1'));
+    const second = roomManager.join('queue-match-1v1', 'socket-2', identity('user-2', 'token-2'));
+
+    const initialState = roomManager.getState('queue-match-1v1');
+
+    expect(initialState.mode).toBe('1v1');
+    expect(initialState.currentTurnSeatId).toBeNull();
+    expect(first.seatId).toBe('T1A');
+    expect(second.seatId).toBe('T2A');
+    expect(initialState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        ready: false,
+        socketId: 'socket-1',
+        isBot: false,
+      }),
+      expect.objectContaining({
+        seatId: 'T2A',
+        ready: false,
+        socketId: 'socket-2',
+        isBot: false,
+      }),
+    ]);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-2', true);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
+
+    const started = roomManager.beginHand('queue-match-1v1');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
   });
 });
 
