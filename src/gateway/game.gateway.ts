@@ -130,6 +130,7 @@ type GatewayLogContext = {
     | 'join_queue_requested'
     | 'join_queue_succeeded'
     | 'join_queue_rejected'
+    | 'queue_timeout'
     | 'match_found'
     | 'leave_queue_requested'
     | 'leave_queue_succeeded'
@@ -187,6 +188,8 @@ type BotTurnDecisionContext = {
   playerId: 'P1' | 'P2';
   context: BotDecisionContext;
 };
+
+const QUEUE_MAX_WAIT_MS = 2 * 60 * 1000;
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -421,6 +424,39 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.emit('queue-state', snapshot);
   }
 
+  private emitQueueTimeout(mode: MatchmakingMode, socketId: string): void {
+    this.server.to(socketId).emit('queue-timeout', {
+      mode,
+      reason: 'timeout',
+    });
+  }
+
+  private expireQueueEntries(mode: MatchmakingMode): QueueSnapshot {
+    const result = this.matchmakingQueueManager.expireEntriesOlderThan(mode, QUEUE_MAX_WAIT_MS);
+
+    if (result.removed.length === 0) {
+      return result.snapshot;
+    }
+
+    for (const removed of result.removed) {
+      this.emitQueueTimeout(mode, removed.socketId);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'queue_timeout',
+        status: 'succeeded',
+        socketId: removed.socketId,
+        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
+        mode,
+        queueSize: result.snapshot.size,
+      });
+    }
+
+    this.emitQueueState(result.snapshot);
+
+    return result.snapshot;
+  }
+
   private removeFromQueueBySocketId(socketId: string): QueueSnapshot | null {
     const removed = this.matchmakingQueueManager.leaveBySocketId(socketId);
 
@@ -437,7 +473,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async tryCreateMatchFromQueue(
     mode: MatchmakingMode,
   ): Promise<MatchFoundResponseDto | null> {
-    const snapshot = this.matchmakingQueueManager.getQueueSnapshot(mode);
+    const snapshot = this.expireQueueEntries(mode);
     const pair = this.matchmakingPairingPolicy.findPair(mode, snapshot.playersWaiting);
 
     if (!pair) {
@@ -941,6 +977,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
+      this.expireQueueEntries(mode);
+
       const identity = await this.resolveHandshakeIdentity(socket);
       const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
         userId: identity.userId,
@@ -1009,7 +1047,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
       }
 
-      const snapshot = this.matchmakingQueueManager.getQueueSnapshot(removed.mode);
+      const snapshot = this.expireQueueEntries(removed.mode);
       this.emitQueueState(snapshot);
 
       this.logGateway('log', {
@@ -1059,7 +1097,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const snapshot = this.matchmakingQueueManager.getQueueSnapshot(mode);
+      const snapshot = this.expireQueueEntries(mode);
 
       this.logGateway('debug', {
         layer: 'gateway',

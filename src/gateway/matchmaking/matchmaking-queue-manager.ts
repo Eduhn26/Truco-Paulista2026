@@ -32,6 +32,11 @@ export type QueueJoinResult = {
   snapshot: QueueSnapshot;
 };
 
+export type QueueExpirationResult = {
+  removed: QueueEntry[];
+  snapshot: QueueSnapshot;
+};
+
 const SUPPORTED_MODES: MatchmakingMode[] = ['1v1', '2v2'];
 
 export class MatchmakingQueueManager {
@@ -94,6 +99,41 @@ export class MatchmakingQueueManager {
     }
 
     return null;
+  }
+
+  expireEntriesOlderThan(
+    mode: MatchmakingMode,
+    maxWaitMs: number,
+    now = Date.now(),
+  ): QueueExpirationResult {
+    if (!Number.isInteger(maxWaitMs) || maxWaitMs < 0) {
+      throw new Error('maxWaitMs must be a non-negative integer');
+    }
+
+    const queue = this.getQueueOrThrow(mode);
+    const removed: QueueEntry[] = [];
+
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const entry = queue[index];
+
+      if (!entry) {
+        continue;
+      }
+
+      const waitingTime = now - entry.joinedAt;
+
+      if (waitingTime < maxWaitMs) {
+        continue;
+      }
+
+      removed.unshift(entry);
+      queue.splice(index, 1);
+    }
+
+    return {
+      removed,
+      snapshot: this.getQueueSnapshot(mode),
+    };
   }
 
   isQueued(playerToken: string): boolean {

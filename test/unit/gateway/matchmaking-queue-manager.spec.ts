@@ -1,7 +1,7 @@
 import {
   MatchmakingQueueManager,
   type MatchmakingMode,
-} from '@game/gateway/matchmaking/matchmaking-queue-manager';
+} from '../../../src/gateway/matchmaking/matchmaking-queue-manager';
 
 function createJoinRequest(overrides?: {
   socketId?: string;
@@ -149,6 +149,66 @@ describe('MatchmakingQueueManager', () => {
     expect(queueManager.isQueued('token-1')).toBe(false);
   });
 
+  it('expires entries older than the configured timeout only for the selected mode', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    const now = 10_000;
+
+    jest.spyOn(Date, 'now').mockReturnValueOnce(now - 5_000);
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-expired',
+        userId: 'user-expired',
+        playerToken: 'token-expired',
+        mode: '1v1',
+      }),
+    );
+
+    jest.spyOn(Date, 'now').mockReturnValueOnce(now - 1_000);
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-active',
+        userId: 'user-active',
+        playerToken: 'token-active',
+        mode: '1v1',
+      }),
+    );
+
+    jest.spyOn(Date, 'now').mockReturnValueOnce(now - 7_000);
+    queueManager.join(
+      createJoinRequest({
+        socketId: 'socket-other-mode',
+        userId: 'user-other-mode',
+        playerToken: 'token-other-mode',
+        mode: '2v2',
+      }),
+    );
+
+    const result = queueManager.expireEntriesOlderThan('1v1', 2_000, now);
+
+    expect(result.removed).toHaveLength(1);
+    expect(result.removed[0]?.socketId).toBe('socket-expired');
+    expect(result.snapshot).toEqual({
+      mode: '1v1',
+      size: 1,
+      playersWaiting: [
+        expect.objectContaining({
+          socketId: 'socket-active',
+        }),
+      ],
+    });
+
+    expect(queueManager.getQueueSnapshot('2v2')).toEqual({
+      mode: '2v2',
+      size: 1,
+      playersWaiting: [
+        expect.objectContaining({
+          socketId: 'socket-other-mode',
+        }),
+      ],
+    });
+  });
+
   it('tracks whether a playerToken is already queued', () => {
     const queueManager = new MatchmakingQueueManager();
 
@@ -195,6 +255,14 @@ describe('MatchmakingQueueManager', () => {
         }),
       ),
     ).toThrow('rating must be a non-negative integer');
+  });
+
+  it('rejects invalid expiration configuration', () => {
+    const queueManager = new MatchmakingQueueManager();
+
+    expect(() => queueManager.expireEntriesOlderThan('1v1', -1)).toThrow(
+      'maxWaitMs must be a non-negative integer',
+    );
   });
 
   it('can clear all queues explicitly', () => {
