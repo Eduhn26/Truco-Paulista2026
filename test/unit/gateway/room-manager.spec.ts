@@ -41,21 +41,33 @@ describe('RoomManager (2v2)', () => {
     );
   });
 
-  it('assigns the next available seat after a disconnect leaves the previous seat empty', () => {
+  it('recovers the same seat after a disconnect when the same token reconnects', () => {
     const roomManager = new RoomManager();
 
     const first = roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
 
+    roomManager.setReady('socket-1', true);
     roomManager.leave('socket-1');
 
     const reconnected = roomManager.join('match-1', 'socket-99', identity('user-1', 'token-1'));
+    const roomState = roomManager.getState('match-1');
 
     expect(first.seatId).toBe('T1A');
-    expect(reconnected.seatId).toBe('T2A');
-    expect(reconnected.teamId).toBe('T2');
-    expect(reconnected.domainPlayerId).toBe('P2');
+    expect(reconnected.seatId).toBe('T1A');
+    expect(reconnected.teamId).toBe('T1');
+    expect(reconnected.domainPlayerId).toBe('P1');
     expect(reconnected.socketId).toBe('socket-99');
     expect(reconnected.userId).toBe('user-1');
+    expect(reconnected.ready).toBe(false);
+    expect(roomState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        socketId: 'socket-99',
+        userId: 'user-1',
+        ready: false,
+        isBot: false,
+      }),
+    ]);
   });
 
   it('only allows start when all four players are ready', () => {
@@ -396,6 +408,39 @@ describe('RoomManager (1v1)', () => {
     const started = roomManager.beginHand('queue-match-1v1');
 
     expect(started.currentTurnSeatId).toBe('T1A');
+  });
+
+  it('recovers the same 1v1 seat after reconnect and keeps the room blocked until the player is ready again', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-1v1', '1v1');
+
+    roomManager.join('queue-match-1v1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('queue-match-1v1', 'socket-2', identity('user-2', 'token-2'));
+
+    roomManager.setReady('socket-1', true);
+    roomManager.setReady('socket-2', true);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
+
+    roomManager.leave('socket-1');
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    const reconnected = roomManager.join(
+      'queue-match-1v1',
+      'socket-99',
+      identity('user-1', 'token-1'),
+    );
+
+    expect(reconnected.seatId).toBe('T1A');
+    expect(reconnected.socketId).toBe('socket-99');
+    expect(reconnected.ready).toBe(false);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-99', true);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
   });
 });
 
