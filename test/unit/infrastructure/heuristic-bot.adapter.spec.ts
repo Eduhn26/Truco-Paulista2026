@@ -8,9 +8,7 @@ describe('HeuristicBotAdapter', () => {
     adapter = new HeuristicBotAdapter();
   });
 
-  function createContext(
-    overrides: Partial<BotDecisionContext> = {},
-  ): BotDecisionContext {
+  function createContext(overrides: Partial<BotDecisionContext> = {}): BotDecisionContext {
     return {
       matchId: 'match-1',
       profile: 'balanced',

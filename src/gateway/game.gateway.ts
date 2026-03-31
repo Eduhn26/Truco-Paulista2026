@@ -38,6 +38,18 @@ import {
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
+import {
+  MatchmakingQueueManager,
+  type MatchmakingMode,
+  type MatchmakingObservabilitySnapshot,
+  type PendingFallbackState,
+  type QueueSnapshot,
+} from './matchmaking/matchmaking-queue-manager';
+
+import {
+  MatchmakingPairingPolicy,
+  type MatchmakingPair,
+} from './matchmaking/matchmaking-pairing-policy';
 import { RoomManager } from './multiplayer/room-manager';
 
 type ErrorResponseDto = { message: string };
@@ -76,6 +88,59 @@ type GetRankingPayload = {
   limit?: unknown;
 };
 
+type JoinQueuePayload = {
+  mode?: unknown;
+};
+
+type GetQueueStatePayload = {
+  mode?: unknown;
+};
+
+type QueueLeftResponseDto = {
+  left: boolean;
+  mode?: MatchmakingMode;
+  snapshot?: QueueSnapshot;
+};
+
+type MatchFoundResponseDto = {
+  matchId: string;
+  mode: MatchmakingMode;
+  players: Array<{
+    userId: string;
+    playerToken: string;
+    rating: number;
+  }>;
+};
+
+type FallbackStateResponseDto = {
+  hasPendingFallback: boolean;
+  fallback?: {
+    mode: MatchmakingMode;
+    rating: number;
+    timedOutAt: number;
+    availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'];
+  };
+};
+
+type ContinueQueueResponseDto = {
+  resumed: boolean;
+  snapshot?: QueueSnapshot;
+  matchFound?: MatchFoundResponseDto;
+};
+
+type BotMatchCreatedResponseDto = {
+  matchId: string;
+  mode: MatchmakingMode;
+};
+
+type DeclineFallbackResponseDto = {
+  declined: boolean;
+};
+
+type MatchmakingSnapshotResponseDto = {
+  snapshot: MatchmakingObservabilitySnapshot;
+};
+
 type GatewayErrorType =
   | 'validation_error'
   | 'transport_error'
@@ -85,31 +150,55 @@ type GatewayErrorType =
 type GatewayLogContext = {
   layer: 'gateway';
   event:
-  | 'socket_connected'
-  | 'socket_disconnected'
-  | 'socket_disconnected_without_match'
-  | 'create_match_requested'
-  | 'create_match_succeeded'
-  | 'create_match_rejected'
-  | 'join_match_requested'
-  | 'join_match_succeeded'
-  | 'join_match_rejected'
-  | 'set_ready_requested'
-  | 'set_ready_succeeded'
-  | 'set_ready_rejected'
-  | 'start_hand_requested'
-  | 'start_hand_succeeded'
-  | 'start_hand_rejected'
-  | 'play_card_requested'
-  | 'play_card_succeeded'
-  | 'play_card_rejected'
-  | 'match_finished'
-  | 'get_ranking_requested'
-  | 'get_ranking_succeeded'
-  | 'get_ranking_rejected'
-  | 'get_state_requested'
-  | 'get_state_succeeded'
-  | 'get_state_rejected';
+    | 'socket_connected'
+    | 'socket_disconnected'
+    | 'socket_disconnected_without_match'
+    | 'create_match_requested'
+    | 'create_match_succeeded'
+    | 'create_match_rejected'
+    | 'join_match_requested'
+    | 'join_match_succeeded'
+    | 'join_match_rejected'
+    | 'join_queue_requested'
+    | 'join_queue_succeeded'
+    | 'join_queue_rejected'
+    | 'queue_timeout'
+    | 'get_matchmaking_snapshot_requested'
+    | 'get_matchmaking_snapshot_succeeded'
+    | 'get_fallback_state_requested'
+    | 'get_fallback_state_succeeded'
+    | 'continue_queue_requested'
+    | 'continue_queue_succeeded'
+    | 'continue_queue_rejected'
+    | 'start_bot_match_requested'
+    | 'start_bot_match_succeeded'
+    | 'start_bot_match_rejected'
+    | 'decline_fallback_requested'
+    | 'decline_fallback_succeeded'
+    | 'decline_fallback_rejected'
+    | 'match_found'
+    | 'leave_queue_requested'
+    | 'leave_queue_succeeded'
+    | 'leave_queue_rejected'
+    | 'get_queue_state_requested'
+    | 'get_queue_state_succeeded'
+    | 'get_queue_state_rejected'
+    | 'set_ready_requested'
+    | 'set_ready_succeeded'
+    | 'set_ready_rejected'
+    | 'start_hand_requested'
+    | 'start_hand_succeeded'
+    | 'start_hand_rejected'
+    | 'play_card_requested'
+    | 'play_card_succeeded'
+    | 'play_card_rejected'
+    | 'match_finished'
+    | 'get_ranking_requested'
+    | 'get_ranking_succeeded'
+    | 'get_ranking_rejected'
+    | 'get_state_requested'
+    | 'get_state_succeeded'
+    | 'get_state_rejected';
   status: 'started' | 'succeeded' | 'rejected' | 'connected' | 'disconnected';
   socketId?: string;
   matchId?: string;
@@ -121,6 +210,9 @@ type GatewayLogContext = {
   viraRank?: string;
   card?: string;
   limit?: number;
+  mode?: MatchmakingMode;
+  rating?: number;
+  queueSize?: number;
   errorType?: GatewayErrorType;
   errorMessage?: string;
 };
@@ -142,6 +234,8 @@ type BotTurnDecisionContext = {
   context: BotDecisionContext;
 };
 
+const QUEUE_MAX_WAIT_MS = 2 * 60 * 1000;
+
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -150,6 +244,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly server!: Server;
 
   private readonly logger = new Logger(GameGateway.name);
+  private readonly matchmakingQueueManager = new MatchmakingQueueManager();
+  private readonly matchmakingPairingPolicy = new MatchmakingPairingPolicy();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -296,6 +392,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null as never;
   }
 
+  private normalizeRequiredQueueMode(value: unknown): MatchmakingMode | null {
+    const mode = this.normalizeMode(value);
+
+    if (mode === '1v1' || mode === '2v2') {
+      return mode;
+    }
+
+    return null;
+  }
+
   private resolveViewerPlayerId(socketId: string, matchId: string): 'P1' | 'P2' | undefined {
     const session = this.roomManager.getSessionBySocketId(socketId);
 
@@ -359,6 +465,219 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.emitRoomState(matchId);
   }
 
+  private emitQueueState(snapshot: QueueSnapshot): void {
+    this.server.emit('queue-state', snapshot);
+  }
+
+  private emitQueueTimeout(mode: MatchmakingMode, socketId: string): void {
+    this.server.to(socketId).emit('queue-timeout', {
+      mode,
+      reason: 'timeout',
+      availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'],
+    });
+  }
+
+  private expireQueueEntries(mode: MatchmakingMode): QueueSnapshot {
+    const result = this.matchmakingQueueManager.expireEntriesOlderThan(mode, QUEUE_MAX_WAIT_MS);
+
+    if (result.removed.length === 0) {
+      return result.snapshot;
+    }
+
+    for (const removed of result.removed) {
+      this.matchmakingQueueManager.registerPendingFallback(removed);
+      this.emitQueueTimeout(mode, removed.socketId);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'queue_timeout',
+        status: 'succeeded',
+        socketId: removed.socketId,
+        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
+        mode,
+        queueSize: result.snapshot.size,
+      });
+    }
+
+    this.emitQueueState(result.snapshot);
+
+    return result.snapshot;
+  }
+
+  private removeFromQueueBySocketId(socketId: string): QueueSnapshot | null {
+    const removed = this.matchmakingQueueManager.leaveBySocketId(socketId);
+
+    if (!removed) {
+      return null;
+    }
+
+    const snapshot = this.matchmakingQueueManager.getQueueSnapshot(removed.mode);
+    this.emitQueueState(snapshot);
+
+    return snapshot;
+  }
+
+  private getSocketById(socketId: string): Socket | null {
+    const socketRegistry = (
+      this.server as unknown as {
+        sockets?: {
+          sockets?: Map<string, Socket>;
+        };
+      }
+    )?.sockets?.sockets;
+
+    if (!socketRegistry) {
+      return null;
+    }
+
+    return socketRegistry.get(socketId) ?? null;
+  }
+
+  private getFallbackStateResponse(socketId: string): FallbackStateResponseDto {
+    const fallback = this.matchmakingQueueManager.getPendingFallbackBySocketId(socketId);
+
+    if (!fallback) {
+      return { hasPendingFallback: false };
+    }
+
+    return {
+      hasPendingFallback: true,
+      fallback: {
+        mode: fallback.mode,
+        rating: fallback.rating,
+        timedOutAt: fallback.timedOutAt,
+        availableActions: ['continue-queue', 'start-bot-match', 'decline-fallback'],
+      },
+    };
+  }
+
+  private async assignSocketToMatch(
+    matchId: string,
+    socket: Socket,
+    identity: ResolvedHandshakeIdentity,
+  ): Promise<void> {
+    await socket.join(matchId);
+
+    const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+      userId: identity.userId,
+    });
+
+    const session = this.roomManager.join(matchId, socket.id, identity);
+
+    socket.emit('player-assigned', {
+      matchId,
+      seatId: session.seatId,
+      teamId: session.teamId,
+      playerId: session.domainPlayerId,
+      playerToken: identity.playerToken,
+      profileId: profileResult.profile.id,
+    });
+  }
+
+  private async assignQueuedPlayersToMatch(matchId: string, pair: MatchmakingPair): Promise<void> {
+    for (const player of pair.players) {
+      const socket = this.getSocketById(player.socketId);
+
+      if (!socket) {
+        continue;
+      }
+
+      const identity: ResolvedHandshakeIdentity = {
+        userId: player.userId,
+        playerToken: player.playerToken,
+      };
+
+      await this.assignSocketToMatch(matchId, socket, identity);
+    }
+  }
+
+  private async createBotFallbackMatch(
+    socket: Socket,
+    fallback: PendingFallbackState,
+  ): Promise<BotMatchCreatedResponseDto> {
+    const result = await this.createMatchUseCase.execute({
+      mode: fallback.mode,
+    });
+
+    const matchId = result.matchId;
+
+    this.roomManager.ensureRoom(matchId, fallback.mode);
+
+    await this.assignSocketToMatch(matchId, socket, {
+      userId: fallback.userId,
+      playerToken: fallback.playerToken,
+    });
+
+    this.fillBotsAndBroadcast(matchId);
+    await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
+
+    return {
+      matchId,
+      mode: fallback.mode,
+    };
+  }
+
+  private async tryCreateMatchFromQueue(
+    mode: MatchmakingMode,
+  ): Promise<MatchFoundResponseDto | null> {
+    const snapshot = this.expireQueueEntries(mode);
+    const pair = this.matchmakingPairingPolicy.findPair(mode, snapshot.playersWaiting);
+
+    if (!pair) {
+      return null;
+    }
+
+    return this.createQueuedMatch(pair);
+  }
+
+  private async createQueuedMatch(pair: MatchmakingPair): Promise<MatchFoundResponseDto> {
+    const result = await this.createMatchUseCase.execute({
+      mode: pair.mode,
+    });
+
+    const matchId = result.matchId;
+    this.roomManager.ensureRoom(matchId, pair.mode);
+
+    for (const player of pair.players) {
+      this.matchmakingQueueManager.leaveBySocketId(player.socketId);
+      this.matchmakingQueueManager.clearPendingFallbackBySocketId(player.socketId);
+    }
+
+    const queueSnapshot = this.matchmakingQueueManager.getQueueSnapshot(pair.mode);
+    this.emitQueueState(queueSnapshot);
+
+    await this.assignQueuedPlayersToMatch(matchId, pair);
+    this.emitRoomState(matchId);
+    await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
+
+    const matchFoundPayload: MatchFoundResponseDto = {
+      matchId,
+      mode: pair.mode,
+      players: pair.players.map((player) => ({
+        userId: player.userId,
+        playerToken: player.playerToken,
+        rating: player.rating,
+      })),
+    };
+
+    for (const player of pair.players) {
+      this.server.to(player.socketId).emit('match-found', matchFoundPayload);
+    }
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'match_found',
+      status: 'succeeded',
+      matchId,
+      mode: pair.mode,
+      queueSize: queueSnapshot.size,
+    });
+
+    return matchFoundPayload;
+  }
+
   private resolveBotProfile(matchId: string, seatId: string | null): BotProfile {
     if (!seatId) {
       return 'balanced';
@@ -407,8 +726,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
-    const hand =
-      playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
+    const hand = playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
 
     return {
       seatId: currentSeat.seatId,
@@ -420,8 +738,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         viraRank: currentHand.viraRank,
         currentRound: this.getCurrentBotRoundView(state),
         player: {
-        playerId,
-        hand,
+          playerId,
+          hand,
         },
       },
     };
@@ -569,6 +887,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(socket: Socket): void {
+    this.removeFromQueueBySocketId(socket.id);
+
     const existingSession = this.roomManager.getSessionBySocketId(socket.id);
     const result = this.roomManager.leave(socket.id);
 
@@ -659,17 +979,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.roomManager.ensureRoom(matchId, dto.mode ?? '2v2');
 
-      await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity);
+      await this.assignSocketToMatch(matchId, socket, identity);
 
-      socket.emit('player-assigned', {
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerToken: identity.playerToken,
-        profileId: profileResult.profile.id,
-      });
+      this.removeFromQueueBySocketId(socket.id);
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
@@ -681,18 +993,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'succeeded',
         socketId: socket.id,
         matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
         playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       };
 
-      if (dto.pointsToWin !== undefined) {
-        successLog.pointsToWin = dto.pointsToWin;
+      if (pointsToWin !== undefined) {
+        successLog.pointsToWin = pointsToWin;
+      }
+
+      if (dto.mode !== undefined) {
+        successLog.mode = dto.mode;
       }
 
       this.logGateway('log', successLog);
-
       return { event: 'created', data: result };
     } catch (error) {
       return this.rejectFromError('create_match_rejected', error, { socketId: socket.id });
@@ -713,10 +1025,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const identity = await this.resolveHandshakeIdentity(socket);
-      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
-        userId: identity.userId,
-      });
-
       const matchIdRaw = payload?.matchId;
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
 
@@ -732,17 +1040,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      await socket.join(matchId);
-      const session = this.roomManager.join(matchId, socket.id, identity);
+      await this.assignSocketToMatch(matchId, socket, identity);
 
-      socket.emit('player-assigned', {
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        playerToken: identity.playerToken,
-        profileId: profileResult.profile.id,
-      });
+      this.removeFromQueueBySocketId(socket.id);
 
       this.fillBotsAndBroadcast(matchId);
       await this.emitPublicMatchState(matchId);
@@ -754,15 +1054,406 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'succeeded',
         socketId: socket.id,
         matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
         playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
       });
 
       return { event: 'joined', data: { matchId } };
     } catch (error) {
       return this.rejectFromError('join_match_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('join-queue')
+  async handleJoinQueue(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: JoinQueuePayload,
+  ): Promise<WsResponse<QueueSnapshot | MatchFoundResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'join_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const existingSession = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (existingSession) {
+        return this.reject(
+          'join_queue_rejected',
+          'Player is already assigned to a room.',
+          {
+            socketId: socket.id,
+            matchId: existingSession.matchId,
+            seatId: existingSession.seatId,
+            teamId: existingSession.teamId,
+            playerId: existingSession.domainPlayerId,
+          },
+          'transport_error',
+        );
+      }
+
+      const mode = this.normalizeRequiredQueueMode(payload?.mode);
+
+      if (!mode) {
+        return this.reject(
+          'join_queue_rejected',
+          'Invalid payload: mode must be either "1v1" or "2v2".',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      this.expireQueueEntries(mode);
+
+      const identity = await this.resolveHandshakeIdentity(socket);
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: identity.userId,
+      });
+
+      const result = this.matchmakingQueueManager.join({
+        socketId: socket.id,
+        userId: identity.userId,
+        playerToken: identity.playerToken,
+        mode,
+        rating: profileResult.profile.rating,
+      });
+
+      socket.emit('queue-joined', result.snapshot);
+      this.emitQueueState(result.snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'join_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
+        mode,
+        rating: profileResult.profile.rating,
+        queueSize: result.snapshot.size,
+      });
+
+      const matchFound = await this.tryCreateMatchFromQueue(mode);
+
+      if (matchFound) {
+        return { event: 'match-found', data: matchFound };
+      }
+
+      return { event: 'queue-joined', data: result.snapshot };
+    } catch (error) {
+      return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('get-matchmaking-snapshot')
+  handleGetMatchmakingSnapshot(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<MatchmakingSnapshotResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_matchmaking_snapshot_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    const snapshot = this.matchmakingQueueManager.getObservabilitySnapshot();
+    const totalWaiting = snapshot.queues['1v1'].waiting + snapshot.queues['2v2'].waiting;
+
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_matchmaking_snapshot_succeeded',
+      status: 'succeeded',
+      socketId: socket.id,
+      queueSize: totalWaiting,
+    });
+
+    return {
+      event: 'matchmaking-snapshot',
+      data: {
+        snapshot,
+      },
+    };
+  }
+
+  @SubscribeMessage('get-fallback-state')
+  handleGetFallbackState(@ConnectedSocket() socket: Socket): WsResponse<FallbackStateResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_fallback_state_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    const response = this.getFallbackStateResponse(socket.id);
+
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_fallback_state_succeeded',
+      status: 'succeeded',
+      socketId: socket.id,
+      ...(response.fallback
+        ? { mode: response.fallback.mode, rating: response.fallback.rating }
+        : {}),
+    });
+
+    return {
+      event: 'fallback-state',
+      data: response,
+    };
+  }
+
+  @SubscribeMessage('continue-queue')
+  async handleContinueQueue(
+    @ConnectedSocket() socket: Socket,
+  ): Promise<WsResponse<ContinueQueueResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'continue_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'continue_queue_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const result = this.matchmakingQueueManager.join({
+        socketId: fallback.socketId,
+        userId: fallback.userId,
+        playerToken: fallback.playerToken,
+        mode: fallback.mode,
+        rating: fallback.rating,
+      });
+
+      socket.emit('queue-resumed', result.snapshot);
+      this.emitQueueState(result.snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'continue_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+        mode: fallback.mode,
+        rating: fallback.rating,
+        queueSize: result.snapshot.size,
+      });
+
+      const matchFound = await this.tryCreateMatchFromQueue(fallback.mode);
+
+      if (matchFound) {
+        return {
+          event: 'queue-resumed',
+          data: {
+            resumed: true,
+            matchFound,
+          },
+        };
+      }
+
+      return {
+        event: 'queue-resumed',
+        data: {
+          resumed: true,
+          snapshot: result.snapshot,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('continue_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('start-bot-match')
+  async handleStartBotMatch(
+    @ConnectedSocket() socket: Socket,
+  ): Promise<WsResponse<BotMatchCreatedResponseDto> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'start_bot_match_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'start_bot_match_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const botMatch = await this.createBotFallbackMatch(socket, fallback);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'start_bot_match_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId: botMatch.matchId,
+        mode: botMatch.mode,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+      });
+
+      return {
+        event: 'bot-match-created',
+        data: botMatch,
+      };
+    } catch (error) {
+      return this.rejectFromError('start_bot_match_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('decline-fallback')
+  handleDeclineFallback(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<DeclineFallbackResponseDto> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'decline_fallback_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+
+      if (!fallback) {
+        return this.reject(
+          'decline_fallback_rejected',
+          'No pending fallback found for this socket.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'decline_fallback_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        mode: fallback.mode,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+      });
+
+      return {
+        event: 'fallback-declined',
+        data: {
+          declined: true,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('decline_fallback_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('leave-queue')
+  handleLeaveQueue(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<QueueLeftResponseDto> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'leave_queue_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const removed = this.matchmakingQueueManager.leaveBySocketId(socket.id);
+
+      if (!removed) {
+        this.logGateway('debug', {
+          layer: 'gateway',
+          event: 'leave_queue_succeeded',
+          status: 'succeeded',
+          socketId: socket.id,
+          queueSize: 0,
+        });
+
+        return {
+          event: 'queue-left',
+          data: { left: false },
+        };
+      }
+
+      const snapshot = this.expireQueueEntries(removed.mode);
+      this.emitQueueState(snapshot);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'leave_queue_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
+        mode: removed.mode,
+        queueSize: snapshot.size,
+      });
+
+      return {
+        event: 'queue-left',
+        data: {
+          left: true,
+          mode: removed.mode,
+          snapshot,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('leave_queue_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('get-queue-state')
+  handleGetQueueState(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetQueueStatePayload,
+  ): WsResponse<QueueSnapshot> | WsResponse<ErrorResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_queue_state_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const mode = this.normalizeRequiredQueueMode(payload?.mode);
+
+      if (!mode) {
+        return this.reject(
+          'get_queue_state_rejected',
+          'Invalid payload: mode must be either "1v1" or "2v2".',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      const snapshot = this.expireQueueEntries(mode);
+
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_queue_state_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        mode,
+        queueSize: snapshot.size,
+      });
+
+      return {
+        event: 'queue-state',
+        data: snapshot,
+      };
+    } catch (error) {
+      return this.rejectFromError('get_queue_state_rejected', error, { socketId: socket.id });
     }
   }
 

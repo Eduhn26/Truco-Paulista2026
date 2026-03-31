@@ -1,6 +1,9 @@
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 
-function identity(userId: string, playerToken?: string): {
+function identity(
+  userId: string,
+  playerToken?: string,
+): {
   userId: string;
   playerToken: string;
 } {
@@ -33,26 +36,38 @@ describe('RoomManager (2v2)', () => {
     roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'));
     roomManager.join('match-1', 'socket-4', identity('user-4', 'token-4'));
 
-    expect(() =>
-      roomManager.join('match-1', 'socket-5', identity('user-5', 'token-5')),
-    ).toThrow('Room match-1 is full');
+    expect(() => roomManager.join('match-1', 'socket-5', identity('user-5', 'token-5'))).toThrow(
+      'Room match-1 is full',
+    );
   });
 
-  it('assigns the next available seat after a disconnect leaves the previous seat empty', () => {
+  it('recovers the same seat after a disconnect when the same token reconnects', () => {
     const roomManager = new RoomManager();
 
     const first = roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
 
+    roomManager.setReady('socket-1', true);
     roomManager.leave('socket-1');
 
     const reconnected = roomManager.join('match-1', 'socket-99', identity('user-1', 'token-1'));
+    const roomState = roomManager.getState('match-1');
 
     expect(first.seatId).toBe('T1A');
-    expect(reconnected.seatId).toBe('T2A');
-    expect(reconnected.teamId).toBe('T2');
-    expect(reconnected.domainPlayerId).toBe('P2');
+    expect(reconnected.seatId).toBe('T1A');
+    expect(reconnected.teamId).toBe('T1');
+    expect(reconnected.domainPlayerId).toBe('P1');
     expect(reconnected.socketId).toBe('socket-99');
     expect(reconnected.userId).toBe('user-1');
+    expect(reconnected.ready).toBe(false);
+    expect(roomState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        socketId: 'socket-99',
+        userId: 'user-1',
+        ready: false,
+        isBot: false,
+      }),
+    ]);
   });
 
   it('only allows start when all four players are ready', () => {
@@ -158,6 +173,43 @@ describe('RoomManager (2v2)', () => {
       'Session not found for socket missing-socket',
     );
   });
+
+  it('keeps queue-created 2v2 matches blocked until all assigned humans are ready', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-2v2', '2v2');
+
+    roomManager.join('queue-match-2v2', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('queue-match-2v2', 'socket-2', identity('user-2', 'token-2'));
+    roomManager.join('queue-match-2v2', 'socket-3', identity('user-3', 'token-3'));
+    roomManager.join('queue-match-2v2', 'socket-4', identity('user-4', 'token-4'));
+
+    const initialState = roomManager.getState('queue-match-2v2');
+
+    expect(initialState.mode).toBe('2v2');
+    expect(initialState.currentTurnSeatId).toBeNull();
+    expect(initialState.players.map((player) => player.ready)).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(roomManager.canStart('queue-match-2v2')).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    roomManager.setReady('socket-2', true);
+    roomManager.setReady('socket-3', true);
+
+    expect(roomManager.canStart('queue-match-2v2')).toBe(false);
+
+    roomManager.setReady('socket-4', true);
+
+    expect(roomManager.canStart('queue-match-2v2')).toBe(true);
+
+    const started = roomManager.beginHand('queue-match-2v2');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+  });
 });
 
 describe('RoomManager (1v1)', () => {
@@ -192,9 +244,9 @@ describe('RoomManager (1v1)', () => {
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
-    expect(() =>
-      roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3')),
-    ).toThrow('Room match-1 is full');
+    expect(() => roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'))).toThrow(
+      'Room match-1 is full',
+    );
   });
 
   it('only allows start when both 1v1 players are ready', () => {
@@ -285,11 +337,7 @@ describe('RoomManager (1v1)', () => {
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    const secondHuman = roomManager.join(
-      'match-1',
-      'socket-2',
-      identity('user-2', 'token-2'),
-    );
+    const secondHuman = roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
     const roomState = roomManager.getState('match-1');
 
@@ -318,6 +366,81 @@ describe('RoomManager (1v1)', () => {
         botProfile: null,
       },
     ]);
+  });
+
+  it('keeps queue-created 1v1 matches blocked until both assigned humans are ready', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-1v1', '1v1');
+
+    const first = roomManager.join('queue-match-1v1', 'socket-1', identity('user-1', 'token-1'));
+    const second = roomManager.join('queue-match-1v1', 'socket-2', identity('user-2', 'token-2'));
+
+    const initialState = roomManager.getState('queue-match-1v1');
+
+    expect(initialState.mode).toBe('1v1');
+    expect(initialState.currentTurnSeatId).toBeNull();
+    expect(first.seatId).toBe('T1A');
+    expect(second.seatId).toBe('T2A');
+    expect(initialState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        ready: false,
+        socketId: 'socket-1',
+        isBot: false,
+      }),
+      expect.objectContaining({
+        seatId: 'T2A',
+        ready: false,
+        socketId: 'socket-2',
+        isBot: false,
+      }),
+    ]);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-1', true);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-2', true);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
+
+    const started = roomManager.beginHand('queue-match-1v1');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+  });
+
+  it('recovers the same 1v1 seat after reconnect and keeps the room blocked until the player is ready again', () => {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('queue-match-1v1', '1v1');
+
+    roomManager.join('queue-match-1v1', 'socket-1', identity('user-1', 'token-1'));
+    roomManager.join('queue-match-1v1', 'socket-2', identity('user-2', 'token-2'));
+
+    roomManager.setReady('socket-1', true);
+    roomManager.setReady('socket-2', true);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
+
+    roomManager.leave('socket-1');
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    const reconnected = roomManager.join(
+      'queue-match-1v1',
+      'socket-99',
+      identity('user-1', 'token-1'),
+    );
+
+    expect(reconnected.seatId).toBe('T1A');
+    expect(reconnected.socketId).toBe('socket-99');
+    expect(reconnected.ready).toBe(false);
+    expect(roomManager.canStart('queue-match-1v1')).toBe(false);
+
+    roomManager.setReady('socket-99', true);
+
+    expect(roomManager.canStart('queue-match-1v1')).toBe(true);
   });
 });
 
@@ -409,11 +532,7 @@ describe('RoomManager bot fill (2v2)', () => {
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    const thirdHuman = roomManager.join(
-      'match-1',
-      'socket-3',
-      identity('user-3', 'token-3'),
-    );
+    const thirdHuman = roomManager.join('match-1', 'socket-3', identity('user-3', 'token-3'));
 
     expect(thirdHuman.seatId).toBe('T1B');
 

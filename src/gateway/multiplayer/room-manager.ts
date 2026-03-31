@@ -206,8 +206,15 @@ export class RoomManager {
     const room = this.rooms.get(session.matchId);
 
     this.sessionsBySocketId.delete(socketId);
-    this.sessionByTokenAndMatch.delete(
+
+    const disconnectedSession: PlayerSession = {
+      ...session,
+      ready: false,
+    };
+
+    this.sessionByTokenAndMatch.set(
       this.buildTokenMatchKey(session.matchId, session.playerToken),
+      disconnectedSession,
     );
 
     if (room) {

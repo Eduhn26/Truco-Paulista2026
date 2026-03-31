@@ -34,29 +34,25 @@ function prefix(): string {
 }
 
 function hr(char = '-', width = 58): void {
-  // eslint-disable-next-line no-console
   console.log(char.repeat(width));
 }
 
 function banner(title: string): void {
   hr('=');
-  // eslint-disable-next-line no-console
+
   console.log(`${prefix()}${title}`);
   hr('=');
 }
 
 function arch(message: string): void {
-  // eslint-disable-next-line no-console
   console.log(`${prefix()}[ARCH] ${message}`);
 }
 
 function out(message: string): void {
-  // eslint-disable-next-line no-console
   console.log(`${prefix()}${message}`);
 }
 
 function indented(message: string): void {
-  // eslint-disable-next-line no-console
   console.log(`          ${message}`);
 }
 
@@ -219,7 +215,6 @@ async function simulateMatch(): Promise<void> {
 }
 
 simulateMatch().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error(err);
   process.exit(1);
 });

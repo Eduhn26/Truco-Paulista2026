@@ -21,11 +21,11 @@ export class Hand {
   private readonly playerTwoHand: Card[];
   private finished = false;
 
-constructor(
-  private readonly viraRank: Rank,
-  playerOneHand: Card[] = [],
-  playerTwoHand: Card[] = [],
-) {
+  constructor(
+    private readonly viraRank: Rank,
+    playerOneHand: Card[] = [],
+    playerTwoHand: Card[] = [],
+  ) {
     this.rounds = [new Round(this.viraRank)];
     this.playerOneHand = [...playerOneHand];
     this.playerTwoHand = [...playerTwoHand];
