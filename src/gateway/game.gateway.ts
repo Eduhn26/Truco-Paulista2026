@@ -470,6 +470,53 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return snapshot;
   }
 
+  private getSocketById(socketId: string): Socket | null {
+    const socketRegistry = (
+      this.server as unknown as {
+        sockets?: {
+          sockets?: Map<string, Socket>;
+        };
+      }
+    )?.sockets?.sockets;
+
+    if (!socketRegistry) {
+      return null;
+    }
+
+    return socketRegistry.get(socketId) ?? null;
+  }
+  private async assignQueuedPlayersToMatch(matchId: string, pair: MatchmakingPair): Promise<void> {
+    for (const player of pair.players) {
+      const socket = this.getSocketById(player.socketId);
+
+      if (!socket) {
+        continue;
+      }
+
+      await socket.join(matchId);
+
+      const identity: ResolvedHandshakeIdentity = {
+        userId: player.userId,
+        playerToken: player.playerToken,
+      };
+
+      const profileResult = await this.getOrCreatePlayerProfileUseCase.execute({
+        userId: player.userId,
+      });
+
+      const session = this.roomManager.join(matchId, socket.id, identity);
+
+      socket.emit('player-assigned', {
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        playerToken: identity.playerToken,
+        profileId: profileResult.profile.id,
+      });
+    }
+  }
+
   private async tryCreateMatchFromQueue(
     mode: MatchmakingMode,
   ): Promise<MatchFoundResponseDto | null> {
@@ -497,6 +544,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const queueSnapshot = this.matchmakingQueueManager.getQueueSnapshot(pair.mode);
     this.emitQueueState(queueSnapshot);
+
+    await this.assignQueuedPlayersToMatch(matchId, pair);
+    this.emitRoomState(matchId);
+    await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
 
     const matchFoundPayload: MatchFoundResponseDto = {
       matchId,

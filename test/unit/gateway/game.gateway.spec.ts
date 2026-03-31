@@ -3,6 +3,9 @@ import { GameGateway } from '../../../src/gateway/game.gateway';
 type GatewayServerMock = {
   to: jest.Mock;
   emit: jest.Mock;
+  sockets: {
+    sockets: Map<string, TestSocket>;
+  };
 };
 
 type GameGatewayServerAccess = {
@@ -29,7 +32,6 @@ type PlayerProfileResult = {
     rating: number;
   };
 };
-
 function createSocket(options?: { id?: string; authToken?: string; token?: string }): TestSocket {
   const auth: Record<string, unknown> = {};
 
@@ -54,6 +56,8 @@ function createSocket(options?: { id?: string; authToken?: string; token?: strin
 
 describe('GameGateway bot profile flow', () => {
   function createGateway() {
+    const socketRegistry = new Map<string, TestSocket>();
+
     const createMatchUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'queue-match-1' }),
     };
@@ -78,7 +82,10 @@ describe('GameGateway bot profile flow', () => {
     const roomManager = {
       ensureRoom: jest.fn(),
       join: jest.fn(),
-      getState: jest.fn(),
+      getState: jest.fn().mockReturnValue({
+        currentTurnSeatId: null,
+        players: [],
+      }),
       getBotProfile: jest.fn(),
       advanceTurn: jest.fn(),
       tryMarkRatingApplied: jest.fn().mockReturnValue(false),
@@ -118,6 +125,9 @@ describe('GameGateway bot profile flow', () => {
         emit: jest.fn(),
       })),
       emit: jest.fn(),
+      sockets: {
+        sockets: socketRegistry,
+      },
     };
 
     return {
@@ -137,6 +147,9 @@ describe('GameGateway bot profile flow', () => {
         botDecisionPort,
       },
       server: gatewayServerAccess.server,
+      registerSocket(socket: TestSocket) {
+        socketRegistry.set(socket.id, socket);
+      },
     };
   }
 
@@ -511,7 +524,7 @@ describe('GameGateway bot profile flow', () => {
   });
 
   it('creates a match when the queue reaches enough compatible players', async () => {
-    const { gateway, deps, server } = createGateway();
+    const { gateway, deps, server, registerSocket } = createGateway();
     const firstSocket = createSocket({
       id: 'socket-match-1',
       authToken: 'auth-token-match-1',
@@ -520,6 +533,9 @@ describe('GameGateway bot profile flow', () => {
       id: 'socket-match-2',
       authToken: 'auth-token-match-2',
     });
+
+    registerSocket(firstSocket);
+    registerSocket(secondSocket);
 
     deps.authTokenService.verifyToken
       .mockReturnValueOnce({ sub: 'auth-user-match-1' })
@@ -537,7 +553,43 @@ describe('GameGateway bot profile flow', () => {
           id: 'profile-match-2',
           rating: 1210,
         },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-match-1',
+          rating: 1200,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-match-2',
+          rating: 1210,
+        },
       });
+
+    deps.roomManager.join
+      .mockReturnValueOnce({
+        matchId: 'queue-match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      })
+      .mockReturnValueOnce({
+        matchId: 'queue-match-1',
+        seatId: 'T2A',
+        teamId: 'T2',
+        domainPlayerId: 'P2',
+      });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'queue-match-1',
+      state: 'pending',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: null,
+    });
 
     await gateway.handleJoinQueue(firstSocket as never, { mode: '1v1' });
     const response = await gateway.handleJoinQueue(secondSocket as never, { mode: '1v1' });
@@ -547,6 +599,39 @@ describe('GameGateway bot profile flow', () => {
     });
 
     expect(deps.roomManager.ensureRoom).toHaveBeenCalledWith('queue-match-1', '1v1');
+
+    expect(firstSocket.join).toHaveBeenCalledWith('queue-match-1');
+    expect(secondSocket.join).toHaveBeenCalledWith('queue-match-1');
+
+    expect(deps.roomManager.join).toHaveBeenCalledWith('queue-match-1', 'socket-match-1', {
+      userId: 'auth-user-match-1',
+      playerToken: 'auth:auth-user-match-1',
+    });
+    expect(deps.roomManager.join).toHaveBeenCalledWith('queue-match-1', 'socket-match-2', {
+      userId: 'auth-user-match-2',
+      playerToken: 'auth:auth-user-match-2',
+    });
+
+    expect(firstSocket.emit).toHaveBeenCalledWith(
+      'player-assigned',
+      expect.objectContaining({
+        matchId: 'queue-match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        playerId: 'P1',
+        profileId: 'profile-match-1',
+      }),
+    );
+    expect(secondSocket.emit).toHaveBeenCalledWith(
+      'player-assigned',
+      expect.objectContaining({
+        matchId: 'queue-match-1',
+        seatId: 'T2A',
+        teamId: 'T2',
+        playerId: 'P2',
+        profileId: 'profile-match-2',
+      }),
+    );
 
     expect(response).toEqual({
       event: 'match-found',
@@ -599,6 +684,7 @@ describe('GameGateway bot profile flow', () => {
     const response = gateway.handleGetQueueState(createSocket() as never, {
       mode: '1v1',
     });
+
     expect(response).toEqual({
       event: 'queue-state',
       data: {
