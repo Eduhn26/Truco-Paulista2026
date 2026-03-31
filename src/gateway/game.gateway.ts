@@ -41,9 +41,11 @@ import { DomainError } from '@game/domain/exceptions/domain-error';
 import {
   MatchmakingQueueManager,
   type MatchmakingMode,
+  type MatchmakingObservabilitySnapshot,
   type PendingFallbackState,
   type QueueSnapshot,
 } from './matchmaking/matchmaking-queue-manager';
+
 import {
   MatchmakingPairingPolicy,
   type MatchmakingPair,
@@ -135,6 +137,10 @@ type DeclineFallbackResponseDto = {
   declined: boolean;
 };
 
+type MatchmakingSnapshotResponseDto = {
+  snapshot: MatchmakingObservabilitySnapshot;
+};
+
 type GatewayErrorType =
   | 'validation_error'
   | 'transport_error'
@@ -157,6 +163,8 @@ type GatewayLogContext = {
     | 'join_queue_succeeded'
     | 'join_queue_rejected'
     | 'queue_timeout'
+    | 'get_matchmaking_snapshot_requested'
+    | 'get_matchmaking_snapshot_succeeded'
     | 'get_fallback_state_requested'
     | 'get_fallback_state_succeeded'
     | 'continue_queue_requested'
@@ -1135,6 +1143,36 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
     }
+  }
+
+  @SubscribeMessage('get-matchmaking-snapshot')
+  handleGetMatchmakingSnapshot(
+    @ConnectedSocket() socket: Socket,
+  ): WsResponse<MatchmakingSnapshotResponseDto> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_matchmaking_snapshot_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    const snapshot = this.matchmakingQueueManager.getObservabilitySnapshot();
+    const totalWaiting = snapshot.queues['1v1'].waiting + snapshot.queues['2v2'].waiting;
+
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_matchmaking_snapshot_succeeded',
+      status: 'succeeded',
+      socketId: socket.id,
+      queueSize: totalWaiting,
+    });
+
+    return {
+      event: 'matchmaking-snapshot',
+      data: {
+        snapshot,
+      },
+    };
   }
 
   @SubscribeMessage('get-fallback-state')

@@ -702,6 +702,96 @@ describe('GameGateway bot profile flow', () => {
     });
   });
 
+  it('returns matchmaking observability snapshot with waiting queues and pending fallbacks', async () => {
+    const { gateway, deps } = createGateway();
+    const waitingSocket = createSocket({
+      id: 'socket-obs-waiting',
+      authToken: 'auth-token-obs-waiting',
+    });
+    const timeoutSocket = createSocket({
+      id: 'socket-obs-timeout',
+      authToken: 'auth-token-obs-timeout',
+    });
+
+    deps.authTokenService.verifyToken
+      .mockReturnValueOnce({ sub: 'auth-user-obs-waiting' })
+      .mockReturnValueOnce({ sub: 'auth-user-obs-timeout' });
+
+    deps.getOrCreatePlayerProfileUseCase.execute
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-obs-waiting',
+          rating: 1400,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-obs-timeout',
+          rating: 1500,
+        },
+      });
+
+    const nowSpy = jest.spyOn(Date, 'now');
+
+    nowSpy.mockReturnValue(1_000);
+    await gateway.handleJoinQueue(waitingSocket as never, { mode: '2v2' });
+
+    nowSpy.mockReturnValue(2_000);
+    await gateway.handleJoinQueue(timeoutSocket as never, { mode: '1v1' });
+
+    nowSpy.mockReturnValue(2_000 + 2 * 60 * 1000 + 1);
+    gateway.handleGetQueueState(createSocket() as never, {
+      mode: '1v1',
+    });
+
+    nowSpy.mockReturnValue(9_999);
+
+    const response = gateway.handleGetMatchmakingSnapshot(createSocket() as never);
+
+    expect(response).toEqual({
+      event: 'matchmaking-snapshot',
+      data: {
+        snapshot: {
+          generatedAt: 9_999,
+          queues: {
+            '1v1': {
+              waiting: 0,
+              playersWaiting: [],
+            },
+            '2v2': {
+              waiting: 1,
+              playersWaiting: [
+                {
+                  socketId: 'socket-obs-waiting',
+                  userId: 'auth-user-obs-waiting',
+                  rating: 1400,
+                  joinedAt: 1_000,
+                },
+              ],
+            },
+          },
+          pendingFallbacks: {
+            total: 1,
+            byMode: {
+              '1v1': 1,
+              '2v2': 0,
+            },
+            players: [
+              {
+                socketId: 'socket-obs-timeout',
+                userId: 'auth-user-obs-timeout',
+                playerToken: 'auth:auth-user-obs-timeout',
+                mode: '1v1',
+                rating: 1500,
+                timedOutAt: 122_001,
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+
   it('leaves queue and broadcasts updated snapshot', async () => {
     const { gateway, deps, server } = createGateway();
     const socket = createSocket({
