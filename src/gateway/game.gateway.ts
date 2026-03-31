@@ -43,6 +43,10 @@ import {
   type MatchmakingMode,
   type QueueSnapshot,
 } from './matchmaking/matchmaking-queue-manager';
+import {
+  MatchmakingPairingPolicy,
+  type MatchmakingPair,
+} from './matchmaking/matchmaking-pairing-policy';
 import { RoomManager } from './multiplayer/room-manager';
 
 type ErrorResponseDto = { message: string };
@@ -95,6 +99,16 @@ type QueueLeftResponseDto = {
   snapshot?: QueueSnapshot;
 };
 
+type MatchFoundResponseDto = {
+  matchId: string;
+  mode: MatchmakingMode;
+  players: Array<{
+    userId: string;
+    playerToken: string;
+    rating: number;
+  }>;
+};
+
 type GatewayErrorType =
   | 'validation_error'
   | 'transport_error'
@@ -116,6 +130,7 @@ type GatewayLogContext = {
     | 'join_queue_requested'
     | 'join_queue_succeeded'
     | 'join_queue_rejected'
+    | 'match_found'
     | 'leave_queue_requested'
     | 'leave_queue_succeeded'
     | 'leave_queue_rejected'
@@ -182,6 +197,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly logger = new Logger(GameGateway.name);
   private readonly matchmakingQueueManager = new MatchmakingQueueManager();
+  private readonly matchmakingPairingPolicy = new MatchmakingPairingPolicy();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -416,6 +432,60 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.emitQueueState(snapshot);
 
     return snapshot;
+  }
+
+  private async tryCreateMatchFromQueue(
+    mode: MatchmakingMode,
+  ): Promise<MatchFoundResponseDto | null> {
+    const snapshot = this.matchmakingQueueManager.getQueueSnapshot(mode);
+    const pair = this.matchmakingPairingPolicy.findPair(mode, snapshot.playersWaiting);
+
+    if (!pair) {
+      return null;
+    }
+
+    return this.createQueuedMatch(pair);
+  }
+
+  private async createQueuedMatch(pair: MatchmakingPair): Promise<MatchFoundResponseDto> {
+    const result = await this.createMatchUseCase.execute({
+      mode: pair.mode,
+    });
+
+    const matchId = result.matchId;
+    this.roomManager.ensureRoom(matchId, pair.mode);
+
+    for (const player of pair.players) {
+      this.matchmakingQueueManager.leaveBySocketId(player.socketId);
+    }
+
+    const queueSnapshot = this.matchmakingQueueManager.getQueueSnapshot(pair.mode);
+    this.emitQueueState(queueSnapshot);
+
+    const matchFoundPayload: MatchFoundResponseDto = {
+      matchId,
+      mode: pair.mode,
+      players: pair.players.map((player) => ({
+        userId: player.userId,
+        playerToken: player.playerToken,
+        rating: player.rating,
+      })),
+    };
+
+    for (const player of pair.players) {
+      this.server.to(player.socketId).emit('match-found', matchFoundPayload);
+    }
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'match_found',
+      status: 'succeeded',
+      matchId,
+      mode: pair.mode,
+      queueSize: queueSnapshot.size,
+    });
+
+    return matchFoundPayload;
   }
 
   private resolveBotProfile(matchId: string, seatId: string | null): BotProfile {
@@ -834,7 +904,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleJoinQueue(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: JoinQueuePayload,
-  ): Promise<WsResponse<QueueSnapshot> | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<QueueSnapshot | MatchFoundResponseDto> | WsResponse<ErrorResponseDto>> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'join_queue_requested',
@@ -897,6 +967,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         rating: profileResult.profile.rating,
         queueSize: result.snapshot.size,
       });
+
+      const matchFound = await this.tryCreateMatchFromQueue(mode);
+
+      if (matchFound) {
+        return { event: 'match-found', data: matchFound };
+      }
 
       return { event: 'queue-joined', data: result.snapshot };
     } catch (error) {
