@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
@@ -69,6 +70,11 @@ const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
     {
       provide: SaveMatchRecordUseCase,
       useFactory: (repo: MatchRecordRepository) => new SaveMatchRecordUseCase(repo),
+      inject: [MATCH_RECORD_REPOSITORY],
+    },
+    {
+      provide: GetMatchHistoryUseCase,
+      useFactory: (repo: MatchRecordRepository) => new GetMatchHistoryUseCase(repo),
       inject: [MATCH_RECORD_REPOSITORY],
     },
     {
