@@ -1,3 +1,4 @@
+import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -8,19 +9,7 @@ import {
   WebSocketServer,
   type WsResponse,
 } from '@nestjs/websockets';
-import { Inject, Logger } from '@nestjs/common';
 import type { Server, Socket } from 'socket.io';
-
-import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
-import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
-import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
-import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
-import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
-import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
-import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
-import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
-import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
-import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import type {
@@ -37,21 +26,27 @@ import {
   type BotProfile,
   type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
+import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
+import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
+import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
+import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
+import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
+import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
+import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
+import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
 
-import {
-  MatchmakingQueueManager,
-  type MatchmakingMode,
-  type MatchmakingObservabilitySnapshot,
-  type PendingFallbackState,
-  type QueueSnapshot,
+import { GatewayMatchmakingService } from './matchmaking/gateway-matchmaking.service';
+import type {
+  MatchmakingMode,
+  MatchmakingObservabilitySnapshot,
+  PendingFallbackState,
+  QueueSnapshot,
 } from './matchmaking/matchmaking-queue-manager';
-
-import {
-  MatchmakingPairingPolicy,
-  type MatchmakingPair,
-} from './matchmaking/matchmaking-pairing-policy';
+import type { MatchmakingPair } from './matchmaking/matchmaking-pairing-policy';
 import { RoomManager } from './multiplayer/room-manager';
 
 type ErrorResponseDto = { message: string };
@@ -252,8 +247,6 @@ type BotTurnDecisionContext = {
   context: BotDecisionContext;
 };
 
-const QUEUE_MAX_WAIT_MS = 2 * 60 * 1000;
-
 @WebSocketGateway({
   cors: { origin: '*' },
 })
@@ -262,8 +255,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly server!: Server;
 
   private readonly logger = new Logger(GameGateway.name);
-  private readonly matchmakingQueueManager = new MatchmakingQueueManager();
-  private readonly matchmakingPairingPolicy = new MatchmakingPairingPolicy();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -278,6 +269,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
     private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
+    private readonly gatewayMatchmakingService: GatewayMatchmakingService,
     @Inject(BOT_DECISION_PORT)
     private readonly botDecisionPort: BotDecisionPort,
   ) {}
@@ -498,22 +490,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private expireQueueEntries(mode: MatchmakingMode): QueueSnapshot {
-    const result = this.matchmakingQueueManager.expireEntriesOlderThan(mode, QUEUE_MAX_WAIT_MS);
+    const result = this.gatewayMatchmakingService.getQueueState(mode);
 
-    if (result.removed.length === 0) {
+    if (result.timedOutFallbacks.length === 0) {
       return result.snapshot;
     }
 
-    for (const removed of result.removed) {
-      this.matchmakingQueueManager.registerPendingFallback(removed);
-      this.emitQueueTimeout(mode, removed.socketId);
+    for (const fallback of result.timedOutFallbacks) {
+      this.emitQueueTimeout(mode, fallback.socketId);
 
       this.logGateway('log', {
         layer: 'gateway',
         event: 'queue_timeout',
         status: 'succeeded',
-        socketId: removed.socketId,
-        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
+        socketId: fallback.socketId,
+        playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
         mode,
         queueSize: result.snapshot.size,
       });
@@ -525,16 +516,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private removeFromQueueBySocketId(socketId: string): QueueSnapshot | null {
-    const removed = this.matchmakingQueueManager.leaveBySocketId(socketId);
+    const result = this.gatewayMatchmakingService.leaveQueue(socketId);
 
-    if (!removed) {
+    if (!result.removed || !result.snapshot) {
       return null;
     }
 
-    const snapshot = this.matchmakingQueueManager.getQueueSnapshot(removed.mode);
-    this.emitQueueState(snapshot);
+    this.emitQueueState(result.snapshot);
 
-    return snapshot;
+    return result.snapshot;
   }
 
   private getSocketById(socketId: string): Socket | null {
@@ -554,7 +544,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private getFallbackStateResponse(socketId: string): FallbackStateResponseDto {
-    const fallback = this.matchmakingQueueManager.getPendingFallbackBySocketId(socketId);
+    const fallback = this.gatewayMatchmakingService.getFallbackState(socketId);
 
     if (!fallback) {
       return { hasPendingFallback: false };
@@ -641,14 +631,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async tryCreateMatchFromQueue(
     mode: MatchmakingMode,
   ): Promise<MatchFoundResponseDto | null> {
-    const snapshot = this.expireQueueEntries(mode);
-    const pair = this.matchmakingPairingPolicy.findPair(mode, snapshot.playersWaiting);
+    const result = this.gatewayMatchmakingService.tryResolvePair(mode);
 
-    if (!pair) {
+    if (result.timedOutFallbacks.length > 0) {
+      for (const fallback of result.timedOutFallbacks) {
+        this.emitQueueTimeout(mode, fallback.socketId);
+
+        this.logGateway('log', {
+          layer: 'gateway',
+          event: 'queue_timeout',
+          status: 'succeeded',
+          socketId: fallback.socketId,
+          playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
+          mode,
+          queueSize: result.snapshot.size,
+        });
+      }
+
+      this.emitQueueState(result.snapshot);
+    }
+
+    if (!result.pair) {
       return null;
     }
 
-    return this.createQueuedMatch(pair);
+    return this.createQueuedMatch(result.pair);
   }
 
   private async createQueuedMatch(pair: MatchmakingPair): Promise<MatchFoundResponseDto> {
@@ -659,12 +666,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const matchId = result.matchId;
     this.roomManager.ensureRoom(matchId, pair.mode);
 
-    for (const player of pair.players) {
-      this.matchmakingQueueManager.leaveBySocketId(player.socketId);
-      this.matchmakingQueueManager.clearPendingFallbackBySocketId(player.socketId);
-    }
-
-    const queueSnapshot = this.matchmakingQueueManager.getQueueSnapshot(pair.mode);
+    const queueSnapshot = this.gatewayMatchmakingService.completeMatchedPair(pair);
     this.emitQueueState(queueSnapshot);
 
     await this.assignQueuedPlayersToMatch(matchId, pair);
@@ -1131,7 +1133,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: identity.userId,
       });
 
-      const result = this.matchmakingQueueManager.join({
+      const snapshot = this.gatewayMatchmakingService.joinQueue({
         socketId: socket.id,
         userId: identity.userId,
         playerToken: identity.playerToken,
@@ -1139,8 +1141,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         rating: profileResult.profile.rating,
       });
 
-      socket.emit('queue-joined', result.snapshot);
-      this.emitQueueState(result.snapshot);
+      socket.emit('queue-joined', snapshot);
+      this.emitQueueState(snapshot);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -1150,7 +1152,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerTokenSuffix: this.maskPlayerToken(identity.playerToken),
         mode,
         rating: profileResult.profile.rating,
-        queueSize: result.snapshot.size,
+        queueSize: snapshot.size,
       });
 
       const matchFound = await this.tryCreateMatchFromQueue(mode);
@@ -1159,7 +1161,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { event: 'match-found', data: matchFound };
       }
 
-      return { event: 'queue-joined', data: result.snapshot };
+      return { event: 'queue-joined', data: snapshot };
     } catch (error) {
       return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
     }
@@ -1176,7 +1178,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       socketId: socket.id,
     });
 
-    const snapshot = this.matchmakingQueueManager.getObservabilitySnapshot();
+    const snapshot = this.gatewayMatchmakingService.getObservabilitySnapshot();
     const totalWaiting = snapshot.queues['1v1'].waiting + snapshot.queues['2v2'].waiting;
 
     this.logGateway('debug', {
@@ -1234,9 +1236,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+      const result = this.gatewayMatchmakingService.continueQueue(socket.id);
 
-      if (!fallback) {
+      if (!result) {
         return this.reject(
           'continue_queue_rejected',
           'No pending fallback found for this socket.',
@@ -1245,16 +1247,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const result = this.matchmakingQueueManager.join({
-        socketId: fallback.socketId,
-        userId: fallback.userId,
-        playerToken: fallback.playerToken,
-        mode: fallback.mode,
-        rating: fallback.rating,
-      });
+      const { fallback, snapshot } = result;
 
-      socket.emit('queue-resumed', result.snapshot);
-      this.emitQueueState(result.snapshot);
+      socket.emit('queue-resumed', snapshot);
+      this.emitQueueState(snapshot);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -1264,7 +1260,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerTokenSuffix: this.maskPlayerToken(fallback.playerToken),
         mode: fallback.mode,
         rating: fallback.rating,
-        queueSize: result.snapshot.size,
+        queueSize: snapshot.size,
       });
 
       const matchFound = await this.tryCreateMatchFromQueue(fallback.mode);
@@ -1283,7 +1279,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         event: 'queue-resumed',
         data: {
           resumed: true,
-          snapshot: result.snapshot,
+          snapshot,
         },
       };
     } catch (error) {
@@ -1303,7 +1299,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+      const fallback = this.gatewayMatchmakingService.takeFallback(socket.id);
 
       if (!fallback) {
         return this.reject(
@@ -1347,7 +1343,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const fallback = this.matchmakingQueueManager.clearPendingFallbackBySocketId(socket.id);
+      const fallback = this.gatewayMatchmakingService.takeFallback(socket.id);
 
       if (!fallback) {
         return this.reject(
@@ -1390,9 +1386,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const removed = this.matchmakingQueueManager.leaveBySocketId(socket.id);
+      const result = this.gatewayMatchmakingService.leaveQueue(socket.id);
 
-      if (!removed) {
+      if (!result.removed || !result.snapshot) {
         this.logGateway('debug', {
           layer: 'gateway',
           event: 'leave_queue_succeeded',
@@ -1407,25 +1403,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
       }
 
-      const snapshot = this.expireQueueEntries(removed.mode);
-      this.emitQueueState(snapshot);
+      this.emitQueueState(result.snapshot);
 
       this.logGateway('log', {
         layer: 'gateway',
         event: 'leave_queue_succeeded',
         status: 'succeeded',
         socketId: socket.id,
-        playerTokenSuffix: this.maskPlayerToken(removed.playerToken),
-        mode: removed.mode,
-        queueSize: snapshot.size,
+        playerTokenSuffix: this.maskPlayerToken(result.removed.playerToken),
+        mode: result.removed.mode,
+        queueSize: result.snapshot.size,
       });
 
       return {
         event: 'queue-left',
         data: {
           left: true,
-          mode: removed.mode,
-          snapshot,
+          mode: result.removed.mode,
+          snapshot: result.snapshot,
         },
       };
     } catch (error) {
