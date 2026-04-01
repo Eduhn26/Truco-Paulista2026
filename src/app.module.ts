@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { AuthModule } from '@game/auth/auth.module';
 import { GameModule } from '@game/modules/game.module';
 import { RequestLoggingInterceptor } from './application/http/interceptors/request-logging.interceptor';
+import { RequestMetricsInterceptor } from './application/http/interceptors/request-metrics.interceptor';
 import { RequestContextMiddleware } from './application/http/middleware/request-context.middleware';
 import { SocketRateLimitGuard } from './gateway/security/socket-rate-limit.guard';
 import { HealthModule } from './health/health.module';
@@ -23,6 +24,10 @@ import { HealthModule } from './health/health.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestLoggingInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RequestMetricsInterceptor,
     },
   ],
 })

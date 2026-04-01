@@ -1,5 +1,9 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 
+import {
+  HttpMetricsService,
+  type HttpMetricsSnapshot,
+} from '../application/http/metrics/http-metrics.service';
 import { HealthService, type ReadinessResponse } from './health.service';
 
 type LivenessResponse = {
@@ -11,7 +15,10 @@ type LivenessResponse = {
 
 @Controller('health')
 export class HealthController {
-  constructor(private readonly healthService: HealthService) {}
+  constructor(
+    private readonly healthService: HealthService,
+    private readonly httpMetricsService: HttpMetricsService,
+  ) {}
 
   @Get('live')
   getLiveness(): LivenessResponse {
@@ -34,5 +41,10 @@ export class HealthController {
     }
 
     return readiness.response;
+  }
+
+  @Get('metrics')
+  getMetrics(): HttpMetricsSnapshot {
+    return this.httpMetricsService.getSnapshot();
   }
 }
