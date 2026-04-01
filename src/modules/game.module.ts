@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 
+import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
-import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
@@ -14,11 +14,16 @@ import { AuthModule } from '@game/auth/auth.module';
 import { GameGateway } from '@game/gateway/game.gateway';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
+import { PrismaMatchRecordRepository } from '@game/infrastructure/persistence/prisma-match-record.repository';
+import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
-import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
 
-import { MATCH_REPOSITORY, PLAYER_PROFILE_REPOSITORY } from './game.tokens';
+import {
+  MATCH_RECORD_REPOSITORY,
+  MATCH_REPOSITORY,
+  PLAYER_PROFILE_REPOSITORY,
+} from './game.tokens';
 
 const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
 
@@ -29,9 +34,11 @@ const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
     RoomManager,
     PrismaMatchRepository,
     PrismaPlayerProfileRepository,
+    PrismaMatchRecordRepository,
     HeuristicBotAdapter,
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
     { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
+    { provide: MATCH_RECORD_REPOSITORY, useClass: PrismaMatchRecordRepository },
     {
       provide: BOT_DECISION_PORT,
       useFactory: (adapter: BotDecisionPort) => adapter,

@@ -228,10 +228,7 @@ function assertBotProfile(value: string | null): 'balanced' | 'aggressive' | 'ca
   throw new Error(`unsupported botProfile: ${value}`);
 }
 
-function assertReplayPayload(
-  value: unknown,
-  eventType: string,
-): MatchReplayEventPayloadDto {
+function assertReplayPayload(value: unknown, eventType: string): MatchReplayEventPayloadDto {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`invalid replay payload for eventType: ${eventType}`);
   }
