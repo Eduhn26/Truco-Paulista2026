@@ -14,6 +14,8 @@ import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-r
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
+import { MatchmakingPairingPolicy } from '@game/gateway/matchmaking/matchmaking-pairing-policy';
+import { MatchmakingQueueManager } from '@game/gateway/matchmaking/matchmaking-queue-manager';
 import { AuthModule } from '@game/auth/auth.module';
 import { GameGateway } from '@game/gateway/game.gateway';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
@@ -42,6 +44,8 @@ const gameModuleLogger = new Logger('GameModule');
   providers: [
     GameGateway,
     RoomManager,
+    MatchmakingQueueManager,
+    MatchmakingPairingPolicy,
     PrismaMatchRepository,
     PrismaPlayerProfileRepository,
     PrismaMatchRecordRepository,

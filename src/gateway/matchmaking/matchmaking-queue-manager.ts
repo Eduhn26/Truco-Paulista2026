@@ -1,3 +1,5 @@
+import { Injectable } from '@nestjs/common';
+
 export type MatchmakingMode = '1v1' | '2v2';
 
 export type QueueEntryIdentity = {
@@ -69,6 +71,7 @@ export type MatchmakingObservabilitySnapshot = {
 
 const SUPPORTED_MODES: MatchmakingMode[] = ['1v1', '2v2'];
 
+@Injectable()
 export class MatchmakingQueueManager {
   private readonly queues = new Map<MatchmakingMode, QueueEntry[]>();
   private readonly pendingFallbackBySocketId = new Map<string, PendingFallbackState>();
