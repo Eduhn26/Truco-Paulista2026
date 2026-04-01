@@ -4,10 +4,12 @@ import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
+import type { MatchRecordRepository } from '@game/application/ports/match-record.repository';
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import { AuthModule } from '@game/auth/auth.module';
@@ -63,6 +65,11 @@ const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
       provide: ViewMatchStateUseCase,
       useFactory: (repo: MatchRepository) => new ViewMatchStateUseCase(repo),
       inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: SaveMatchRecordUseCase,
+      useFactory: (repo: MatchRecordRepository) => new SaveMatchRecordUseCase(repo),
+      inject: [MATCH_RECORD_REPOSITORY],
     },
     {
       provide: GetOrCreatePlayerProfileUseCase,
