@@ -54,7 +54,7 @@ O Truco Paulista foi escolhido por ser intencionalmente desafiador — regras de
 | 12 | Arquitetura de bots — boundary, profiles, adapter, input transport-agnostic | ✅ |
 | 13 | Matchmaking — fila pública, pairing, timeout, fallback, reconexão | ✅ |
 | 14 | Histórico de partidas + replay | ✅ |
-| 15 | Serviço de IA em Python | 🔜 |
+| 15 | Python AI Service — serviço externo, contrato HTTP, adapter, wiring e observabilidade | ✅ |
 | 16 | Hardening — segurança + performance | 🔜 |
 
 ---
@@ -70,7 +70,7 @@ Gateway → Application → Domain
 Infrastructure implementa Application Ports
 ```
 
-O Domínio nunca conhece: `NestJS` · `Prisma` · `Socket.IO` · `OAuth` · logging · validação de transporte
+O Domínio nunca conhece: `NestJS` · `Prisma` · `Socket.IO` · `OAuth` · `FastAPI` · logging · validação de transporte
 
 ### Camadas
 
@@ -78,11 +78,28 @@ O Domínio nunca conhece: `NestJS` · `Prisma` · `Socket.IO` · `OAuth` · logg
 |--------|-----------------|
 | **Domain** | Regras puras do Truco — entidades, value objects, invariantes |
 | **Application** | Use Cases, DTOs, orquestração, ports, mappers |
-| **Infrastructure** | Persistência, Prisma, adaptadores de auth, bots, histórico e replay |
+| **Infrastructure** | Persistência, Prisma, adaptadores de auth, bots, replay, histórico e integração Python |
 | **Gateway** | WebSocket, estado efêmero de sala/turno, matchmaking, leitura histórica |
 | **Auth** | Estratégias OAuth, emissão de auth token |
 | **Frontend** | Sessão no browser, UI autenticada, coordenação de socket |
+| **Python Bot Service** | Runtime externo de decisão — contrato HTTP explícito, validação Pydantic |
 | **Health** | Lifecycle de startup, endpoints operacionais, logging estruturado |
+
+### Boundary de bot
+
+A regra central da arquitetura de bots:
+
+```
+Application define a boundary
+Infrastructure escolhe a implementação
+Gateway nunca conhece o adapter concreto
+
+BOT_DECISION_PORT
+├── HeuristicBotAdapter   ← baseline local, sempre disponível
+└── PythonBotAdapter      ← runtime remoto, com fallback seguro
+```
+
+Isso permite evolução incremental sem refactor transversal.
 
 ### Testabilidade
 
@@ -126,22 +143,29 @@ Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay
 - `MatchRecord` como boundary explícita de histórico — separada de `MatchSnapshot`
 - Participantes históricos persistidos por partida (usuários e bots)
 - Replay como sequência ordenada de eventos tipados
-- Use cases: salvar histórico · listar histórico por usuário · buscar replay por partida
+- Use cases: salvar histórico · listar por usuário · buscar replay por partida
 - Gateway expõe leitura via `get-match-history` e `get-match-replay`
 - Prisma e schema de persistência não acoplados ao transporte
 
 </details>
 
 <details>
-<summary><strong>Bots</strong></summary>
+<summary><strong>Bots e Python AI Service</strong></summary>
 <br/>
 
-- Preenchimento automático de assentos
-- Perfis determinísticos: `balanced` · `aggressive` · `cautious`
+- Preenchimento automático de assentos com perfis determinísticos: `balanced` · `aggressive` · `cautious`
 - `BotDecisionPort` na Application — independente de tecnologia
-- `HeuristicBotAdapter` como baseline local
-- `BotDecisionContext` transport-agnostic
-- Wiring preparado para adapter Python futuro
+- `HeuristicBotAdapter` como baseline local sempre disponível
+- `PythonBotAdapter` em Infrastructure com mapeamento request/response e fallback seguro
+- Seleção de adapter por config no `GameModule`
+- Observabilidade explícita de seleção de adapter e fallback
+
+**Python Bot Service** (`python-bot-service/`):
+- FastAPI + Pydantic, runtime isolado
+- `GET /health/live` · `GET /health/ready`
+- `POST /decide` com contrato HTTP estável e explícito
+- Reasons suportadas: `empty-hand` · `missing-round` · `unsupported-state`
+- Preparado para evolução de inferência remota sem contaminar Domain ou Gateway
 
 </details>
 
@@ -177,6 +201,7 @@ Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay
 
 - `GET /health/live` · `GET /health/ready`
 - Logs estruturados de bootstrap, banco e gateway
+- Logs estruturados de seleção de adapter do bot, fallback e tentativa remota
 - Classificação de erros: `validation_error` · `transport_error` · `domain_error` · `unexpected_error`
 - Snapshot observável do matchmaking exposto no gateway
 
@@ -195,7 +220,8 @@ Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay
 | **Persistência** | PostgreSQL 16 + Prisma ORM |
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React + Vite + TypeScript + Tailwind CSS |
-| **Bots** | Adapter heurístico local — boundary preparado para Python |
+| **Bots** | `HeuristicBotAdapter` local + `PythonBotAdapter` remoto |
+| **Python Bot Service** | FastAPI + Pydantic · runtime isolado |
 | **Histórico** | `MatchRecord` + replay events persistidos via Prisma |
 | **Testes** | Jest + ts-jest |
 | **Deploy** | Render + Render Postgres + Docker multi-stage |
@@ -224,16 +250,24 @@ npm run dev
 ```
 
 ```bash
+# Python Bot Service
+cd python-bot-service
+python -m venv .venv
+source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+```bash
+# Completamente containerizado
+docker compose up -d --build
+docker compose logs --tail=100 backend
+
 # Health checks
 curl http://localhost:3000/health/live
 curl http://localhost:3000/health/ready
-```
-
-**Completamente containerizado:**
-
-```bash
-docker compose up -d --build
-docker compose logs --tail=100 backend
+curl http://localhost:8000/health/live   # Python service
 ```
 
 ---
@@ -262,6 +296,41 @@ O backend autentica via OAuth, emite um token próprio e redireciona o browser p
   "expiresIn": "7d"
 }
 ```
+
+---
+
+## Contrato do Python Bot Service
+
+**Request — `POST /decide`**
+
+```json
+{
+  "matchId": "match-1",
+  "profile": "balanced",
+  "viraRank": "4",
+  "currentRound": {
+    "playerOneCard": null,
+    "playerTwoCard": null,
+    "finished": false,
+    "result": null
+  },
+  "player": {
+    "playerId": "P1",
+    "hand": ["4P", "7C", "AO"]
+  }
+}
+```
+
+**Response**
+
+```json
+{
+  "action": "play",
+  "cardIndex": 0
+}
+```
+
+Reasons de fallback: `empty-hand` · `missing-round` · `unsupported-state`
 
 ---
 
@@ -332,6 +401,10 @@ truco-paulista/
 │       ├── features/
 │       ├── pages/
 │       └── services/
+├── python-bot-service/        # FastAPI + Pydantic
+│   ├── app/
+│   ├── requirements.txt
+│   └── README.md
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
@@ -348,7 +421,7 @@ truco-paulista/
 │   │   ├── ports/
 │   │   └── mappers/
 │   ├── infrastructure/
-│   │   ├── bots/              # HeuristicBotAdapter
+│   │   ├── bots/              # HeuristicBotAdapter + PythonBotAdapter
 │   │   └── persistence/       # Prisma + in-memory + history/replay
 │   ├── gateway/               # WebSocket + matchmaking + multiplayer + history reads
 │   │   ├── game.gateway.ts
@@ -363,100 +436,6 @@ truco-paulista/
         ├── application/
         ├── gateway/
         └── infrastructure/
-```
-
----
-
-## Schema do banco
-
-```prisma
-model MatchSnapshot {
-  id          String   @id @default(cuid())
-  matchId     String   @unique
-  pointsToWin Int
-  state       String
-  score       Json
-  data        Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model User {
-  id             String                  @id @default(cuid())
-  provider       String
-  providerUserId String
-  email          String?
-  displayName    String?
-  avatarUrl      String?
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  playerProfile  PlayerProfile?
-  matchRecords   MatchRecordParticipant[]
-  @@unique([provider, providerUserId])
-}
-
-model PlayerProfile {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  rating        Int      @default(1000)
-  wins          Int      @default(0)
-  losses        Int      @default(0)
-  matchesPlayed Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  user          User     @relation(fields: [userId], references: [id])
-}
-
-model MatchRecord {
-  id                  String                   @id @default(cuid())
-  matchId             String                   @unique
-  mode                String
-  status              String
-  pointsToWin         Int
-  startedAt           DateTime?
-  finishedAt          DateTime?
-  finalState          String
-  finalViraRank       String?
-  finalScorePlayerOne Int
-  finalScorePlayerTwo Int
-  roundsPlayed        Int
-  winnerPlayerId      String?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  participants        MatchRecordParticipant[]
-  replayEvents        MatchReplayEvent[]
-  @@index([finishedAt])
-  @@index([status])
-}
-
-model MatchRecordParticipant {
-  id            String      @id @default(cuid())
-  matchRecordId String
-  seatId        String
-  userId        String?
-  displayName   String?
-  isBot         Boolean
-  botProfile    String?
-  createdAt     DateTime    @default(now())
-  matchRecord   MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
-  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  @@index([matchRecordId])
-  @@index([userId])
-  @@unique([matchRecordId, seatId])
-}
-
-model MatchReplayEvent {
-  id            String      @id @default(cuid())
-  matchRecordId String
-  sequence      Int
-  eventType     String
-  occurredAt    DateTime
-  payload       Json
-  createdAt     DateTime    @default(now())
-  matchRecord   MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
-  @@index([matchRecordId])
-  @@unique([matchRecordId, sequence])
-}
 ```
 
 ---
@@ -491,6 +470,9 @@ Cada decisão tem uma razão documentada — não apenas uma preferência.
 | D22 | `MatchSnapshot` e `MatchRecord` têm responsabilidades diferentes e não devem ser unificados |
 | D23 | Replay é projeção histórica ordenada, não vazamento cru de payload de transporte |
 | D24 | Gateway expõe leitura histórica sem acoplar Prisma ou schema de persistência ao transporte |
+| D25 | Python Bot Service é runtime externo — o Domain nunca conhece FastAPI ou Pydantic |
+| D26 | `PythonBotAdapter` tem fallback seguro para o adapter heurístico em caso de falha remota |
+| D27 | A seleção de adapter é concern de configuração do `GameModule`, não do Gateway |
 
 ---
 
@@ -509,6 +491,7 @@ Cada decisão tem uma razão documentada — não apenas uma preferência.
 | DT-24 | Matchmaking usa estado efêmero em memória — sem persistência durável | 🔜 Backlog |
 | DT-25 | Integração automática do histórico ao fechamento da partida ainda pode evoluir | ⚠️ Aceita |
 | DT-26 | Replay modelado e exposto, mas sem UX rica de consumo no frontend | 🔜 Backlog |
+| DT-27 | Python Bot Service usa decisão heurística simples — inferência real é trabalho futuro | ⚠️ Aceita |
 
 ---
 

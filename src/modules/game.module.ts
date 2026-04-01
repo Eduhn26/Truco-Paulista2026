@@ -1,5 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, Logger } from '@nestjs/common';
 
+import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
+import type { MatchRecordRepository } from '@game/application/ports/match-record.repository';
+import type { MatchRepository } from '@game/application/ports/match.repository';
+import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
@@ -10,14 +14,16 @@ import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-r
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
-import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
-import type { MatchRecordRepository } from '@game/application/ports/match-record.repository';
-import type { MatchRepository } from '@game/application/ports/match.repository';
-import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import { AuthModule } from '@game/auth/auth.module';
 import { GameGateway } from '@game/gateway/game.gateway';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
+import { PythonBotAdapter } from '@game/infrastructure/bots/python-bot.adapter';
+import {
+  PYTHON_BOT_CONFIG,
+  PythonBotConfigService,
+  type PythonBotConfig,
+} from '@game/infrastructure/bots/python-bot.config';
 import { PrismaMatchRecordRepository } from '@game/infrastructure/persistence/prisma-match-record.repository';
 import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
@@ -29,7 +35,7 @@ import {
   PLAYER_PROFILE_REPOSITORY,
 } from './game.tokens';
 
-const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
+const gameModuleLogger = new Logger('GameModule');
 
 @Module({
   imports: [PrismaModule, AuthModule],
@@ -40,13 +46,47 @@ const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
     PrismaPlayerProfileRepository,
     PrismaMatchRecordRepository,
     HeuristicBotAdapter,
+    PythonBotAdapter,
+    PythonBotConfigService,
+    {
+      provide: PYTHON_BOT_CONFIG,
+      useFactory: (configService: PythonBotConfigService): PythonBotConfig =>
+        configService.getConfig(),
+      inject: [PythonBotConfigService],
+    },
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
     { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
     { provide: MATCH_RECORD_REPOSITORY, useClass: PrismaMatchRecordRepository },
     {
       provide: BOT_DECISION_PORT,
-      useFactory: (adapter: BotDecisionPort) => adapter,
-      inject: [DEFAULT_BOT_DECISION_ADAPTER],
+      useFactory: (
+        config: PythonBotConfig,
+        heuristicBotAdapter: HeuristicBotAdapter,
+        pythonBotAdapter: PythonBotAdapter,
+      ): BotDecisionPort => {
+        const selectedAdapter = config.enabled ? 'python' : 'heuristic';
+
+        // NOTE: Keep adapter selection observable at module wiring time so runtime
+        // diagnosis can prove which boundary implementation was actually injected.
+        gameModuleLogger.log(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            layer: 'infrastructure',
+            component: 'game_module',
+            event: 'bot_adapter_selected',
+            status: 'selected',
+            selectedAdapter,
+            pythonBotEnabled: config.enabled,
+          }),
+        );
+
+        if (config.enabled) {
+          return pythonBotAdapter;
+        }
+
+        return heuristicBotAdapter;
+      },
+      inject: [PYTHON_BOT_CONFIG, HeuristicBotAdapter, PythonBotAdapter],
     },
     {
       provide: CreateMatchUseCase,
