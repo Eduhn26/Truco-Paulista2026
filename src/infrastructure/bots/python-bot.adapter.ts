@@ -48,11 +48,21 @@ export class PythonBotAdapter implements BotDecisionPort {
   ) {}
 
   decide(context: BotDecisionContext): BotDecision {
-    // NOTE: The application boundary remains synchronous in Phase 15.
-    // Until adapter selection and end-to-end flow are hardened, the remote adapter
-    // must degrade safely to the local baseline instead of leaking transport timing
-    // concerns into Gateway orchestration.
+    // NOTE: The stable application boundary is still synchronous, so this adapter
+    // must fail safe and remain explicit about why runtime falls back to the
+    // local baseline instead of hiding transport concerns inside orchestration.
     if (!this.config.enabled) {
+      this.logger.log(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'python_adapter_disabled_fallback_applied',
+          status: 'fallback',
+          fallbackAdapter: 'heuristic',
+        }),
+      );
+
       return this.heuristicBotAdapter.decide(context);
     }
 
@@ -63,6 +73,7 @@ export class PythonBotAdapter implements BotDecisionPort {
         component: 'python_bot_adapter',
         event: 'remote_decision_deferred_to_fallback',
         status: 'fallback',
+        fallbackAdapter: 'heuristic',
         baseUrl: this.config.baseUrl,
         timeoutMs: this.config.timeoutMs,
       }),
@@ -71,8 +82,6 @@ export class PythonBotAdapter implements BotDecisionPort {
     return this.heuristicBotAdapter.decide(context);
   }
 
-  // NOTE: The request mapper is introduced now so the HTTP contract is formalized
-  // on the TypeScript side before selection wiring starts using it.
   private mapRequest(context: BotDecisionContext): PythonBotDecisionRequest {
     return {
       matchId: context.matchId,
@@ -93,8 +102,6 @@ export class PythonBotAdapter implements BotDecisionPort {
     };
   }
 
-  // NOTE: Keep the response parser strict so future remote integration cannot
-  // silently invent new shapes outside the backend-supported decision space.
   private mapResponse(response: PythonBotDecisionResponse): BotDecision {
     if (response.action === 'play-card') {
       return {
@@ -109,18 +116,43 @@ export class PythonBotAdapter implements BotDecisionPort {
     };
   }
 
-  // NOTE: This method is intentionally not called by `decide()` yet.
-  // The remote HTTP bridge becomes active only after selection wiring and
-  // end-to-end validation are introduced in the next steps.
-  async requestRemoteDecision(
-    context: BotDecisionContext,
-  ): Promise<PythonBotDecisionResponse | null> {
+  // NOTE: The remote bridge stays opt-in at the adapter level so runtime
+  // observability can mature before the project promotes network I/O into the
+  // main bot turn path.
+  async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision | null> {
     if (!this.config.enabled) {
+      this.logger.log(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'remote_decision_skipped',
+          status: 'skipped',
+          reason: 'adapter_disabled',
+        }),
+      );
+
       return null;
     }
 
+    const requestPayload = this.mapRequest(context);
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), this.config.timeoutMs);
+
+    this.logger.log(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        layer: 'infrastructure',
+        component: 'python_bot_adapter',
+        event: 'remote_decision_attempt_started',
+        status: 'started',
+        baseUrl: this.config.baseUrl,
+        timeoutMs: this.config.timeoutMs,
+        matchId: requestPayload.matchId,
+        profile: requestPayload.profile,
+        playerId: requestPayload.player.playerId,
+      }),
+    );
 
     try {
       const response = await fetch(`${this.config.baseUrl}/decide`, {
@@ -128,7 +160,7 @@ export class PythonBotAdapter implements BotDecisionPort {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(this.mapRequest(context)),
+        body: JSON.stringify(requestPayload),
         signal: controller.signal,
       });
 
@@ -141,6 +173,18 @@ export class PythonBotAdapter implements BotDecisionPort {
             event: 'remote_decision_request_failed',
             status: 'failed',
             httpStatus: response.status,
+          }),
+        );
+
+        this.logger.warn(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            layer: 'infrastructure',
+            component: 'python_bot_adapter',
+            event: 'remote_decision_fallback_applied',
+            status: 'fallback',
+            reason: 'http_not_ok',
+            fallbackAdapter: 'heuristic',
           }),
         );
 
@@ -160,10 +204,35 @@ export class PythonBotAdapter implements BotDecisionPort {
           }),
         );
 
+        this.logger.warn(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            layer: 'infrastructure',
+            component: 'python_bot_adapter',
+            event: 'remote_decision_fallback_applied',
+            status: 'fallback',
+            reason: 'invalid_response_shape',
+            fallbackAdapter: 'heuristic',
+          }),
+        );
+
         return null;
       }
 
-      return data;
+      const mappedDecision = this.mapResponse(data);
+
+      this.logger.log(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'remote_decision_attempt_succeeded',
+          status: 'succeeded',
+          action: mappedDecision.action,
+        }),
+      );
+
+      return mappedDecision;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'unknown_error';
 
@@ -175,6 +244,18 @@ export class PythonBotAdapter implements BotDecisionPort {
           event: 'remote_decision_transport_error',
           status: 'failed',
           errorMessage,
+        }),
+      );
+
+      this.logger.warn(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'remote_decision_fallback_applied',
+          status: 'fallback',
+          reason: 'transport_error',
+          fallbackAdapter: 'heuristic',
         }),
       );
 

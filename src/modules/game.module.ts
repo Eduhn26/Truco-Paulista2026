@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Logger } from '@nestjs/common';
 
 import { BOT_DECISION_PORT, type BotDecisionPort } from '@game/application/ports/bot-decision.port';
 import type { MatchRecordRepository } from '@game/application/ports/match-record.repository';
@@ -35,6 +35,8 @@ import {
   PLAYER_PROFILE_REPOSITORY,
 } from './game.tokens';
 
+const gameModuleLogger = new Logger('GameModule');
+
 @Module({
   imports: [PrismaModule, AuthModule],
   providers: [
@@ -62,8 +64,22 @@ import {
         heuristicBotAdapter: HeuristicBotAdapter,
         pythonBotAdapter: PythonBotAdapter,
       ): BotDecisionPort => {
-        // NOTE: Keep adapter selection inside module wiring so Gateway orchestration
-        // stays bound only to the stable bot decision contract.
+        const selectedAdapter = config.enabled ? 'python' : 'heuristic';
+
+        // NOTE: Keep adapter selection observable at module wiring time so runtime
+        // diagnosis can prove which boundary implementation was actually injected.
+        gameModuleLogger.log(
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            layer: 'infrastructure',
+            component: 'game_module',
+            event: 'bot_adapter_selected',
+            status: 'selected',
+            selectedAdapter,
+            pythonBotEnabled: config.enabled,
+          }),
+        );
+
         if (config.enabled) {
           return pythonBotAdapter;
         }
