@@ -16,6 +16,7 @@ RUN npx prisma generate
 
 COPY nest-cli.json tsconfig*.json ./
 COPY src ./src
+COPY docker ./docker
 
 RUN npm run build
 
@@ -28,6 +29,7 @@ ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 COPY package*.json ./
 COPY prisma ./prisma
+COPY docker ./docker
 
 # NOTE: Runtime keeps only production dependencies. Prisma generated artifacts
 # are copied from the builder stage because the Prisma CLI itself is not needed
@@ -43,9 +45,8 @@ COPY --from=builder /app/dist ./dist
 RUN mkdir -p /app/dist/src/generated
 COPY --from=builder /app/src/generated/prisma /app/dist/src/generated/prisma
 
+RUN chmod +x /app/docker/entrypoint.sh
+
 EXPOSE 3000
 
-# HACK: Render free instances do not support pre-deploy commands. We run
-# migrations during container startup to keep production schema aligned
-# without introducing a paid-only platform dependency.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "/app/docker/entrypoint.sh"]

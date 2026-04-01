@@ -8,9 +8,21 @@ import { AuthService, type AuthenticatedUserDto } from '@game/auth/auth.service'
 export class GoogleAuthStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(private readonly authService: AuthService) {
     super({
-      clientID: GoogleAuthStrategy.requireEnv('GOOGLE_CLIENT_ID'),
-      clientSecret: GoogleAuthStrategy.requireEnv('GOOGLE_CLIENT_SECRET'),
-      callbackURL: GoogleAuthStrategy.requireEnv('GOOGLE_CALLBACK_URL'),
+      clientID: GoogleAuthStrategy.readEnv(
+        'GOOGLE_CLIENT_ID',
+        'dummy-google-client-id',
+        'Google OAuth',
+      ),
+      clientSecret: GoogleAuthStrategy.readEnv(
+        'GOOGLE_CLIENT_SECRET',
+        'dummy-google-client-secret',
+        'Google OAuth',
+      ),
+      callbackURL: GoogleAuthStrategy.readEnv(
+        'GOOGLE_CALLBACK_URL',
+        'http://localhost:3000/auth/google/callback',
+        'Google OAuth',
+      ),
       scope: ['email', 'profile'],
     });
   }
@@ -29,7 +41,7 @@ export class GoogleAuthStrategy extends PassportStrategy(Strategy, 'google') {
       const avatarUrl = profile.photos?.[0]?.value ?? null;
       const displayName = profile.displayName?.trim() || null;
 
-      const user = await this.authService.validateOrCreateGoogleUser({
+      const user: AuthenticatedUserDto = await this.authService.validateOrCreateGoogleUser({
         providerUserId: profile.id,
         email: primaryEmail,
         displayName,
@@ -42,13 +54,17 @@ export class GoogleAuthStrategy extends PassportStrategy(Strategy, 'google') {
     }
   }
 
-  private static requireEnv(name: string): string {
+  private static readEnv(name: string, fallback: string, context: string): string {
     const value = process.env[name]?.trim();
 
-    if (!value) {
-      throw new Error(`${name} is required for Google OAuth`);
+    if (value) {
+      return value;
     }
 
-    return value;
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error(`${name} is required for ${context}`);
+    }
+
+    return fallback;
   }
 }

@@ -8,9 +8,21 @@ import { AuthService } from '@game/auth/auth.service';
 export class GitHubAuthStrategy extends PassportStrategy(Strategy, 'github') {
   constructor(private readonly authService: AuthService) {
     super({
-      clientID: GitHubAuthStrategy.requireEnv('GITHUB_CLIENT_ID'),
-      clientSecret: GitHubAuthStrategy.requireEnv('GITHUB_CLIENT_SECRET'),
-      callbackURL: GitHubAuthStrategy.requireEnv('GITHUB_CALLBACK_URL'),
+      clientID: GitHubAuthStrategy.readEnv(
+        'GITHUB_CLIENT_ID',
+        'dummy-github-client-id',
+        'GitHub OAuth',
+      ),
+      clientSecret: GitHubAuthStrategy.readEnv(
+        'GITHUB_CLIENT_SECRET',
+        'dummy-github-client-secret',
+        'GitHub OAuth',
+      ),
+      callbackURL: GitHubAuthStrategy.readEnv(
+        'GITHUB_CALLBACK_URL',
+        'http://localhost:3000/auth/github/callback',
+        'GitHub OAuth',
+      ),
       scope: ['user:email'],
     });
   }
@@ -35,13 +47,17 @@ export class GitHubAuthStrategy extends PassportStrategy(Strategy, 'github') {
     return profile.emails?.[0]?.value ?? null;
   }
 
-  private static requireEnv(name: string): string {
+  private static readEnv(name: string, fallback: string, context: string): string {
     const value = process.env[name]?.trim();
 
-    if (!value) {
-      throw new Error(`${name} is required for GitHub OAuth`);
+    if (value) {
+      return value;
     }
 
-    return value;
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error(`${name} is required for ${context}`);
+    }
+
+    return fallback;
   }
 }
