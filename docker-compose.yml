@@ -34,6 +34,12 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres?schema=public}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-replace-with-a-real-secret}
+      AUTH_TOKEN_EXPIRES_IN: ${AUTH_TOKEN_EXPIRES_IN:-7d}
+      PYTHON_BOT_ENABLED: ${PYTHON_BOT_ENABLED:-false}
+      PYTHON_BOT_BASE_URL: ${PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
+      PYTHON_BOT_TIMEOUT_MS: ${PYTHON_BOT_TIMEOUT_MS:-1500}
     command: ['npm', 'run', 'prisma:deploy']
     restart: 'no'
 
@@ -49,6 +55,12 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-3000}
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres?schema=public}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-replace-with-a-real-secret}
+      AUTH_TOKEN_EXPIRES_IN: ${AUTH_TOKEN_EXPIRES_IN:-7d}
+      PYTHON_BOT_ENABLED: ${PYTHON_BOT_ENABLED:-false}
+      PYTHON_BOT_BASE_URL: ${PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
+      PYTHON_BOT_TIMEOUT_MS: ${PYTHON_BOT_TIMEOUT_MS:-1500}
     ports:
       - '${PORT:-3000}:3000'
     restart: unless-stopped
