@@ -50,6 +50,10 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
   };
 }
 
+export function readGatewayCorsOrigin(env: NodeJS.ProcessEnv = process.env): string {
+  return readRequiredUrlLikeString(env['CORS_ORIGIN'], 'CORS_ORIGIN');
+}
+
 function readNodeEnv(value: string | undefined): NodeEnvironment {
   const normalized = value?.trim() ?? 'development';
 

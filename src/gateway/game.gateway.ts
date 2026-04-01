@@ -26,6 +26,7 @@ import {
   type BotProfile,
   type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
+import { readGatewayCorsOrigin } from '@game/application/runtime/env/runtime-config';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
@@ -49,7 +50,16 @@ import type {
 import type { MatchmakingPair } from './matchmaking/matchmaking-pairing-policy';
 import { RoomManager } from './multiplayer/room-manager';
 
-type ErrorResponseDto = { message: string };
+type GatewayErrorCode =
+  | 'validation_error'
+  | 'transport_error'
+  | 'domain_error'
+  | 'unexpected_error';
+
+type ErrorResponseDto = {
+  code: GatewayErrorCode;
+  message: string;
+};
 
 type CreateMatchPayload = {
   pointsToWin?: unknown;
@@ -147,12 +157,6 @@ type MatchmakingSnapshotResponseDto = {
   snapshot: MatchmakingObservabilitySnapshot;
 };
 
-type GatewayErrorType =
-  | 'validation_error'
-  | 'transport_error'
-  | 'domain_error'
-  | 'unexpected_error';
-
 type GatewayLogContext = {
   layer: 'gateway';
   event:
@@ -226,7 +230,7 @@ type GatewayLogContext = {
   mode?: MatchmakingMode;
   rating?: number;
   queueSize?: number;
-  errorType?: GatewayErrorType;
+  errorType?: GatewayErrorCode;
   errorMessage?: string;
 };
 
@@ -248,7 +252,10 @@ type BotTurnDecisionContext = {
 };
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: {
+    origin: readGatewayCorsOrigin(),
+    credentials: true,
+  },
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -305,7 +312,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     event: GatewayLogContext['event'],
     message: string,
     context: RejectContext,
-    errorType: GatewayErrorType,
+    errorType: GatewayErrorCode,
   ): WsResponse<ErrorResponseDto> {
     this.logGateway('warn', {
       layer: 'gateway',
@@ -316,7 +323,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ...context,
     });
 
-    return { event: 'error', data: { message } };
+    return {
+      event: 'error',
+      data: {
+        code: errorType,
+        message,
+      },
+    };
   }
 
   private rejectFromError(
@@ -903,7 +916,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         errorMessage: message,
       });
 
-      socket.emit('error', { message });
+      socket.emit('error', {
+        code: 'transport_error',
+        message,
+      });
       socket.disconnect(true);
     }
   }
