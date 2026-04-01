@@ -15,7 +15,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Jest](https://img.shields.io/badge/116_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
+[![Jest](https://img.shields.io/badge/135_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
 
 <br/>
 
@@ -53,7 +53,7 @@ O Truco Paulista foi escolhido por ser intencionalmente desafiador — regras de
 | 11 | Modo 1v1 + bots preenchendo assentos + estado público/privado | ✅ |
 | 12 | Arquitetura de bots — boundary, profiles, adapter, input transport-agnostic | ✅ |
 | 13 | Matchmaking — fila pública, pairing, timeout, fallback, reconexão | ✅ |
-| 14 | Histórico de partidas + replay | 🔜 |
+| 14 | Histórico de partidas + replay | ✅ |
 | 15 | Serviço de IA em Python | 🔜 |
 | 16 | Hardening — segurança + performance | 🔜 |
 
@@ -78,17 +78,17 @@ O Domínio nunca conhece: `NestJS` · `Prisma` · `Socket.IO` · `OAuth` · logg
 |--------|-----------------|
 | **Domain** | Regras puras do Truco — entidades, value objects, invariantes |
 | **Application** | Use Cases, DTOs, orquestração, ports, mappers |
-| **Infrastructure** | Persistência, Prisma, adaptadores de auth e bots |
-| **Gateway** | WebSocket, estado efêmero de sala/turno, matchmaking |
+| **Infrastructure** | Persistência, Prisma, adaptadores de auth, bots, histórico e replay |
+| **Gateway** | WebSocket, estado efêmero de sala/turno, matchmaking, leitura histórica |
 | **Auth** | Estratégias OAuth, emissão de auth token |
 | **Frontend** | Sessão no browser, UI autenticada, coordenação de socket |
 | **Health** | Lifecycle de startup, endpoints operacionais, logging estruturado |
 
 ### Testabilidade
 
-Domínio, Gateway, RoomManager, boundary do bot e matchmaking são testáveis sem servidor, banco ou mocks de framework.
+Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay são testáveis sem servidor, banco real ou mocks de framework.
 
-> ✅ **20 suites · 116 testes · 0 falhas**
+> ✅ **23 suites · 135 testes · 0 falhas**
 
 ---
 
@@ -116,6 +116,19 @@ Domínio, Gateway, RoomManager, boundary do bot e matchmaking são testáveis se
 - Fallback pós-timeout: continuar na fila · iniciar com bot · recusar
 - Transição automática de fila para partida
 - Snapshot consolidado de observabilidade
+
+</details>
+
+<details>
+<summary><strong>Histórico e replay</strong></summary>
+<br/>
+
+- `MatchRecord` como boundary explícita de histórico — separada de `MatchSnapshot`
+- Participantes históricos persistidos por partida (usuários e bots)
+- Replay como sequência ordenada de eventos tipados
+- Use cases: salvar histórico · listar histórico por usuário · buscar replay por partida
+- Gateway expõe leitura via `get-match-history` e `get-match-replay`
+- Prisma e schema de persistência não acoplados ao transporte
 
 </details>
 
@@ -183,6 +196,7 @@ Domínio, Gateway, RoomManager, boundary do bot e matchmaking são testáveis se
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React + Vite + TypeScript + Tailwind CSS |
 | **Bots** | Adapter heurístico local — boundary preparado para Python |
+| **Histórico** | `MatchRecord` + replay events persistidos via Prisma |
 | **Testes** | Jest + ts-jest |
 | **Deploy** | Render + Render Postgres + Docker multi-stage |
 
@@ -193,15 +207,11 @@ Domínio, Gateway, RoomManager, boundary do bot e matchmaking são testáveis se
 **Pré-requisitos:** Node.js 20+ · Docker + Docker Compose
 
 ```bash
-# 1. Instalar e configurar
+# Backend
 npm install
 cp .env.example .env
-
-# 2. Banco de dados
 docker compose up -d postgres
 npx prisma migrate dev
-
-# 3. Iniciar
 npm run start:dev
 ```
 
@@ -214,7 +224,7 @@ npm run dev
 ```
 
 ```bash
-# Validar
+# Health checks
 curl http://localhost:3000/health/live
 curl http://localhost:3000/health/ready
 ```
@@ -284,6 +294,8 @@ O backend autentica via OAuth, emite um token próprio e redireciona o browser p
 | `play-card` | Jogar carta |
 | `get-state` | Estado atual |
 | `get-ranking` | Ranking |
+| `get-match-history` | Histórico de partidas por usuário |
+| `get-match-replay` | Replay de uma partida |
 | `get-matchmaking-snapshot` | Snapshot do matchmaking |
 
 **Server → Client**
@@ -303,6 +315,8 @@ O backend autentica via OAuth, emite um token próprio e redireciona o browser p
 | `hand-started` | Mão iniciada |
 | `card-played` | Carta jogada |
 | `rating-updated` | Ranking atualizado |
+| `match-history` | Histórico de partidas |
+| `match-replay` | Replay da partida |
 | `matchmaking-snapshot` | Snapshot do matchmaking |
 | `error` | Erro classificado |
 
@@ -335,8 +349,8 @@ truco-paulista/
 │   │   └── mappers/
 │   ├── infrastructure/
 │   │   ├── bots/              # HeuristicBotAdapter
-│   │   └── persistence/       # Prisma + in-memory
-│   ├── gateway/               # WebSocket + matchmaking + multiplayer
+│   │   └── persistence/       # Prisma + in-memory + history/replay
+│   ├── gateway/               # WebSocket + matchmaking + multiplayer + history reads
 │   │   ├── game.gateway.ts
 │   │   ├── matchmaking/
 │   │   └── multiplayer/
@@ -368,15 +382,16 @@ model MatchSnapshot {
 }
 
 model User {
-  id             String   @id @default(cuid())
+  id             String                  @id @default(cuid())
   provider       String
   providerUserId String
   email          String?
   displayName    String?
   avatarUrl      String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
   playerProfile  PlayerProfile?
+  matchRecords   MatchRecordParticipant[]
   @@unique([provider, providerUserId])
 }
 
@@ -390,6 +405,57 @@ model PlayerProfile {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   user          User     @relation(fields: [userId], references: [id])
+}
+
+model MatchRecord {
+  id                  String                   @id @default(cuid())
+  matchId             String                   @unique
+  mode                String
+  status              String
+  pointsToWin         Int
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  finalState          String
+  finalViraRank       String?
+  finalScorePlayerOne Int
+  finalScorePlayerTwo Int
+  roundsPlayed        Int
+  winnerPlayerId      String?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  participants        MatchRecordParticipant[]
+  replayEvents        MatchReplayEvent[]
+  @@index([finishedAt])
+  @@index([status])
+}
+
+model MatchRecordParticipant {
+  id            String      @id @default(cuid())
+  matchRecordId String
+  seatId        String
+  userId        String?
+  displayName   String?
+  isBot         Boolean
+  botProfile    String?
+  createdAt     DateTime    @default(now())
+  matchRecord   MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([matchRecordId])
+  @@index([userId])
+  @@unique([matchRecordId, seatId])
+}
+
+model MatchReplayEvent {
+  id            String      @id @default(cuid())
+  matchRecordId String
+  sequence      Int
+  eventType     String
+  occurredAt    DateTime
+  payload       Json
+  createdAt     DateTime    @default(now())
+  matchRecord   MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
+  @@index([matchRecordId])
+  @@unique([matchRecordId, sequence])
 }
 ```
 
@@ -421,6 +487,10 @@ Cada decisão tem uma razão documentada — não apenas uma preferência.
 | D18 | Reconexão recupera o mesmo seat por `playerToken + matchId`, não o próximo livre |
 | D19 | Fallback pós-timeout é estado operacional de matchmaking, não regra do jogo |
 | D20 | Observabilidade do matchmaking expõe snapshots, não estruturas internas mutáveis |
+| D21 | Histórico de partidas vive fora do Domain como concern de Application/Infrastructure |
+| D22 | `MatchSnapshot` e `MatchRecord` têm responsabilidades diferentes e não devem ser unificados |
+| D23 | Replay é projeção histórica ordenada, não vazamento cru de payload de transporte |
+| D24 | Gateway expõe leitura histórica sem acoplar Prisma ou schema de persistência ao transporte |
 
 ---
 
@@ -437,6 +507,8 @@ Cada decisão tem uma razão documentada — não apenas uma preferência.
 | DT-22 | `HeuristicBotAdapter` é baseline simples para competição real | ⚠️ Aceita |
 | DT-23 | `game.gateway.ts` concentra orquestração de matchmaking — pode merecer extração | ⚠️ Aceita |
 | DT-24 | Matchmaking usa estado efêmero em memória — sem persistência durável | 🔜 Backlog |
+| DT-25 | Integração automática do histórico ao fechamento da partida ainda pode evoluir | ⚠️ Aceita |
+| DT-26 | Replay modelado e exposto, mas sem UX rica de consumo no frontend | 🔜 Backlog |
 
 ---
 

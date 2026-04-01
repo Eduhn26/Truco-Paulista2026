@@ -30,6 +30,7 @@ model User {
   updatedAt      DateTime @updatedAt
 
   playerProfile PlayerProfile?
+  matchRecords  MatchRecordParticipant[]
 
   @@unique([provider, providerUserId])
 }
@@ -44,4 +45,59 @@ model PlayerProfile {
   matchesPlayed Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model MatchRecord {
+  id                 String                   @id @default(cuid())
+  matchId            String                   @unique
+  mode               String
+  status             String
+  pointsToWin        Int
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  finalState         String
+  finalViraRank      String?
+  finalScorePlayerOne Int
+  finalScorePlayerTwo Int
+  roundsPlayed       Int
+  winnerPlayerId     String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  participants MatchRecordParticipant[]
+  replayEvents MatchReplayEvent[]
+
+  @@index([finishedAt])
+  @@index([status])
+}
+
+model MatchRecordParticipant {
+  id          String      @id @default(cuid())
+  matchRecordId String
+  matchRecord MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
+  seatId      String
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName String?
+  isBot       Boolean
+  botProfile  String?
+  createdAt   DateTime    @default(now())
+
+  @@index([matchRecordId])
+  @@index([userId])
+  @@unique([matchRecordId, seatId])
+}
+
+model MatchReplayEvent {
+  id            String      @id @default(cuid())
+  matchRecordId String
+  matchRecord   MatchRecord @relation(fields: [matchRecordId], references: [id], onDelete: Cascade)
+  sequence      Int
+  eventType     String
+  occurredAt    DateTime
+  payload       Json
+  createdAt     DateTime    @default(now())
+
+  @@index([matchRecordId])
+  @@unique([matchRecordId, sequence])
 }

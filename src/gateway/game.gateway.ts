@@ -19,6 +19,8 @@ import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
+import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
+import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import type {
@@ -86,6 +88,15 @@ type SetReadyPayload = {
 
 type GetRankingPayload = {
   limit?: unknown;
+};
+
+type GetMatchHistoryPayload = {
+  userId?: unknown;
+  limit?: unknown;
+};
+
+type GetMatchReplayPayload = {
+  matchId?: unknown;
 };
 
 type JoinQueuePayload = {
@@ -196,11 +207,18 @@ type GatewayLogContext = {
     | 'get_ranking_requested'
     | 'get_ranking_succeeded'
     | 'get_ranking_rejected'
+    | 'get_match_history_requested'
+    | 'get_match_history_succeeded'
+    | 'get_match_history_rejected'
+    | 'get_match_replay_requested'
+    | 'get_match_replay_succeeded'
+    | 'get_match_replay_rejected'
     | 'get_state_requested'
     | 'get_state_succeeded'
     | 'get_state_rejected';
   status: 'started' | 'succeeded' | 'rejected' | 'connected' | 'disconnected';
   socketId?: string;
+  userId?: string;
   matchId?: string;
   seatId?: string;
   teamId?: string;
@@ -255,6 +273,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
     private readonly getRankingUseCase: GetRankingUseCase,
+    private readonly getMatchHistoryUseCase: GetMatchHistoryUseCase,
+    private readonly getMatchReplayUseCase: GetMatchReplayUseCase,
     private readonly getOrCreateUserUseCase: GetOrCreateUserUseCase,
     private readonly authTokenService: AuthTokenService,
     private readonly roomManager: RoomManager,
@@ -1737,6 +1757,117 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { event: 'ranking', data: { ok: true } };
     } catch (error) {
       return this.rejectFromError('get_ranking_rejected', error, { socketId: socket.id });
+    }
+  }
+
+  @SubscribeMessage('get-match-history')
+  async handleGetMatchHistory(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetMatchHistoryPayload,
+  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_match_history_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const userIdRaw = payload?.userId;
+      const userId = typeof userIdRaw === 'string' ? userIdRaw.trim() : '';
+
+      if (!userId) {
+        return this.reject(
+          'get_match_history_rejected',
+          'Invalid payload: userId is required.',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      const rawLimit = payload?.limit;
+      const limit =
+        typeof rawLimit === 'number' && Number.isInteger(rawLimit) && rawLimit > 0 ? rawLimit : 20;
+
+      const history = await this.getMatchHistoryUseCase.execute({
+        userId,
+        limit,
+      });
+
+      socket.emit('match-history', history);
+
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_match_history_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        userId,
+        limit,
+      });
+
+      return { event: 'match-history', data: { ok: true } };
+    } catch (error) {
+      return this.rejectFromError('get_match_history_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('get-match-replay')
+  async handleGetMatchReplay(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetMatchReplayPayload,
+  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'get_match_replay_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'get_match_replay_rejected',
+          'Invalid payload: matchId is required.',
+          { socketId: socket.id },
+          'validation_error',
+        );
+      }
+
+      const replay = await this.getMatchReplayUseCase.execute({ matchId });
+
+      socket.emit('match-replay', replay);
+
+      this.logGateway('debug', {
+        layer: 'gateway',
+        event: 'get_match_replay_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+      });
+
+      return { event: 'match-replay', data: { ok: true } };
+    } catch (error) {
+      const rejectContext: {
+        socketId: string;
+        matchId?: string;
+      } = {
+        socketId: socket.id,
+      };
+
+      if (typeof payload?.matchId === 'string') {
+        const normalizedMatchId = payload.matchId.trim();
+
+        if (normalizedMatchId) {
+          rejectContext.matchId = normalizedMatchId;
+        }
+      }
+
+      return this.rejectFromError('get_match_replay_rejected', error, rejectContext);
     }
   }
 
