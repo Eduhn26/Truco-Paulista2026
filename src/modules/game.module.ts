@@ -18,6 +18,11 @@ import { AuthModule } from '@game/auth/auth.module';
 import { GameGateway } from '@game/gateway/game.gateway';
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
+import {
+  PYTHON_BOT_CONFIG,
+  PythonBotConfigService,
+  type PythonBotConfig,
+} from '@game/infrastructure/bots/python-bot.config';
 import { PrismaMatchRecordRepository } from '@game/infrastructure/persistence/prisma-match-record.repository';
 import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/prisma-player-profile.repository';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
@@ -40,6 +45,13 @@ const DEFAULT_BOT_DECISION_ADAPTER = HeuristicBotAdapter;
     PrismaPlayerProfileRepository,
     PrismaMatchRecordRepository,
     HeuristicBotAdapter,
+    PythonBotConfigService,
+    {
+      provide: PYTHON_BOT_CONFIG,
+      useFactory: (configService: PythonBotConfigService): PythonBotConfig =>
+        configService.getConfig(),
+      inject: [PythonBotConfigService],
+    },
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
     { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
     { provide: MATCH_RECORD_REPOSITORY, useClass: PrismaMatchRecordRepository },
