@@ -69,6 +69,8 @@ describe('GameGateway bot profile flow', () => {
     };
     const updateRatingUseCase = { execute: jest.fn() };
     const getRankingUseCase = { execute: jest.fn() };
+    const getMatchHistoryUseCase = { execute: jest.fn() };
+    const getMatchReplayUseCase = { execute: jest.fn() };
     const getOrCreateUserUseCase = {
       execute: jest.fn().mockResolvedValue({
         user: { id: 'legacy-user-1' },
@@ -111,6 +113,8 @@ describe('GameGateway bot profile flow', () => {
       getOrCreatePlayerProfileUseCase as never,
       updateRatingUseCase as never,
       getRankingUseCase as never,
+      getMatchHistoryUseCase as never,
+      getMatchReplayUseCase as never,
       getOrCreateUserUseCase as never,
       authTokenService as never,
       roomManager as never,
@@ -141,6 +145,8 @@ describe('GameGateway bot profile flow', () => {
         getOrCreatePlayerProfileUseCase,
         updateRatingUseCase,
         getRankingUseCase,
+        getMatchHistoryUseCase,
+        getMatchReplayUseCase,
         getOrCreateUserUseCase,
         authTokenService,
         roomManager,
@@ -884,6 +890,170 @@ describe('GameGateway bot profile flow', () => {
         mode: '1v1',
         size: 0,
         playersWaiting: [],
+      },
+    });
+  });
+
+  it('returns match history for a user and emits match-history', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-history-1',
+      authToken: 'auth-token-history-1',
+    });
+
+    deps.getMatchHistoryUseCase.execute.mockResolvedValue({
+      items: [
+        {
+          id: 'record-1',
+          matchId: 'match-1',
+          mode: '1v1',
+          status: 'completed',
+          startedAt: '2026-04-01T01:00:00.000Z',
+          finishedAt: '2026-04-01T01:10:00.000Z',
+          participants: [
+            {
+              seatId: 'T1A',
+              userId: 'user-1',
+              displayName: 'Eduardo',
+              isBot: false,
+              botProfile: null,
+            },
+          ],
+          finalScore: {
+            playerOne: 12,
+            playerTwo: 8,
+          },
+          winnerPlayerId: 'P1',
+        },
+      ],
+    });
+
+    const response = await gateway.handleGetMatchHistory(socket as never, {
+      userId: 'user-1',
+      limit: 5,
+    });
+
+    expect(deps.getMatchHistoryUseCase.execute).toHaveBeenCalledWith({
+      userId: 'user-1',
+      limit: 5,
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('match-history', {
+      items: [
+        expect.objectContaining({
+          id: 'record-1',
+          matchId: 'match-1',
+        }),
+      ],
+    });
+
+    expect(response).toEqual({
+      event: 'match-history',
+      data: {
+        ok: true,
+      },
+    });
+  });
+
+  it('rejects get-match-history when userId is missing', async () => {
+    const { gateway } = createGateway();
+    const socket = createSocket({
+      id: 'socket-history-invalid-1',
+      authToken: 'auth-token-history-invalid-1',
+    });
+
+    const response = await gateway.handleGetMatchHistory(socket as never, {});
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        message: 'Invalid payload: userId is required.',
+      },
+    });
+  });
+
+  it('returns match replay and emits match-replay', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-replay-1',
+      authToken: 'auth-token-replay-1',
+    });
+
+    deps.getMatchReplayUseCase.execute.mockResolvedValue({
+      matchId: 'match-1',
+      events: [
+        {
+          sequence: 0,
+          occurredAt: '2026-04-01T01:00:00.000Z',
+          payload: {
+            type: 'match-created',
+            pointsToWin: 12,
+            mode: '1v1',
+          },
+        },
+      ],
+    });
+
+    const response = await gateway.handleGetMatchReplay(socket as never, {
+      matchId: 'match-1',
+    });
+
+    expect(deps.getMatchReplayUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-1',
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('match-replay', {
+      matchId: 'match-1',
+      events: [
+        expect.objectContaining({
+          sequence: 0,
+        }),
+      ],
+    });
+
+    expect(response).toEqual({
+      event: 'match-replay',
+      data: {
+        ok: true,
+      },
+    });
+  });
+
+  it('emits match-replay with null data when replay is not found', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-replay-null-1',
+      authToken: 'auth-token-replay-null-1',
+    });
+
+    deps.getMatchReplayUseCase.execute.mockResolvedValue(null);
+
+    const response = await gateway.handleGetMatchReplay(socket as never, {
+      matchId: 'missing-match',
+    });
+
+    expect(socket.emit).toHaveBeenCalledWith('match-replay', null);
+    expect(response).toEqual({
+      event: 'match-replay',
+      data: {
+        ok: true,
+      },
+    });
+  });
+
+  it('rejects get-match-replay when matchId is missing', async () => {
+    const { gateway } = createGateway();
+    const socket = createSocket({
+      id: 'socket-replay-invalid-1',
+      authToken: 'auth-token-replay-invalid-1',
+    });
+
+    const response = await gateway.handleGetMatchReplay(socket as never, {});
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        message: 'Invalid payload: matchId is required.',
       },
     });
   });
