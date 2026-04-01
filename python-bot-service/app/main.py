@@ -1,21 +1,28 @@
 from fastapi import FastAPI
 
 from app.config import settings
-from app.schemas import BotDecisionContextPayload, BotDecisionResponse, HealthResponse
+from app.schemas import (
+    BotDecisionRequest,
+    BotDecisionResponse,
+    HealthResponse,
+    PassDecisionResponse,
+)
 
 app = FastAPI(
     title='Truco Paulista Python Bot Service',
-    version='0.1.0',
+    version='0.2.0',
     description=(
         'External decision service for Truco Paulista bots. '
-        'This service is introduced in Phase 15 without changing the backend bot boundary.'
+        'This service keeps the backend bot boundary stable while exposing '
+        'an explicit HTTP contract for infrastructure adapters.'
     ),
 )
 
 
 @app.get('/health/live', response_model=HealthResponse)
 def get_liveness() -> HealthResponse:
-    """Simple liveness endpoint for local runtime validation."""
+    # NOTE: Liveness must stay dependency-free so process health remains distinct
+    # from any future downstream integration failures.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -25,12 +32,8 @@ def get_liveness() -> HealthResponse:
 
 @app.get('/health/ready', response_model=HealthResponse)
 def get_readiness() -> HealthResponse:
-    """
-    Readiness endpoint for future container/orchestration checks.
-
-    NOTE:
-    There are no external dependencies yet in Phase 15.A.
-    """
+    # NOTE: Readiness is intentionally identical for now because Phase 15.B still
+    # has no external dependencies. This keeps the endpoint stable for later hardening.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -39,18 +42,24 @@ def get_readiness() -> HealthResponse:
 
 
 @app.post('/decide', response_model=BotDecisionResponse)
-def decide(_payload: BotDecisionContextPayload) -> BotDecisionResponse:
-    """
-    Setup-phase stub endpoint.
+def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
+    # NOTE: Phase 15.B locks the external contract first.
+    # Real strategy comes later, after the HTTP boundary is stable enough for the adapter.
+    if len(payload.player.hand) == 0:
+        return PassDecisionResponse(
+            action='pass',
+            reason='empty-hand',
+        )
 
-    NOTE:
-    This does not implement real bot intelligence yet.
-    The goal is to validate that:
-    - FastAPI is running
-    - Pydantic validates structured input
-    - the service already exposes the future decision surface
-    """
-    return BotDecisionResponse(
+    if payload.current_round is None:
+        return PassDecisionResponse(
+            action='pass',
+            reason='missing-round',
+        )
+
+    # NOTE: Returning an explicit fallback keeps unsupported situations observable
+    # without inventing ad-hoc response shapes outside the agreed contract.
+    return PassDecisionResponse(
         action='pass',
-        reason='setup-default',
+        reason='unsupported-state',
     )
