@@ -1,3 +1,5 @@
+import { Injectable } from '@nestjs/common';
+
 import type { MatchmakingMode } from './matchmaking-queue-manager';
 
 export type MatchmakingQueueCandidate = {
@@ -14,6 +16,7 @@ export type MatchmakingPair = {
   averageRating: number;
 };
 
+@Injectable()
 export class MatchmakingPairingPolicy {
   findPair(mode: MatchmakingMode, queue: MatchmakingQueueCandidate[]): MatchmakingPair | null {
     const requiredPlayers = this.getRequiredPlayers(mode);

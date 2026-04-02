@@ -1,14 +1,26 @@
+import compression from 'compression';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { loadRuntimeConfig } from './application/runtime/env/runtime-config';
 
 type BootstrapLogContext = {
   layer: 'bootstrap';
-  event: 'application_starting' | 'application_started' | 'application_start_failed';
+  event:
+    | 'application_starting'
+    | 'runtime_configuration_loaded'
+    | 'application_started'
+    | 'application_start_failed';
   status: 'started' | 'succeeded' | 'failed';
+  nodeEnv?: string;
   port?: number;
   url?: string;
+  corsOrigin?: string;
+  pythonBotEnabled?: boolean;
+  helmetEnabled?: boolean;
+  compressionEnabled?: boolean;
   errorName?: string;
   errorMessage?: string;
 };
@@ -22,26 +34,56 @@ function formatBootstrapLog(context: BootstrapLogContext): string {
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const port = process.env['PORT'] ? Number(process.env['PORT']) : 3000;
+  const runtimeConfig = loadRuntimeConfig();
 
   logger.log(
     formatBootstrapLog({
       layer: 'bootstrap',
       event: 'application_starting',
       status: 'started',
-      port,
+      nodeEnv: runtimeConfig.nodeEnv,
+      port: runtimeConfig.port,
     }),
   );
 
   const app = await NestFactory.create(AppModule);
-  await app.listen(port);
+
+  app.use(helmet());
+
+  app.use(
+    compression({
+      threshold: 1024,
+    }),
+  );
+
+  app.enableCors({
+    origin: runtimeConfig.corsOrigin,
+    credentials: true,
+  });
+
+  logger.log(
+    formatBootstrapLog({
+      layer: 'bootstrap',
+      event: 'runtime_configuration_loaded',
+      status: 'succeeded',
+      nodeEnv: runtimeConfig.nodeEnv,
+      port: runtimeConfig.port,
+      corsOrigin: runtimeConfig.corsOrigin,
+      pythonBotEnabled: runtimeConfig.pythonBotEnabled,
+      helmetEnabled: true,
+      compressionEnabled: true,
+    }),
+  );
+
+  await app.listen(runtimeConfig.port);
 
   logger.log(
     formatBootstrapLog({
       layer: 'bootstrap',
       event: 'application_started',
       status: 'succeeded',
-      port,
+      nodeEnv: runtimeConfig.nodeEnv,
+      port: runtimeConfig.port,
       url: await app.getUrl(),
     }),
   );

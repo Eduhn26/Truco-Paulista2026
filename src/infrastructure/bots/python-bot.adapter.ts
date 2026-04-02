@@ -6,10 +6,8 @@ import type {
   BotDecisionPort,
 } from '@game/application/ports/bot-decision.port';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
-import {
-  PYTHON_BOT_CONFIG,
-  type PythonBotConfig,
-} from '@game/infrastructure/bots/python-bot.config';
+
+import { PYTHON_BOT_CONFIG, type PythonBotConfig } from './python-bot.config';
 
 type PythonBotDecisionRequest = {
   matchId: string;
@@ -37,6 +35,41 @@ type PythonBotDecisionResponse =
       reason: 'empty-hand' | 'missing-round' | 'unsupported-state';
     };
 
+type PythonBotFailureType = 'timeout' | 'http_error' | 'invalid_payload' | 'transport_error';
+
+type PythonBotFailureContext = {
+  layer: 'infrastructure';
+  component: 'python_bot_adapter';
+  event: 'python_bot_request_failed' | 'python_bot_response_invalid';
+  status: 'failed';
+  profile: 'balanced' | 'aggressive' | 'cautious';
+  timeoutMs: number;
+  url: string;
+  errorType: PythonBotFailureType;
+  errorMessage: string;
+};
+
+type PythonBotFallbackContext = {
+  layer: 'infrastructure';
+  component: 'python_bot_adapter';
+  event: 'python_bot_fallback_applied';
+  status: 'fallback';
+  profile: 'balanced' | 'aggressive' | 'cautious';
+  timeoutMs: number;
+  errorType: PythonBotFailureType;
+  errorMessage: string;
+};
+
+type PythonBotDebugContext = {
+  layer: 'infrastructure';
+  component: 'python_bot_adapter';
+  event: 'python_bot_disabled' | 'python_bot_request_started' | 'python_bot_request_succeeded';
+  status: 'skipped' | 'started' | 'succeeded';
+  profile: 'balanced' | 'aggressive' | 'cautious';
+  timeoutMs: number;
+  url?: string;
+};
+
 @Injectable()
 export class PythonBotAdapter implements BotDecisionPort {
   private readonly logger = new Logger(PythonBotAdapter.name);
@@ -48,38 +81,108 @@ export class PythonBotAdapter implements BotDecisionPort {
   ) {}
 
   decide(context: BotDecisionContext): BotDecision {
-    // NOTE: The stable application boundary is still synchronous, so this adapter
-    // must fail safe and remain explicit about why runtime falls back to the
-    // local baseline instead of hiding transport concerns inside orchestration.
+    return this.heuristicBotAdapter.decide(context);
+  }
+
+  async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision> {
+    const fallbackDecision = this.heuristicBotAdapter.decide(context);
+
     if (!this.config.enabled) {
-      this.logger.log(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          layer: 'infrastructure',
-          component: 'python_bot_adapter',
-          event: 'python_adapter_disabled_fallback_applied',
-          status: 'fallback',
-          fallbackAdapter: 'heuristic',
-        }),
-      );
-
-      return this.heuristicBotAdapter.decide(context);
-    }
-
-    this.logger.warn(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
+      this.logDebug({
         layer: 'infrastructure',
         component: 'python_bot_adapter',
-        event: 'remote_decision_deferred_to_fallback',
-        status: 'fallback',
-        fallbackAdapter: 'heuristic',
-        baseUrl: this.config.baseUrl,
+        event: 'python_bot_disabled',
+        status: 'skipped',
+        profile: context.profile,
         timeoutMs: this.config.timeoutMs,
-      }),
-    );
+      });
 
-    return this.heuristicBotAdapter.decide(context);
+      return fallbackDecision;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const requestUrl = `${this.config.baseUrl}/decide`;
+
+    this.logDebug({
+      layer: 'infrastructure',
+      component: 'python_bot_adapter',
+      event: 'python_bot_request_started',
+      status: 'started',
+      profile: context.profile,
+      timeoutMs: this.config.timeoutMs,
+      url: requestUrl,
+    });
+
+    try {
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(this.mapRequest(context)),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return this.fallbackFromFailure(context, fallbackDecision, {
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'python_bot_request_failed',
+          status: 'failed',
+          profile: context.profile,
+          timeoutMs: this.config.timeoutMs,
+          url: requestUrl,
+          errorType: 'http_error',
+          errorMessage: `Python bot service responded with status ${response.status}.`,
+        });
+      }
+
+      const rawResponse = (await response.json()) as unknown;
+
+      if (!this.isValidRemoteResponse(rawResponse)) {
+        return this.fallbackFromFailure(context, fallbackDecision, {
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'python_bot_response_invalid',
+          status: 'failed',
+          profile: context.profile,
+          timeoutMs: this.config.timeoutMs,
+          url: requestUrl,
+          errorType: 'invalid_payload',
+          errorMessage: 'Python bot service returned an invalid decision payload.',
+        });
+      }
+
+      const decision = this.mapResponse(rawResponse);
+
+      this.logDebug({
+        layer: 'infrastructure',
+        component: 'python_bot_adapter',
+        event: 'python_bot_request_succeeded',
+        status: 'succeeded',
+        profile: context.profile,
+        timeoutMs: this.config.timeoutMs,
+        url: requestUrl,
+      });
+
+      return decision;
+    } catch (error) {
+      return this.fallbackFromFailure(context, fallbackDecision, {
+        layer: 'infrastructure',
+        component: 'python_bot_adapter',
+        event: 'python_bot_request_failed',
+        status: 'failed',
+        profile: context.profile,
+        timeoutMs: this.config.timeoutMs,
+        url: requestUrl,
+        errorType: this.isAbortError(error) ? 'timeout' : 'transport_error',
+        errorMessage:
+          error instanceof Error ? error.message : 'Unexpected python bot transport failure.',
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   private mapRequest(context: BotDecisionContext): PythonBotDecisionRequest {
@@ -116,156 +219,7 @@ export class PythonBotAdapter implements BotDecisionPort {
     };
   }
 
-  // NOTE: The remote bridge stays opt-in at the adapter level so runtime
-  // observability can mature before the project promotes network I/O into the
-  // main bot turn path.
-  async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision | null> {
-    if (!this.config.enabled) {
-      this.logger.log(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          layer: 'infrastructure',
-          component: 'python_bot_adapter',
-          event: 'remote_decision_skipped',
-          status: 'skipped',
-          reason: 'adapter_disabled',
-        }),
-      );
-
-      return null;
-    }
-
-    const requestPayload = this.mapRequest(context);
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), this.config.timeoutMs);
-
-    this.logger.log(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        layer: 'infrastructure',
-        component: 'python_bot_adapter',
-        event: 'remote_decision_attempt_started',
-        status: 'started',
-        baseUrl: this.config.baseUrl,
-        timeoutMs: this.config.timeoutMs,
-        matchId: requestPayload.matchId,
-        profile: requestPayload.profile,
-        playerId: requestPayload.player.playerId,
-      }),
-    );
-
-    try {
-      const response = await fetch(`${this.config.baseUrl}/decide`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestPayload),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        this.logger.warn(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            layer: 'infrastructure',
-            component: 'python_bot_adapter',
-            event: 'remote_decision_request_failed',
-            status: 'failed',
-            httpStatus: response.status,
-          }),
-        );
-
-        this.logger.warn(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            layer: 'infrastructure',
-            component: 'python_bot_adapter',
-            event: 'remote_decision_fallback_applied',
-            status: 'fallback',
-            reason: 'http_not_ok',
-            fallbackAdapter: 'heuristic',
-          }),
-        );
-
-        return null;
-      }
-
-      const data: unknown = await response.json();
-
-      if (!this.isPythonBotDecisionResponse(data)) {
-        this.logger.warn(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            layer: 'infrastructure',
-            component: 'python_bot_adapter',
-            event: 'remote_decision_response_rejected',
-            status: 'rejected',
-          }),
-        );
-
-        this.logger.warn(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            layer: 'infrastructure',
-            component: 'python_bot_adapter',
-            event: 'remote_decision_fallback_applied',
-            status: 'fallback',
-            reason: 'invalid_response_shape',
-            fallbackAdapter: 'heuristic',
-          }),
-        );
-
-        return null;
-      }
-
-      const mappedDecision = this.mapResponse(data);
-
-      this.logger.log(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          layer: 'infrastructure',
-          component: 'python_bot_adapter',
-          event: 'remote_decision_attempt_succeeded',
-          status: 'succeeded',
-          action: mappedDecision.action,
-        }),
-      );
-
-      return mappedDecision;
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'unknown_error';
-
-      this.logger.warn(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          layer: 'infrastructure',
-          component: 'python_bot_adapter',
-          event: 'remote_decision_transport_error',
-          status: 'failed',
-          errorMessage,
-        }),
-      );
-
-      this.logger.warn(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          layer: 'infrastructure',
-          component: 'python_bot_adapter',
-          event: 'remote_decision_fallback_applied',
-          status: 'fallback',
-          reason: 'transport_error',
-          fallbackAdapter: 'heuristic',
-        }),
-      );
-
-      return null;
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
-  }
-
-  private isPythonBotDecisionResponse(value: unknown): value is PythonBotDecisionResponse {
+  private isValidRemoteResponse(value: unknown): value is PythonBotDecisionResponse {
     if (!value || typeof value !== 'object') {
       return false;
     }
@@ -273,7 +227,7 @@ export class PythonBotAdapter implements BotDecisionPort {
     const candidate = value as Partial<PythonBotDecisionResponse>;
 
     if (candidate.action === 'play-card') {
-      return typeof candidate.card === 'string';
+      return typeof candidate.card === 'string' && candidate.card.trim().length > 0;
     }
 
     if (candidate.action === 'pass') {
@@ -285,5 +239,48 @@ export class PythonBotAdapter implements BotDecisionPort {
     }
 
     return false;
+  }
+
+  private fallbackFromFailure(
+    context: BotDecisionContext,
+    fallbackDecision: BotDecision,
+    failureContext: PythonBotFailureContext,
+  ): BotDecision {
+    this.logWarn(failureContext);
+
+    this.logWarn({
+      layer: 'infrastructure',
+      component: 'python_bot_adapter',
+      event: 'python_bot_fallback_applied',
+      status: 'fallback',
+      profile: context.profile,
+      timeoutMs: this.config.timeoutMs,
+      errorType: failureContext.errorType,
+      errorMessage: failureContext.errorMessage,
+    });
+
+    return fallbackDecision;
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
+  }
+
+  private logDebug(context: PythonBotDebugContext): void {
+    this.logger.debug(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        ...context,
+      }),
+    );
+  }
+
+  private logWarn(context: PythonBotFailureContext | PythonBotFallbackContext): void {
+    this.logger.warn(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        ...context,
+      }),
+    );
   }
 }

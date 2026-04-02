@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+NonEmptyString = Annotated[str, Field(min_length=1)]
 
 BotProfile = Literal['balanced', 'aggressive', 'cautious']
 PlayerId = Literal['P1', 'P2']
@@ -13,7 +14,7 @@ class BotPlayerView(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     player_id: PlayerId = Field(alias='playerId')
-    hand: list[str]
+    hand: list[NonEmptyString]
 
 
 class BotRoundView(BaseModel):
@@ -30,9 +31,9 @@ class BotDecisionRequest(BaseModel):
 
     # NOTE: Keep the HTTP payload aligned with the existing backend bot boundary.
     # The Python service must adapt to the contract, not the other way around.
-    match_id: str = Field(alias='matchId')
+    match_id: NonEmptyString = Field(alias='matchId')
     profile: BotProfile
-    vira_rank: str = Field(alias='viraRank')
+    vira_rank: NonEmptyString = Field(alias='viraRank')
     current_round: BotRoundView | None = Field(alias='currentRound')
     player: BotPlayerView
 
@@ -41,7 +42,7 @@ class PlayCardDecisionResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     action: Literal['play-card']
-    card: str
+    card: NonEmptyString
 
 
 class PassDecisionResponse(BaseModel):
@@ -63,5 +64,5 @@ class HealthResponse(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     status: Literal['ok']
-    service: str
-    environment: str
+    service: NonEmptyString
+    environment: NonEmptyString
