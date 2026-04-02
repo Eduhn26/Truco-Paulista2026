@@ -27,185 +27,9 @@
 
 ---
 
-## Sobre o projeto
+Estudo prático de engenharia de software construído em fases incrementais. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis.
 
-Estudo prático e incremental de engenharia de software com objetivos técnicos claros: aplicar DDD em um domínio com regras não triviais, usar TypeScript como ferramenta de design e construir um backend autoritativo onde o servidor é dono da verdade.
-
-O Truco Paulista foi escolhido por ser intencionalmente desafiador — regras de mão, hierarquia de cartas, lógica de equipes e estados de partida tornam a modelagem genuinamente difícil.
-
----
-
-## Fases
-
-| # | Descrição | |
-|---|-----------|--|
-| 0 | Setup profissional — TS strict, ESLint, Jest, scripts | ✅ |
-| 1 | Domínio puro — entidades, value objects, domain services | ✅ |
-| 2 | Camada de Aplicação — Use Cases, DTOs, Ports | ✅ |
-| 3 | Transporte WebSocket — Socket.IO + Gateway | ✅ |
-| 4 | Persistência real — PostgreSQL + Prisma | ✅ |
-| 5 | Multiplayer 2v2 + ranking | ✅ |
-| 6 | Observabilidade — health, readiness, logs estruturados | ✅ |
-| 7 | Containerização — Docker multi-stage + Compose | ✅ |
-| 8 | Deploy em produção — Render + Postgres + migrations | ✅ |
-| 9 | Autenticação real — Google/GitHub OAuth + WebSocket autenticado | ✅ |
-| 10 | Frontend jogável — React + Vite + lobby autenticado | ✅ |
-| 11 | Modo 1v1 + bots preenchendo assentos + estado público/privado | ✅ |
-| 12 | Arquitetura de bots — boundary, profiles, adapter, input transport-agnostic | ✅ |
-| 13 | Matchmaking — fila pública, pairing, timeout, fallback, reconexão | ✅ |
-| 14 | Histórico de partidas + replay | ✅ |
-| 15 | Python AI Service — serviço externo, contrato HTTP, adapter, wiring e observabilidade | ✅ |
-| 16 | Hardening — segurança + performance | 🔜 |
-
----
-
-## Arquitetura
-
-### Domain-first
-
-O Domínio tem **zero dependência** de frameworks, bancos, transporte ou autenticação. Isso não é aspiracional — é uma invariante estrutural.
-
-```
-Gateway → Application → Domain
-Infrastructure implementa Application Ports
-```
-
-O Domínio nunca conhece: `NestJS` · `Prisma` · `Socket.IO` · `OAuth` · `FastAPI` · logging · validação de transporte
-
-### Camadas
-
-| Camada | Responsabilidade |
-|--------|-----------------|
-| **Domain** | Regras puras do Truco — entidades, value objects, invariantes |
-| **Application** | Use Cases, DTOs, orquestração, ports, mappers |
-| **Infrastructure** | Persistência, Prisma, adaptadores de auth, bots, replay, histórico e integração Python |
-| **Gateway** | WebSocket, estado efêmero de sala/turno, matchmaking, leitura histórica |
-| **Auth** | Estratégias OAuth, emissão de auth token |
-| **Frontend** | Sessão no browser, UI autenticada, coordenação de socket |
-| **Python Bot Service** | Runtime externo de decisão — contrato HTTP explícito, validação Pydantic |
-| **Health** | Lifecycle de startup, endpoints operacionais, logging estruturado |
-
-### Boundary de bot
-
-A regra central da arquitetura de bots:
-
-```
-Application define a boundary
-Infrastructure escolhe a implementação
-Gateway nunca conhece o adapter concreto
-
-BOT_DECISION_PORT
-├── HeuristicBotAdapter   ← baseline local, sempre disponível
-└── PythonBotAdapter      ← runtime remoto, com fallback seguro
-```
-
-Isso permite evolução incremental sem refactor transversal.
-
-### Testabilidade
-
-Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay são testáveis sem servidor, banco real ou mocks de framework.
-
-> ✅ **23 suites · 135 testes · 0 falhas**
-
----
-
-## O que funciona hoje
-
-<details>
-<summary><strong>Multiplayer e ranking</strong></summary>
-<br/>
-
-- Multiplayer real via WebSocket — 2v2 e 1v1
-- 4 assentos por sala: `T1A` · `T2A` · `T1B` · `T2B`
-- Sincronização de estado `ready` — partida inicia apenas quando todos estão prontos
-- Reconexão por identidade de sessão preservando o mesmo assento
-- Ranking persistido com ELO simplificado: `+25` vitória · `-25` derrota · mínimo `100`
-
-</details>
-
-<details>
-<summary><strong>Matchmaking público</strong></summary>
-<br/>
-
-- Fila pública por modo: 1v1 e 2v2
-- Pairing por rating
-- Timeout determinístico de fila
-- Fallback pós-timeout: continuar na fila · iniciar com bot · recusar
-- Transição automática de fila para partida
-- Snapshot consolidado de observabilidade
-
-</details>
-
-<details>
-<summary><strong>Histórico e replay</strong></summary>
-<br/>
-
-- `MatchRecord` como boundary explícita de histórico — separada de `MatchSnapshot`
-- Participantes históricos persistidos por partida (usuários e bots)
-- Replay como sequência ordenada de eventos tipados
-- Use cases: salvar histórico · listar por usuário · buscar replay por partida
-- Gateway expõe leitura via `get-match-history` e `get-match-replay`
-- Prisma e schema de persistência não acoplados ao transporte
-
-</details>
-
-<details>
-<summary><strong>Bots e Python AI Service</strong></summary>
-<br/>
-
-- Preenchimento automático de assentos com perfis determinísticos: `balanced` · `aggressive` · `cautious`
-- `BotDecisionPort` na Application — independente de tecnologia
-- `HeuristicBotAdapter` como baseline local sempre disponível
-- `PythonBotAdapter` em Infrastructure com mapeamento request/response e fallback seguro
-- Seleção de adapter por config no `GameModule`
-- Observabilidade explícita de seleção de adapter e fallback
-
-**Python Bot Service** (`python-bot-service/`):
-- FastAPI + Pydantic, runtime isolado
-- `GET /health/live` · `GET /health/ready`
-- `POST /decide` com contrato HTTP estável e explícito
-- Reasons suportadas: `empty-hand` · `missing-round` · `unsupported-state`
-- Preparado para evolução de inferência remota sem contaminar Domain ou Gateway
-
-</details>
-
-<details>
-<summary><strong>Autenticação</strong></summary>
-<br/>
-
-- Google OAuth + GitHub OAuth reais
-- Provedores normalizados em identidade interna (`User`)
-- Auth token emitido pela aplicação após callback
-- Handshake WebSocket autenticado via `authToken`
-- `PlayerProfile` vinculado ao `userId`
-- Múltiplos usuários autenticados sem colisão de assento
-
-</details>
-
-<details>
-<summary><strong>Frontend</strong></summary>
-<br/>
-
-- React + Vite + TypeScript + Tailwind CSS em `frontend-app/`
-- Callback OAuth integrado ao frontend
-- Persistência de sessão no browser: `authToken` · `backendUrl` · identidade do usuário
-- Lobby autenticado + página de partida com hidratação direta via socket
-- Emite ações reais: `get-state` · `start-hand` · `play-card`
-- Não-autoritativo — o backend é dono da verdade
-
-</details>
-
-<details>
-<summary><strong>Observabilidade</strong></summary>
-<br/>
-
-- `GET /health/live` · `GET /health/ready`
-- Logs estruturados de bootstrap, banco e gateway
-- Logs estruturados de seleção de adapter do bot, fallback e tentativa remota
-- Classificação de erros: `validation_error` · `transport_error` · `domain_error` · `unexpected_error`
-- Snapshot observável do matchmaking exposto no gateway
-
-</details>
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes e transições de estado tornam o exercício de DDD não trivial.
 
 ---
 
@@ -213,18 +37,53 @@ Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay
 
 | | |
 |-|---|
-| **Runtime** | Node.js 20 |
-| **Linguagem** | TypeScript strict |
-| **Framework** | NestJS |
+| **Backend** | Node.js 20 · NestJS · TypeScript strict |
 | **Transporte** | Socket.IO |
-| **Persistência** | PostgreSQL 16 + Prisma ORM |
+| **Persistência** | PostgreSQL 16 · Prisma ORM |
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
-| **Frontend** | React + Vite + TypeScript + Tailwind CSS |
-| **Bots** | `HeuristicBotAdapter` local + `PythonBotAdapter` remoto |
-| **Python Bot Service** | FastAPI + Pydantic · runtime isolado |
-| **Histórico** | `MatchRecord` + replay events persistidos via Prisma |
-| **Testes** | Jest + ts-jest |
-| **Deploy** | Render + Render Postgres + Docker multi-stage |
+| **Frontend** | React · Vite · TypeScript · Tailwind CSS |
+| **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
+| **Testes** | Jest · ts-jest — 23 suites · 135 testes · 0 falhas |
+| **Deploy** | Render · Docker multi-stage |
+
+---
+
+## Arquitetura
+
+```
+Gateway → Application → Domain
+Infrastructure implementa Application Ports
+```
+
+O Domínio não conhece NestJS, Prisma, Socket.IO, OAuth ou FastAPI. Isso não é aspiracional — é uma invariante estrutural verificável nos testes.
+
+Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `HeuristicBotAdapter` e `PythonBotAdapter` vivem na Infrastructure. O Gateway nunca conhece o adapter concreto.
+
+→ Decisões arquiteturais detalhadas em [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## Fases
+
+| # | Descrição | |
+|---|-----------|--|
+| 0 | Setup — TS strict, ESLint, Jest | ✅ |
+| 1 | Domínio puro — entidades, value objects, domain services | ✅ |
+| 2 | Camada de Aplicação — Use Cases, DTOs, Ports | ✅ |
+| 3 | Transporte WebSocket — Socket.IO + Gateway | ✅ |
+| 4 | Persistência — PostgreSQL + Prisma | ✅ |
+| 5 | Multiplayer 2v2 + ranking | ✅ |
+| 6 | Observabilidade — health, readiness, logs estruturados | ✅ |
+| 7 | Containerização — Docker multi-stage + Compose | ✅ |
+| 8 | Deploy em produção — Render + Postgres + migrations | ✅ |
+| 9 | Autenticação — Google/GitHub OAuth + WebSocket autenticado | ✅ |
+| 10 | Frontend jogável — React + Vite + lobby autenticado | ✅ |
+| 11 | Modo 1v1 + bots + estado público/privado | ✅ |
+| 12 | Arquitetura de bots — boundary, profiles, adapter | ✅ |
+| 13 | Matchmaking — fila, pairing, timeout, fallback | ✅ |
+| 14 | Histórico de partidas + replay | ✅ |
+| 15 | Python AI Service — FastAPI, contrato HTTP, adapter, wiring | ✅ |
+| 16 | Hardening — rate limiting, métricas, correlation ID, env validation | ✅ |
 
 ---
 
@@ -234,8 +93,7 @@ Domínio, Gateway, RoomManager, boundary do bot, matchmaking e histórico/replay
 
 ```bash
 # Backend
-npm install
-cp .env.example .env
+npm install && cp .env.example .env
 docker compose up -d postgres
 npx prisma migrate dev
 npm run start:dev
@@ -243,255 +101,36 @@ npm run start:dev
 
 ```bash
 # Frontend
-cd frontend-app
-npm install
-npm run dev
+cd frontend-app && npm install && npm run dev
 # → http://localhost:5173
 ```
 
 ```bash
 # Python Bot Service
 cd python-bot-service
-python -m venv .venv
-source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && cp .env.example .env
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ```bash
-# Completamente containerizado
-docker compose up -d --build
-docker compose logs --tail=100 backend
-
-# Health checks
+# Validar
 curl http://localhost:3000/health/live
 curl http://localhost:3000/health/ready
-curl http://localhost:8000/health/live   # Python service
+curl http://localhost:3000/health/metrics
+curl http://localhost:8000/health/live
 ```
 
 ---
 
-## Autenticação
+## Documentação
 
-```
-GET /auth/google           →  Inicia login Google
-GET /auth/google/callback  →  Callback Google
-GET /auth/github           →  Inicia login GitHub
-GET /auth/github/callback  →  Callback GitHub
-```
-
-O backend autentica via OAuth, emite um token próprio e redireciona o browser para persistir a sessão no frontend.
-
-```json
-{
-  "user": {
-    "id": "...",
-    "provider": "google | github",
-    "email": "...",
-    "displayName": "...",
-    "avatarUrl": "..."
-  },
-  "authToken": "...",
-  "expiresIn": "7d"
-}
-```
-
----
-
-## Contrato do Python Bot Service
-
-**Request — `POST /decide`**
-
-```json
-{
-  "matchId": "match-1",
-  "profile": "balanced",
-  "viraRank": "4",
-  "currentRound": {
-    "playerOneCard": null,
-    "playerTwoCard": null,
-    "finished": false,
-    "result": null
-  },
-  "player": {
-    "playerId": "P1",
-    "hand": ["4P", "7C", "AO"]
-  }
-}
-```
-
-**Response**
-
-```json
-{
-  "action": "play",
-  "cardIndex": 0
-}
-```
-
-Reasons de fallback: `empty-hand` · `missing-round` · `unsupported-state`
-
----
-
-## API
-
-### Endpoints HTTP
-
-| Rota | Método | Descrição |
-|------|--------|-----------|
-| `/health/live` | `GET` | Liveness — processo no ar |
-| `/health/ready` | `GET` | Readiness — banco pronto |
-| `/auth/google` | `GET` | Login Google OAuth |
-| `/auth/github` | `GET` | Login GitHub OAuth |
-
-### Eventos WebSocket
-
-**Client → Server**
-
-| Evento | Descrição |
-|--------|-----------|
-| `create-match` | Criar sala |
-| `join-match` | Entrar em sala existente |
-| `join-queue` | Entrar na fila pública |
-| `leave-queue` | Sair da fila |
-| `continue-queue` | Voltar à fila após timeout |
-| `start-bot-match` | Iniciar partida com bot |
-| `decline-fallback` | Recusar fallback pendente |
-| `set-ready` | Sinalizar pronto |
-| `start-hand` | Iniciar mão |
-| `play-card` | Jogar carta |
-| `get-state` | Estado atual |
-| `get-ranking` | Ranking |
-| `get-match-history` | Histórico de partidas por usuário |
-| `get-match-replay` | Replay de uma partida |
-| `get-matchmaking-snapshot` | Snapshot do matchmaking |
-
-**Server → Client**
-
-| Evento | Descrição |
-|--------|-----------|
-| `player-assigned` | Assento atribuído |
-| `queue-joined` | Entrada na fila confirmada |
-| `queue-timeout` | Timeout com opções de fallback |
-| `queue-resumed` | Retorno à fila confirmado |
-| `match-found` | Partida encontrada |
-| `bot-match-created` | Partida com bot criada |
-| `fallback-declined` | Fallback recusado |
-| `room-state` | Estado da sala |
-| `match-state` | Estado da partida |
-| `match-state:private` | Mão privada do jogador |
-| `hand-started` | Mão iniciada |
-| `card-played` | Carta jogada |
-| `rating-updated` | Ranking atualizado |
-| `match-history` | Histórico de partidas |
-| `match-replay` | Replay da partida |
-| `matchmaking-snapshot` | Snapshot do matchmaking |
-| `error` | Erro classificado |
-
----
-
-## Estrutura do projeto
-
-```
-truco-paulista/
-├── frontend-app/              # React + Vite + TypeScript + Tailwind
-│   └── src/
-│       ├── app/
-│       ├── features/
-│       ├── pages/
-│       └── services/
-├── python-bot-service/        # FastAPI + Pydantic
-│   ├── app/
-│   ├── requirements.txt
-│   └── README.md
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
-├── src/
-│   ├── auth/                  # OAuth, auth token service
-│   ├── domain/                # Regras puras — sem frameworks
-│   │   ├── entities/
-│   │   ├── value-objects/
-│   │   ├── services/
-│   │   └── exceptions/
-│   ├── application/           # Use Cases, DTOs, Ports, Mappers
-│   │   ├── use-cases/
-│   │   ├── dtos/
-│   │   ├── ports/
-│   │   └── mappers/
-│   ├── infrastructure/
-│   │   ├── bots/              # HeuristicBotAdapter + PythonBotAdapter
-│   │   └── persistence/       # Prisma + in-memory + history/replay
-│   ├── gateway/               # WebSocket + matchmaking + multiplayer + history reads
-│   │   ├── game.gateway.ts
-│   │   ├── matchmaking/
-│   │   └── multiplayer/
-│   ├── health/
-│   ├── modules/
-│   └── main.ts
-└── test/
-    └── unit/
-        ├── domain/
-        ├── application/
-        ├── gateway/
-        └── infrastructure/
-```
-
----
-
-## Decisões arquiteturais
-
-Cada decisão tem uma razão documentada — não apenas uma preferência.
-
-| ID | Decisão |
-|----|---------|
-| D1 | `PlayerId` no Domínio é `'P1'`, `'P2'` — identidade de domínio, não de transporte |
-| D2 | `SeatId` e `TeamId` vivem no Gateway, não como Value Objects do Domínio |
-| D3 | Ordem de turno no Gateway é adaptação transitória de transporte |
-| D4 | Ranking é Bounded Context separado — `Match` nunca atualiza `PlayerProfile` |
-| D5 | `toSnapshot()` / `fromSnapshot()` são extensões de serialização, não alteram invariantes |
-| D6 | Health vive fora do Domínio, em `src/health/*` |
-| D7 | Readiness do banco pertence à Infraestrutura via `PrismaService` |
-| D8 | `DomainError` deve permanecer distinguível de falhas técnicas |
-| D9 | `User` é boundary de identidade da Infraestrutura — nunca vaza para o Domínio |
-| D10 | OAuth providers são adaptadores; a aplicação os normaliza em identidade interna |
-| D11 | A aplicação emite seu próprio auth token para o handshake WebSocket |
-| D12 | Migrations no Render Free rodam no startup do container como workaround operacional |
-| D13 | Bots pertencem ao backend boundary, não ao frontend |
-| D14 | `BotDecisionPort` vive na Application — independente de tecnologia |
-| D15 | `BotDecisionContext` contém apenas input de decisão, sem detalhes de transporte |
-| D16 | Frontend é não-autoritativo — o backend é dono da verdade da partida |
-| D17 | Matchmaking vive fora do Domain, como orchestration no Gateway/Application boundary |
-| D18 | Reconexão recupera o mesmo seat por `playerToken + matchId`, não o próximo livre |
-| D19 | Fallback pós-timeout é estado operacional de matchmaking, não regra do jogo |
-| D20 | Observabilidade do matchmaking expõe snapshots, não estruturas internas mutáveis |
-| D21 | Histórico de partidas vive fora do Domain como concern de Application/Infrastructure |
-| D22 | `MatchSnapshot` e `MatchRecord` têm responsabilidades diferentes e não devem ser unificados |
-| D23 | Replay é projeção histórica ordenada, não vazamento cru de payload de transporte |
-| D24 | Gateway expõe leitura histórica sem acoplar Prisma ou schema de persistência ao transporte |
-| D25 | Python Bot Service é runtime externo — o Domain nunca conhece FastAPI ou Pydantic |
-| D26 | `PythonBotAdapter` tem fallback seguro para o adapter heurístico em caso de falha remota |
-| D27 | A seleção de adapter é concern de configuração do `GameModule`, não do Gateway |
-
----
-
-## Dívida técnica
-
-| ID | Descrição | Status |
-|----|-----------|--------|
-| DT-4 | Ordem de turno ainda no Gateway como regra transitória | ⚠️ Aceita |
-| DT-7 | Camada de métricas formal não implementada | 🔜 Backlog |
-| DT-8 | Sem correlation ID para rastreamento a nível de socket | 🔜 Backlog |
-| DT-13 | Build Docker depende de `legacy-peer-deps` | ⚠️ Aceita |
-| DT-14 | Migrations rodam no startup do container no Render Free | ⚠️ Aceita |
-| DT-15 | Compatibilidade com identidade de socket legado deve ser removida após migração do frontend | ⚠️ Aceita |
-| DT-22 | `HeuristicBotAdapter` é baseline simples para competição real | ⚠️ Aceita |
-| DT-23 | `game.gateway.ts` concentra orquestração de matchmaking — pode merecer extração | ⚠️ Aceita |
-| DT-24 | Matchmaking usa estado efêmero em memória — sem persistência durável | 🔜 Backlog |
-| DT-25 | Integração automática do histórico ao fechamento da partida ainda pode evoluir | ⚠️ Aceita |
-| DT-26 | Replay modelado e exposto, mas sem UX rica de consumo no frontend | 🔜 Backlog |
-| DT-27 | Python Bot Service usa decisão heurística simples — inferência real é trabalho futuro | ⚠️ Aceita |
+| | |
+|-|---|
+| [Arquitetura e decisões](docs/architecture.md) | Domain-first, camadas, ADRs D1–D30 |
+| [API — WebSocket events](docs/api.md) | Todos os eventos Client↔Server |
+| [Python Bot Service](python-bot-service/README.md) | Contrato HTTP, exemplos, health |
+| [Dívida técnica](docs/technical-debt.md) | DTs rastreadas com status |
 
 ---
 
