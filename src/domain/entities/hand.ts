@@ -7,12 +7,29 @@ import { Round, type RoundSnapshot } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
 import { dealHandsFromViraRank } from '../services/deck';
 
+export type HandValue = 1 | 3 | 6 | 9 | 12;
+export type HandBetState = 'idle' | 'awaiting_response';
+export type HandSpecialState = 'normal' | 'mao_de_onze' | 'mao_de_ferro';
+
 export type HandSnapshot = {
   viraRank: Rank;
   rounds: RoundSnapshot[];
   finished: boolean;
   playerOneHand: string[];
   playerTwoHand: string[];
+  currentValue: HandValue;
+  betState: HandBetState;
+  pendingValue: HandValue | null;
+  requestedBy: PlayerId | null;
+  specialState: HandSpecialState;
+};
+
+type HandStateConfig = {
+  currentValue?: HandValue;
+  betState?: HandBetState;
+  pendingValue?: HandValue | null;
+  requestedBy?: PlayerId | null;
+  specialState?: HandSpecialState;
 };
 
 export class Hand {
@@ -20,21 +37,34 @@ export class Hand {
   private readonly playerOneHand: Card[];
   private readonly playerTwoHand: Card[];
   private finished = false;
+  private currentValue: HandValue;
+  private betState: HandBetState;
+  private pendingValue: HandValue | null;
+  private requestedBy: PlayerId | null;
+  private specialState: HandSpecialState;
 
   constructor(
     private readonly viraRank: Rank,
     playerOneHand: Card[] = [],
     playerTwoHand: Card[] = [],
+    state: HandStateConfig = {},
   ) {
     this.rounds = [new Round(this.viraRank)];
     this.playerOneHand = [...playerOneHand];
     this.playerTwoHand = [...playerTwoHand];
+    this.currentValue = state.currentValue ?? 1;
+    this.betState = state.betState ?? 'idle';
+    this.pendingValue = state.pendingValue ?? null;
+    this.requestedBy = state.requestedBy ?? null;
+    this.specialState = state.specialState ?? 'normal';
+
+    this.assertStateInvariants();
   }
 
-  static start(viraRank: Rank): Hand {
+  static start(viraRank: Rank, state: HandStateConfig = {}): Hand {
     const dealtHands = dealHandsFromViraRank(viraRank);
 
-    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand);
+    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, state);
   }
 
   static fromSnapshot(snapshot: HandSnapshot): Hand {
@@ -42,6 +72,13 @@ export class Hand {
       snapshot.viraRank,
       snapshot.playerOneHand.map((card) => Card.from(card)),
       snapshot.playerTwoHand.map((card) => Card.from(card)),
+      {
+        currentValue: snapshot.currentValue ?? 1,
+        betState: snapshot.betState ?? 'idle',
+        pendingValue: snapshot.pendingValue ?? null,
+        requestedBy: snapshot.requestedBy ?? null,
+        specialState: snapshot.specialState ?? 'normal',
+      },
     );
 
     const restoredRounds = snapshot.rounds.map((round) => Round.fromSnapshot(round));
@@ -51,12 +88,19 @@ export class Hand {
       ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]),
     );
     hand.finished = snapshot.finished;
+    hand.assertStateInvariants();
 
     return hand;
   }
 
   play(player: PlayerId, card: Card): void {
-    if (this.finished) throw new InvalidMoveError('Hand is already finished.');
+    if (this.finished) {
+      throw new InvalidMoveError('Hand is already finished.');
+    }
+
+    if (this.betState === 'awaiting_response') {
+      throw new InvalidMoveError('Cannot play cards while a bet response is pending.');
+    }
 
     this.removeCardFromHand(player, card);
 
@@ -89,6 +133,34 @@ export class Hand {
     return [...this.getCardsByPlayer(player)];
   }
 
+  getCurrentValue(): HandValue {
+    return this.currentValue;
+  }
+
+  getBetState(): HandBetState {
+    return this.betState;
+  }
+
+  getPendingValue(): HandValue | null {
+    return this.pendingValue;
+  }
+
+  getRequestedBy(): PlayerId | null {
+    return this.requestedBy;
+  }
+
+  getSpecialState(): HandSpecialState {
+    return this.specialState;
+  }
+
+  hasPendingBetResponse(): boolean {
+    return this.betState === 'awaiting_response';
+  }
+
+  isSpecialHand(): boolean {
+    return this.specialState !== 'normal';
+  }
+
   toSnapshot(): HandSnapshot {
     return {
       viraRank: this.viraRank,
@@ -96,6 +168,11 @@ export class Hand {
       finished: this.finished,
       playerOneHand: this.playerOneHand.map((card) => card.toString()),
       playerTwoHand: this.playerTwoHand.map((card) => card.toString()),
+      currentValue: this.currentValue,
+      betState: this.betState,
+      pendingValue: this.pendingValue,
+      requestedBy: this.requestedBy,
+      specialState: this.specialState,
     };
   }
 
@@ -177,5 +254,31 @@ export class Hand {
     }
 
     hand.splice(cardIndex, 1);
+  }
+
+  private assertStateInvariants(): void {
+    if (this.betState === 'idle') {
+      if (this.pendingValue !== null) {
+        throw new InvalidMoveError('Idle hand cannot have a pending bet value.');
+      }
+
+      if (this.requestedBy !== null) {
+        throw new InvalidMoveError('Idle hand cannot have a requesting player.');
+      }
+
+      return;
+    }
+
+    if (this.pendingValue === null) {
+      throw new InvalidMoveError('Pending bet state requires a pending bet value.');
+    }
+
+    if (this.requestedBy === null) {
+      throw new InvalidMoveError('Pending bet state requires a requesting player.');
+    }
+
+    if (this.pendingValue <= this.currentValue) {
+      throw new InvalidMoveError('Pending bet value must be greater than current hand value.');
+    }
   }
 }
