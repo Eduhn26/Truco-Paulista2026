@@ -220,26 +220,29 @@ describe('GameGateway bot profile flow', () => {
         queues: {
           '1v1': {
             waiting: queueStateByMode['1v1'].length,
-            playersWaiting: queueStateByMode['1v1'].map(({ socketId, userId, rating, joinedAt }) => ({
-              socketId,
-              userId,
-              rating,
-              joinedAt,
-            })),
+            playersWaiting: queueStateByMode['1v1'].map(
+              ({ socketId, userId, rating, joinedAt }) => ({
+                socketId,
+                userId,
+                rating,
+                joinedAt,
+              }),
+            ),
           },
           '2v2': {
             waiting: queueStateByMode['2v2'].length,
-            playersWaiting: queueStateByMode['2v2'].map(({ socketId, userId, rating, joinedAt }) => ({
-              socketId,
-              userId,
-              rating,
-              joinedAt,
-            })),
+            playersWaiting: queueStateByMode['2v2'].map(
+              ({ socketId, userId, rating, joinedAt }) => ({
+                socketId,
+                userId,
+                rating,
+                joinedAt,
+              }),
+            ),
           },
         },
         pendingFallbacks: {
-          total:
-            pendingFallbacksByMode['1v1'].length + pendingFallbacksByMode['2v2'].length,
+          total: pendingFallbacksByMode['1v1'].length + pendingFallbacksByMode['2v2'].length,
           byMode: {
             '1v1': pendingFallbacksByMode['1v1'].length,
             '2v2': pendingFallbacksByMode['2v2'].length,
@@ -383,14 +386,16 @@ describe('GameGateway bot profile flow', () => {
         };
       }),
 
-      completeMatchedPair: jest.fn((pair: { mode: MatchmakingMode; players: Array<{ socketId: string }> }) => {
-        for (const player of pair.players) {
-          removeWaitingBySocketId(player.socketId);
-          removePendingFallbackBySocketId(player.socketId);
-        }
+      completeMatchedPair: jest.fn(
+        (pair: { mode: MatchmakingMode; players: Array<{ socketId: string }> }) => {
+          for (const player of pair.players) {
+            removeWaitingBySocketId(player.socketId);
+            removePendingFallbackBySocketId(player.socketId);
+          }
 
-        return toQueueSnapshot(pair.mode);
-      }),
+          return toQueueSnapshot(pair.mode);
+        },
+      ),
     };
 
     const botDecisionPort = {

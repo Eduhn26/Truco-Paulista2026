@@ -292,6 +292,7 @@ export class Hand {
 
   private evaluateFinished(): void {
     const winner = this.resolveWinner();
+
     if (winner) {
       this.finishWithWinner(winner, this.currentValue);
       return;
@@ -316,6 +317,7 @@ export class Hand {
 
   private resolveWinner(): PlayerId | null {
     const wins = this.countWins();
+
     if (wins.P1 >= 2) return 'P1';
     if (wins.P2 >= 2) return 'P2';
 
@@ -323,26 +325,44 @@ export class Hand {
     const r2 = this.getRoundResultAt(1);
     const r3 = this.getRoundResultAt(2);
 
-    if (!r1 || !r2) return null;
-
-    if (r1 !== 'TIE' && r2 === 'TIE') return r1;
-    if (r1 === 'TIE' && r2 !== 'TIE') return r2;
-
-    if (r1 === 'TIE' && r2 === 'TIE') {
-      if (r3 && r3 !== 'TIE') return r3;
+    if (!r1 || !r2) {
       return null;
     }
 
-    if (r1 !== 'TIE' && r2 !== 'TIE' && r1 !== r2) {
-      if (r3 && r3 !== 'TIE') return r3;
+    if (r1 === 'TIE') {
+      if (r2 === 'TIE') {
+        if (r3 && r3 !== 'TIE') {
+          return r3;
+        }
+
+        return null;
+      }
+
+      return r2;
+    }
+
+    if (r2 === 'TIE') {
+      return r1;
+    }
+
+    if (r1 === r2) {
+      return r1;
+    }
+
+    if (!r3) {
       return null;
     }
 
-    return null;
+    if (r3 === 'TIE') {
+      return r1;
+    }
+
+    return r3;
   }
 
   private getRoundResultAt(index: number): RoundResult | null {
     const round = this.rounds[index];
+
     if (!round) return null;
     if (!round.isFinished()) return null;
 
@@ -353,9 +373,12 @@ export class Hand {
     const wins = { P1: 0, P2: 0 };
 
     for (const round of this.rounds) {
-      if (!round.isFinished()) continue;
+      if (!round.isFinished()) {
+        continue;
+      }
 
       const result: RoundResult = round.getResult();
+
       if (result === 'P1') wins.P1 += 1;
       if (result === 'P2') wins.P2 += 1;
     }
