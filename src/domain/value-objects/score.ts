@@ -10,9 +10,24 @@ export class Score {
     return new Score(0, 0);
   }
 
+  static fromValues(playerOne: number, playerTwo: number): Score {
+    return new Score(playerOne, playerTwo);
+  }
+
   addPoint(player: PlayerId): Score {
-    if (player === 'P1') return new Score(this.playerOne + 1, this.playerTwo);
-    return new Score(this.playerOne, this.playerTwo + 1);
+    return this.addPoints(player, 1);
+  }
+
+  addPoints(player: PlayerId, amount: number): Score {
+    if (amount <= 0) {
+      return this;
+    }
+
+    if (player === 'P1') {
+      return new Score(this.playerOne + amount, this.playerTwo);
+    }
+
+    return new Score(this.playerOne, this.playerTwo + amount);
   }
 
   hasWinner(pointsToWin: number): PlayerId | null {

@@ -27,18 +27,8 @@ export class Match {
   static fromSnapshot(snapshot: MatchSnapshot): Match {
     const match = new Match(snapshot.pointsToWin);
 
-    let restoredScore = Score.zero();
-
-    for (let index = 0; index < snapshot.score.playerOne; index += 1) {
-      restoredScore = restoredScore.addPoint('P1');
-    }
-
-    for (let index = 0; index < snapshot.score.playerTwo; index += 1) {
-      restoredScore = restoredScore.addPoint('P2');
-    }
-
     match.state = snapshot.state;
-    match.score = restoredScore;
+    match.score = Score.fromValues(snapshot.score.playerOne, snapshot.score.playerTwo);
     match.currentHand = snapshot.currentHand ? Hand.fromSnapshot(snapshot.currentHand) : null;
 
     return match;
@@ -61,36 +51,56 @@ export class Match {
       throw new InvalidMoveError('Match is already finished.');
     }
 
-    if (this.state !== 'waiting') return;
+    if (this.state !== 'waiting') {
+      return;
+    }
 
     this.currentHand = Hand.start(viraRank);
     this.state = 'in_progress';
   }
 
   play(player: PlayerId, card: Card): void {
-    if (this.state !== 'in_progress' || !this.currentHand) {
-      throw new InvalidMoveError('Match is not in progress.');
-    }
+    const currentHand = this.ensureCurrentHandInProgress();
 
-    this.currentHand.play(player, card);
+    currentHand.play(player, card);
+    this.resolveFinishedHandIfNeeded();
+  }
 
-    if (!this.currentHand.isFinished()) return;
+  requestTruco(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
 
-    const winner = this.currentHand.getWinner();
-    if (winner) {
-      this.score = this.score.addPoint(winner);
-    }
+    currentHand.requestTruco(player);
+  }
 
-    const matchWinner = this.score.hasWinner(this.pointsToWin);
+  raiseToSix(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
 
-    this.currentHand = null;
+    currentHand.raiseToSix(player);
+  }
 
-    if (matchWinner) {
-      this.state = 'finished';
-      return;
-    }
+  raiseToNine(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
 
-    this.state = 'waiting';
+    currentHand.raiseToNine(player);
+  }
+
+  raiseToTwelve(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
+
+    currentHand.raiseToTwelve(player);
+  }
+
+  acceptBet(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
+
+    currentHand.acceptBet(player);
+  }
+
+  declineBet(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
+
+    currentHand.declineBet(player);
+    this.resolveFinishedHandIfNeeded();
   }
 
   toSnapshot(): MatchSnapshot {
@@ -105,5 +115,37 @@ export class Match {
       },
       currentHand: this.currentHand ? this.currentHand.toSnapshot() : null,
     };
+  }
+
+  private ensureCurrentHandInProgress(): Hand {
+    if (this.state !== 'in_progress' || !this.currentHand) {
+      throw new InvalidMoveError('Match is not in progress.');
+    }
+
+    return this.currentHand;
+  }
+
+  private resolveFinishedHandIfNeeded(): void {
+    if (!this.currentHand || !this.currentHand.isFinished()) {
+      return;
+    }
+
+    const winner = this.currentHand.getWinner();
+    const awardedPoints = this.currentHand.getAwardedPoints();
+
+    if (winner && awardedPoints) {
+      this.score = this.score.addPoints(winner, awardedPoints);
+    }
+
+    const matchWinner = this.score.hasWinner(this.pointsToWin);
+
+    this.currentHand = null;
+
+    if (matchWinner) {
+      this.state = 'finished';
+      return;
+    }
+
+    this.state = 'waiting';
   }
 }

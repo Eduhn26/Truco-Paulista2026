@@ -1,3 +1,7 @@
+jest.mock('../../../src/application/runtime/env/runtime-config', () => ({
+  readGatewayCorsOrigin: () => 'http://localhost:5173',
+}));
+
 import { GameGateway } from '../../../src/gateway/game.gateway';
 
 type GatewayServerMock = {
@@ -32,6 +36,27 @@ type PlayerProfileResult = {
     rating: number;
   };
 };
+
+type MatchmakingMode = '1v1' | '2v2';
+
+type QueuePlayer = {
+  socketId: string;
+  userId: string;
+  playerToken: string;
+  mode: MatchmakingMode;
+  rating: number;
+  joinedAt: number;
+};
+
+type PendingFallback = {
+  socketId: string;
+  userId: string;
+  playerToken: string;
+  mode: MatchmakingMode;
+  rating: number;
+  timedOutAt: number;
+};
+
 function createSocket(options?: { id?: string; authToken?: string; token?: string }): TestSocket {
   const auth: Record<string, unknown> = {};
 
@@ -101,6 +126,273 @@ describe('GameGateway bot profile flow', () => {
       beginHand: jest.fn(),
       isPlayersTurn: jest.fn(),
     };
+
+    const queueStateByMode: Record<MatchmakingMode, QueuePlayer[]> = {
+      '1v1': [],
+      '2v2': [],
+    };
+
+    const pendingFallbacksByMode: Record<MatchmakingMode, PendingFallback[]> = {
+      '1v1': [],
+      '2v2': [],
+    };
+
+    const QUEUE_TIMEOUT_MS = 2 * 60 * 1000;
+
+    const toQueueSnapshot = (mode: MatchmakingMode) => ({
+      mode,
+      size: queueStateByMode[mode].length,
+      playersWaiting: queueStateByMode[mode].map(
+        ({ socketId, userId, playerToken, rating, joinedAt }) => ({
+          socketId,
+          userId,
+          playerToken,
+          rating,
+          joinedAt,
+        }),
+      ),
+    });
+
+    const removeWaitingBySocketId = (socketId: string): QueuePlayer | null => {
+      for (const mode of ['1v1', '2v2'] as const) {
+        const index = queueStateByMode[mode].findIndex((player) => player.socketId === socketId);
+
+        if (index >= 0) {
+          const [removed] = queueStateByMode[mode].splice(index, 1);
+          return removed ?? null;
+        }
+      }
+
+      return null;
+    };
+
+    const removePendingFallbackBySocketId = (socketId: string): PendingFallback | null => {
+      for (const mode of ['1v1', '2v2'] as const) {
+        const index = pendingFallbacksByMode[mode].findIndex(
+          (player) => player.socketId === socketId,
+        );
+
+        if (index >= 0) {
+          const [removed] = pendingFallbacksByMode[mode].splice(index, 1);
+          return removed ?? null;
+        }
+      }
+
+      return null;
+    };
+
+    const expireQueue = (mode: MatchmakingMode) => {
+      const now = Date.now();
+      const timedOutFallbacks: PendingFallback[] = [];
+
+      const remainingPlayers: QueuePlayer[] = [];
+
+      for (const player of queueStateByMode[mode]) {
+        if (now > player.joinedAt + QUEUE_TIMEOUT_MS) {
+          const fallback: PendingFallback = {
+            socketId: player.socketId,
+            userId: player.userId,
+            playerToken: player.playerToken,
+            mode: player.mode,
+            rating: player.rating,
+            timedOutAt: player.joinedAt + QUEUE_TIMEOUT_MS + 1,
+          };
+
+          pendingFallbacksByMode[mode].push(fallback);
+          timedOutFallbacks.push(fallback);
+          continue;
+        }
+
+        remainingPlayers.push(player);
+      }
+
+      queueStateByMode[mode] = remainingPlayers;
+
+      return {
+        snapshot: toQueueSnapshot(mode),
+        timedOutFallbacks,
+      };
+    };
+
+    const gatewayMatchmakingService = {
+      getObservabilitySnapshot: jest.fn(() => ({
+        generatedAt: Date.now(),
+        queues: {
+          '1v1': {
+            waiting: queueStateByMode['1v1'].length,
+            playersWaiting: queueStateByMode['1v1'].map(({ socketId, userId, rating, joinedAt }) => ({
+              socketId,
+              userId,
+              rating,
+              joinedAt,
+            })),
+          },
+          '2v2': {
+            waiting: queueStateByMode['2v2'].length,
+            playersWaiting: queueStateByMode['2v2'].map(({ socketId, userId, rating, joinedAt }) => ({
+              socketId,
+              userId,
+              rating,
+              joinedAt,
+            })),
+          },
+        },
+        pendingFallbacks: {
+          total:
+            pendingFallbacksByMode['1v1'].length + pendingFallbacksByMode['2v2'].length,
+          byMode: {
+            '1v1': pendingFallbacksByMode['1v1'].length,
+            '2v2': pendingFallbacksByMode['2v2'].length,
+          },
+          players: [...pendingFallbacksByMode['1v1'], ...pendingFallbacksByMode['2v2']].map(
+            ({ socketId, userId, playerToken, mode, rating, timedOutAt }) => ({
+              socketId,
+              userId,
+              playerToken,
+              mode,
+              rating,
+              timedOutAt,
+            }),
+          ),
+        },
+      })),
+
+      getFallbackState: jest.fn((socketId: string) => {
+        return (
+          pendingFallbacksByMode['1v1'].find((player) => player.socketId === socketId) ??
+          pendingFallbacksByMode['2v2'].find((player) => player.socketId === socketId) ??
+          null
+        );
+      }),
+
+      joinQueue: jest.fn(
+        ({
+          socketId,
+          userId,
+          playerToken,
+          mode,
+          rating,
+        }: {
+          socketId: string;
+          userId: string;
+          playerToken: string;
+          mode: MatchmakingMode;
+          rating: number;
+        }) => {
+          removeWaitingBySocketId(socketId);
+          removePendingFallbackBySocketId(socketId);
+
+          queueStateByMode[mode].push({
+            socketId,
+            userId,
+            playerToken,
+            mode,
+            rating,
+            joinedAt: Date.now(),
+          });
+
+          return toQueueSnapshot(mode);
+        },
+      ),
+
+      continueQueue: jest.fn((socketId: string) => {
+        const fallback = removePendingFallbackBySocketId(socketId);
+
+        if (!fallback) {
+          return null;
+        }
+
+        queueStateByMode[fallback.mode].push({
+          socketId: fallback.socketId,
+          userId: fallback.userId,
+          playerToken: fallback.playerToken,
+          mode: fallback.mode,
+          rating: fallback.rating,
+          joinedAt: Date.now(),
+        });
+
+        return {
+          fallback,
+          snapshot: toQueueSnapshot(fallback.mode),
+        };
+      }),
+
+      takeFallback: jest.fn((socketId: string) => {
+        return removePendingFallbackBySocketId(socketId);
+      }),
+
+      leaveQueue: jest.fn((socketId: string) => {
+        const removedWaiting = removeWaitingBySocketId(socketId);
+
+        if (removedWaiting) {
+          const maintenance = expireQueue(removedWaiting.mode);
+
+          return {
+            removed: removedWaiting,
+            snapshot: maintenance.snapshot,
+          };
+        }
+
+        const removedFallback = removePendingFallbackBySocketId(socketId);
+
+        if (removedFallback) {
+          return {
+            removed: {
+              socketId: removedFallback.socketId,
+              userId: removedFallback.userId,
+              playerToken: removedFallback.playerToken,
+              mode: removedFallback.mode,
+              rating: removedFallback.rating,
+              joinedAt: removedFallback.timedOutAt,
+            },
+            snapshot: toQueueSnapshot(removedFallback.mode),
+          };
+        }
+
+        return {
+          removed: null,
+          snapshot: null,
+        };
+      }),
+
+      getQueueState: jest.fn((mode: MatchmakingMode) => {
+        return expireQueue(mode);
+      }),
+
+      tryResolvePair: jest.fn((mode: MatchmakingMode) => {
+        const maintenance = expireQueue(mode);
+        const requiredPlayers = mode === '1v1' ? 2 : 4;
+
+        if (maintenance.snapshot.playersWaiting.length < requiredPlayers) {
+          return {
+            snapshot: maintenance.snapshot,
+            timedOutFallbacks: maintenance.timedOutFallbacks,
+            pair: null,
+          };
+        }
+
+        const players = maintenance.snapshot.playersWaiting.slice(0, requiredPlayers);
+
+        return {
+          snapshot: maintenance.snapshot,
+          timedOutFallbacks: maintenance.timedOutFallbacks,
+          pair: {
+            mode,
+            players,
+          },
+        };
+      }),
+
+      completeMatchedPair: jest.fn((pair: { mode: MatchmakingMode; players: Array<{ socketId: string }> }) => {
+        for (const player of pair.players) {
+          removeWaitingBySocketId(player.socketId);
+          removePendingFallbackBySocketId(player.socketId);
+        }
+
+        return toQueueSnapshot(pair.mode);
+      }),
+    };
+
     const botDecisionPort = {
       decide: jest.fn(),
     };
@@ -118,6 +410,7 @@ describe('GameGateway bot profile flow', () => {
       getOrCreateUserUseCase as never,
       authTokenService as never,
       roomManager as never,
+      gatewayMatchmakingService as never,
       botDecisionPort as never,
     );
 
@@ -150,6 +443,7 @@ describe('GameGateway bot profile flow', () => {
         getOrCreateUserUseCase,
         authTokenService,
         roomManager,
+        gatewayMatchmakingService,
         botDecisionPort,
       },
       server: gatewayServerAccess.server,
@@ -465,6 +759,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'transport_error',
         message: 'Player is already assigned to a room.',
       },
     });
@@ -486,6 +781,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
         message: 'Invalid payload: mode must be either "1v1" or "2v2".',
       },
     });
@@ -967,6 +1263,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
         message: 'Invalid payload: userId is required.',
       },
     });
@@ -1053,6 +1350,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
         message: 'Invalid payload: matchId is required.',
       },
     });

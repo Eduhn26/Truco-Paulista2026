@@ -22,6 +22,8 @@ export type HandSnapshot = {
   pendingValue: HandValue | null;
   requestedBy: PlayerId | null;
   specialState: HandSpecialState;
+  winner: PlayerId | null;
+  awardedPoints: HandValue | null;
 };
 
 type HandStateConfig = {
@@ -30,6 +32,8 @@ type HandStateConfig = {
   pendingValue?: HandValue | null;
   requestedBy?: PlayerId | null;
   specialState?: HandSpecialState;
+  winner?: PlayerId | null;
+  awardedPoints?: HandValue | null;
 };
 
 export class Hand {
@@ -42,6 +46,8 @@ export class Hand {
   private pendingValue: HandValue | null;
   private requestedBy: PlayerId | null;
   private specialState: HandSpecialState;
+  private winner: PlayerId | null;
+  private awardedPoints: HandValue | null;
 
   constructor(
     private readonly viraRank: Rank,
@@ -57,6 +63,8 @@ export class Hand {
     this.pendingValue = state.pendingValue ?? null;
     this.requestedBy = state.requestedBy ?? null;
     this.specialState = state.specialState ?? 'normal';
+    this.winner = state.winner ?? null;
+    this.awardedPoints = state.awardedPoints ?? null;
 
     this.assertStateInvariants();
   }
@@ -78,6 +86,8 @@ export class Hand {
         pendingValue: snapshot.pendingValue ?? null,
         requestedBy: snapshot.requestedBy ?? null,
         specialState: snapshot.specialState ?? 'normal',
+        winner: snapshot.winner ?? null,
+        awardedPoints: snapshot.awardedPoints ?? null,
       },
     );
 
@@ -116,6 +126,48 @@ export class Hand {
     }
   }
 
+  requestTruco(player: PlayerId): void {
+    this.requestBet(player, 3);
+  }
+
+  raiseToSix(player: PlayerId): void {
+    this.requestBet(player, 6);
+  }
+
+  raiseToNine(player: PlayerId): void {
+    this.requestBet(player, 9);
+  }
+
+  raiseToTwelve(player: PlayerId): void {
+    this.requestBet(player, 12);
+  }
+
+  acceptBet(player: PlayerId): void {
+    this.ensureHandCanChangeBet();
+    this.ensurePendingBetExists();
+
+    if (this.requestedBy === player) {
+      throw new InvalidMoveError('Requesting player cannot accept their own bet.');
+    }
+
+    this.currentValue = this.pendingValue!;
+    this.betState = 'idle';
+    this.pendingValue = null;
+    this.requestedBy = null;
+    this.assertStateInvariants();
+  }
+
+  declineBet(player: PlayerId): void {
+    this.ensureHandCanChangeBet();
+    this.ensurePendingBetExists();
+
+    if (this.requestedBy === player) {
+      throw new InvalidMoveError('Requesting player cannot decline their own bet.');
+    }
+
+    this.finishWithWinner(this.requestedBy!, this.currentValue);
+  }
+
   isFinished(): boolean {
     return this.finished;
   }
@@ -125,8 +177,19 @@ export class Hand {
   }
 
   getWinner(): PlayerId | null {
-    if (!this.finished) return null;
-    return this.resolveWinner();
+    if (!this.finished) {
+      return null;
+    }
+
+    return this.winner;
+  }
+
+  getAwardedPoints(): HandValue | null {
+    if (!this.finished) {
+      return null;
+    }
+
+    return this.awardedPoints;
   }
 
   getPlayerHand(player: PlayerId): Card[] {
@@ -173,7 +236,54 @@ export class Hand {
       pendingValue: this.pendingValue,
       requestedBy: this.requestedBy,
       specialState: this.specialState,
+      winner: this.winner,
+      awardedPoints: this.awardedPoints,
     };
+  }
+
+  private requestBet(player: PlayerId, targetValue: HandValue): void {
+    this.ensureHandCanChangeBet();
+
+    if (this.betState === 'awaiting_response') {
+      throw new InvalidMoveError('Cannot request a new bet while another response is pending.');
+    }
+
+    const expectedNextValue = this.getNextBetValue(this.currentValue);
+
+    if (expectedNextValue === null) {
+      throw new InvalidMoveError('Hand is already at the maximum bet value.');
+    }
+
+    if (targetValue !== expectedNextValue) {
+      throw new InvalidMoveError(
+        `Invalid bet escalation from ${this.currentValue} to ${targetValue}.`,
+      );
+    }
+
+    this.betState = 'awaiting_response';
+    this.pendingValue = targetValue;
+    this.requestedBy = player;
+    this.assertStateInvariants();
+  }
+
+  private getNextBetValue(currentValue: HandValue): HandValue | null {
+    if (currentValue === 1) return 3;
+    if (currentValue === 3) return 6;
+    if (currentValue === 6) return 9;
+    if (currentValue === 9) return 12;
+    return null;
+  }
+
+  private ensureHandCanChangeBet(): void {
+    if (this.finished) {
+      throw new InvalidMoveError('Hand is already finished.');
+    }
+  }
+
+  private ensurePendingBetExists(): void {
+    if (this.betState !== 'awaiting_response' || this.pendingValue === null || !this.requestedBy) {
+      throw new InvalidMoveError('There is no pending bet response.');
+    }
   }
 
   private getCurrentRound(): Round {
@@ -183,13 +293,25 @@ export class Hand {
   private evaluateFinished(): void {
     const winner = this.resolveWinner();
     if (winner) {
-      this.finished = true;
+      this.finishWithWinner(winner, this.currentValue);
       return;
     }
 
     if (this.rounds.length === 3 && this.getCurrentRound().isFinished()) {
       this.finished = true;
+      this.winner = null;
+      this.awardedPoints = null;
     }
+  }
+
+  private finishWithWinner(player: PlayerId, points: HandValue): void {
+    this.finished = true;
+    this.winner = player;
+    this.awardedPoints = points;
+    this.betState = 'idle';
+    this.pendingValue = null;
+    this.requestedBy = null;
+    this.assertStateInvariants();
   }
 
   private resolveWinner(): PlayerId | null {
@@ -265,20 +387,44 @@ export class Hand {
       if (this.requestedBy !== null) {
         throw new InvalidMoveError('Idle hand cannot have a requesting player.');
       }
-
-      return;
     }
 
-    if (this.pendingValue === null) {
-      throw new InvalidMoveError('Pending bet state requires a pending bet value.');
+    if (this.betState === 'awaiting_response') {
+      if (this.pendingValue === null) {
+        throw new InvalidMoveError('Pending bet state requires a pending bet value.');
+      }
+
+      if (this.requestedBy === null) {
+        throw new InvalidMoveError('Pending bet state requires a requesting player.');
+      }
+
+      if (this.pendingValue <= this.currentValue) {
+        throw new InvalidMoveError('Pending bet value must be greater than current hand value.');
+      }
+
+      const expectedNextValue = this.getNextBetValue(this.currentValue);
+
+      if (expectedNextValue !== this.pendingValue) {
+        throw new InvalidMoveError('Pending bet value must match the next valid escalation step.');
+      }
     }
 
-    if (this.requestedBy === null) {
-      throw new InvalidMoveError('Pending bet state requires a requesting player.');
+    if (!this.finished) {
+      if (this.winner !== null) {
+        throw new InvalidMoveError('Unfinished hand cannot have a winner.');
+      }
+
+      if (this.awardedPoints !== null) {
+        throw new InvalidMoveError('Unfinished hand cannot have awarded points.');
+      }
     }
 
-    if (this.pendingValue <= this.currentValue) {
-      throw new InvalidMoveError('Pending bet value must be greater than current hand value.');
+    if (this.finished && this.winner === null && this.awardedPoints !== null) {
+      throw new InvalidMoveError('Finished tied hand cannot have awarded points.');
+    }
+
+    if (this.finished && this.winner !== null && this.awardedPoints === null) {
+      throw new InvalidMoveError('Finished hand with a winner must have awarded points.');
     }
   }
 }
