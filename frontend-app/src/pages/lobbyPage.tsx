@@ -53,12 +53,14 @@ export function LobbyPage() {
       return;
     }
 
-   saveMatchSnapshot(snapshotMatchId, {
-  roomState: next.nextRoomState ?? roomState,
-  publicMatchState: next.nextMatchState ?? matchState,
-  privateMatchState: next.nextMatchState ?? privateMatchState ?? matchState,
-  playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
-});
+    // NOTE: The lobby stores a lightweight snapshot so the dedicated match page
+    // can hydrate quickly without depending on this screen staying mounted.
+    saveMatchSnapshot(snapshotMatchId, {
+      roomState: next.nextRoomState ?? roomState,
+      publicMatchState: next.nextMatchState ?? matchState,
+      privateMatchState: next.nextMatchState ?? privateMatchState ?? matchState,
+      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
+    });
   }
 
   function handleConnect(): void {
@@ -94,9 +96,7 @@ export function LobbyPage() {
         onPlayerAssigned: (payload) => {
           setPlayerAssigned(payload);
           persistSnapshot({ nextPlayerAssigned: payload });
-          appendLog(
-            `Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`,
-          );
+          appendLog(`Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`);
         },
         onRoomState: (payload) => {
           setRoomState(payload);
@@ -142,11 +142,10 @@ export function LobbyPage() {
 
   function handleReady(): void {
     const mySeatId = playerAssigned?.seatId;
-    const currentReady =
-      roomState?.players.find((player) => player.seatId === mySeatId)?.ready ?? false;
+    const readyNow = roomState?.players.find((player) => player.seatId === mySeatId)?.ready ?? false;
 
-    clientRef.current?.emitSetReady(!currentReady);
-    appendLog(`Emitted set-ready (${String(!currentReady)}).`);
+    clientRef.current?.emitSetReady(!readyNow);
+    appendLog(`Emitted set-ready (${String(!readyNow)}).`);
   }
 
   function handleGetState(): void {
@@ -161,273 +160,394 @@ export function LobbyPage() {
 
   const roomPlayers = useMemo(() => roomState?.players ?? [], [roomState]);
   const displayedMatchState = privateMatchState ?? matchState;
+  const currentReady =
+    roomState?.players.find((player) => player.seatId === playerAssigned?.seatId)?.ready ?? false;
 
   return (
-    <section className="grid gap-6 xl:grid-cols-[360px_1fr]">
-      <aside className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-        <h1 className="text-2xl font-black tracking-tight">Lobby</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          Shell inicial para conexão autenticada e fluxo básico da partida.
-        </p>
+    <section className="grid gap-8">
+      <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/80 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_45%)] px-8 py-8 lg:px-10 lg:py-10">
+          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr] xl:items-end">
+            <div>
+              <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
+                Authenticated lobby
+              </div>
 
-        <div className="mt-6 grid gap-4">
-          <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/5 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-emerald-300">
-              Authenticated user
+              <h1 className="mt-5 max-w-4xl text-4xl font-black tracking-tight text-white lg:text-5xl">
+                Entre na sala e deixe a partida pronta para começar.
+              </h1>
+
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
+                O lobby agora prioriza entrada, leitura rápida de status e ações principais. A
+                lógica continua intacta, mas a experiência visual fica mais próxima de um produto
+                jogável de verdade.
+              </p>
             </div>
-            <div className="mt-2 text-sm font-bold text-slate-100">
-              {session?.user?.displayName ?? session?.user?.email ?? 'Unknown user'}
+
+            <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
+              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                  Connection
+                </div>
+                <div
+                  className={`mt-3 inline-flex rounded-full px-3 py-1.5 text-sm font-bold ${
+                    connectionStatus === 'online'
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : 'bg-rose-500/15 text-rose-300'
+                  }`}
+                >
+                  {connectionStatus}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                  Assigned seat
+                </div>
+                <div className="mt-3 text-lg font-bold text-slate-100">
+                  {playerAssigned?.seatId ?? '-'}
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                  Active match
+                </div>
+                <div className="mt-3 break-all text-sm font-bold text-slate-100">
+                  {derivedMatchId || '-'}
+                </div>
+              </div>
             </div>
-            <div className="mt-1 text-xs text-slate-400">
-              provider: {session?.user?.provider ?? '-'}
-            </div>
-            <div className="mt-1 break-all text-xs text-slate-400">
-              userId: {session?.user?.id ?? '-'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-              Assigned seat
-            </div>
-            <div className="mt-2 text-sm font-bold text-slate-100">
-              {playerAssigned?.seatId ?? '-'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-              Backend URL
-            </div>
-            <div className="mt-2 break-all font-mono text-sm text-slate-100">
-              {session?.backendUrl || '-'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-              Session auth
-            </div>
-            <div
-              className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-bold ${
-                session?.authToken
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-rose-500/15 text-rose-300'
-              }`}
-            >
-              {session?.authToken ? 'available' : 'missing'}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-              Connection
-            </div>
-            <div
-              className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-bold ${
-                connectionStatus === 'online'
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-rose-500/15 text-rose-300'
-              }`}
-            >
-              {connectionStatus}
-            </div>
-          </div>
-
-          <label className="grid gap-2 text-sm">
-            <span className="text-slate-400">Match ID</span>
-            <input
-              value={matchId}
-              onChange={(event) => setMatchId(event.target.value)}
-              className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400/40"
-              placeholder="Paste a matchId to join an existing room"
-            />
-          </label>
-
-          <div className="grid gap-3">
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={!canConnect}
-              className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Connect socket
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDisconnect}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-            >
-              Disconnect
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCreateMatch}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-            >
-              Create match
-            </button>
-
-            <button
-              type="button"
-              onClick={handleJoinMatch}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-            >
-              Join match
-            </button>
-
-            <button
-              type="button"
-              onClick={handleReady}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-            >
-              Toggle ready
-            </button>
-
-            <button
-              type="button"
-              onClick={handleGetState}
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-            >
-              Get state
-            </button>
-
-            {derivedMatchId ? (
-              <Link
-                to={`/match/${derivedMatchId}`}
-                className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-center text-sm font-bold text-emerald-300 transition hover:bg-emerald-500/15"
-              >
-                Open match shell
-              </Link>
-            ) : null}
           </div>
         </div>
-      </aside>
 
-      <div className="grid gap-6">
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold">Room state</h2>
-            <span className="text-xs text-slate-500">server-driven</span>
-          </div>
+        <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[420px_1fr]">
+          <aside className="grid gap-6 self-start">
+            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">Player session</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Contexto da sessão mantido em destaque, mas sem competir com as ações principais.
+                  </p>
+                </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 break-all font-mono text-sm">{roomState?.matchId || '-'}</div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                currentTurnSeatId
-              </div>
-              <div className="mt-2 font-mono text-sm">
-                {roomState?.currentTurnSeatId || '-'}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">canStart</div>
-              <div className="mt-2 font-mono text-sm">{String(roomState?.canStart ?? false)}</div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">players</div>
-              <div className="mt-2 font-mono text-sm">{roomPlayers.length}</div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            {roomPlayers.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 p-4 text-sm text-slate-400">
-                No players received yet.
-              </div>
-            ) : (
-              roomPlayers.map((player) => (
                 <div
-                  key={player.seatId}
-                  className="rounded-2xl border border-white/10 bg-slate-950/70 p-4"
+                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
+                    session?.authToken
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : 'bg-rose-500/15 text-rose-300'
+                  }`}
                 >
-                  <div className="text-sm font-bold text-slate-100">{player.seatId}</div>
-                  <div className="mt-2 text-sm text-slate-400">
-                    ready: {String(player.ready)}
+                  {session?.authToken ? 'Auth ready' : 'Auth missing'}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 text-sm">
+                <div className="rounded-3xl border border-emerald-400/15 bg-emerald-500/5 px-5 py-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">
+                    User
                   </div>
-                  <div className="mt-1 text-sm text-slate-400">
-                    bot: {String(player.isBot ?? false)}
+                  <div className="mt-3 text-lg font-bold text-slate-100">
+                    {session?.user?.displayName ?? session?.user?.email ?? 'Unknown user'}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </section>
 
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold">Match state</h2>
-            <span className="text-xs text-slate-500">
-              {privateMatchState ? 'private view' : 'public view'}
-            </span>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 break-all font-mono text-sm">
-                {displayedMatchState?.matchId || '-'}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">state</div>
-              <div className="mt-2 font-mono text-sm">{displayedMatchState?.state || '-'}</div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">score</div>
-              <div className="mt-2 font-mono text-sm">
-                T1 {displayedMatchState?.score.playerOne ?? 0} × T2{' '}
-                {displayedMatchState?.score.playerTwo ?? 0}
-              </div>
-            </div>
-          </div>
-
-          {displayedMatchState?.currentHand ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Player one hand
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    Provider
+                  </div>
+                  <div className="mt-3 text-slate-100">{session?.user?.provider ?? '-'}</div>
                 </div>
-                <div className="mt-2 font-mono text-sm text-slate-100">
-                  {displayedMatchState.currentHand.playerOneHand.join(', ') || '-'}
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    User ID
+                  </div>
+                  <div className="mt-3 break-all font-mono text-xs text-slate-100">
+                    {session?.user?.id ?? '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    Backend URL
+                  </div>
+                  <div className="mt-3 break-all font-mono text-xs text-slate-100">
+                    {session?.backendUrl || '-'}
+                  </div>
                 </div>
               </div>
+            </section>
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Player two hand
+            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div>
+                <div className="text-lg font-black tracking-tight text-slate-100">Lobby actions</div>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Conecte, crie ou entre em uma sala e siga para a mesa dedicada quando a partida
+                  estiver pronta.
+                </p>
+              </div>
+
+              <label className="mt-6 grid gap-2 text-sm">
+                <span className="font-medium text-slate-300">Match ID</span>
+                <input
+                  value={matchId}
+                  onChange={(event) => setMatchId(event.target.value)}
+                  className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-slate-100 outline-none transition focus:border-emerald-400/40"
+                  placeholder="Paste a matchId to join an existing room"
+                />
+              </label>
+
+              <div className="mt-6 grid gap-4">
+                <button
+                  type="button"
+                  onClick={handleConnect}
+                  disabled={!canConnect}
+                  className="rounded-3xl bg-emerald-500 px-5 py-4 text-base font-black text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Connect socket
+                </button>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleDisconnect}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                  >
+                    Disconnect
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleGetState}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                  >
+                    Get state
+                  </button>
                 </div>
-                <div className="mt-2 font-mono text-sm text-slate-100">
-                  {displayedMatchState.currentHand.playerTwoHand.join(', ') || '-'}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleCreateMatch}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                  >
+                    Create match
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleJoinMatch}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                  >
+                    Join match
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleReady}
+                  className={`rounded-3xl border px-5 py-4 text-sm font-bold transition ${
+                    currentReady
+                      ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15'
+                      : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
+                  }`}
+                >
+                  {currentReady ? 'Set not ready' : 'Set ready'}
+                </button>
+
+                {derivedMatchId ? (
+                  <Link
+                    to={`/match/${derivedMatchId}`}
+                    className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-5 py-4 text-center text-sm font-black text-emerald-300 transition hover:bg-emerald-500/15"
+                  >
+                    Open match screen
+                  </Link>
+                ) : null}
+              </div>
+            </section>
+          </aside>
+
+          <div className="grid gap-6">
+            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">Room overview</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Estado da sala agrupado para leitura rápida antes da ida para a mesa.
+                  </p>
+                </div>
+
+                <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  server-driven
                 </div>
               </div>
-            </div>
-          ) : null}
-        </section>
 
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold">Event log</h2>
-            <span className="text-xs text-slate-500">client-side</span>
-          </div>
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    matchId
+                  </div>
+                  <div className="mt-3 break-all font-mono text-sm text-slate-100">
+                    {roomState?.matchId || '-'}
+                  </div>
+                </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-            <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-slate-300">
-              {eventLog.length > 0 ? eventLog.join('\n') : 'No events yet.'}
-            </pre>
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    currentTurnSeatId
+                  </div>
+                  <div className="mt-3 font-mono text-sm text-slate-100">
+                    {roomState?.currentTurnSeatId || '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    canStart
+                  </div>
+                  <div className="mt-3 font-mono text-sm text-slate-100">
+                    {String(roomState?.canStart ?? false)}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    players
+                  </div>
+                  <div className="mt-3 font-mono text-sm text-slate-100">{roomPlayers.length}</div>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                {roomPlayers.length === 0 ? (
+                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm text-slate-400">
+                    No players received yet.
+                  </div>
+                ) : (
+                  roomPlayers.map((player) => (
+                    <div
+                      key={player.seatId}
+                      className="rounded-3xl border border-white/10 bg-white/[0.03] p-5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-base font-black text-slate-100">{player.seatId}</div>
+                        <div
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] ${
+                            player.ready
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : 'bg-white/5 text-slate-400'
+                          }`}
+                        >
+                          {player.ready ? 'Ready' : 'Waiting'}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-2 text-sm text-slate-400">
+                        <div>bot: {String(player.isBot ?? false)}</div>
+                        <div>team: {player.teamId ?? '-'}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">Match preview</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Resumo compacto da partida antes da transição para a tela jogável.
+                  </p>
+                </div>
+
+                <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  {privateMatchState ? 'private view' : 'public view'}
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    matchId
+                  </div>
+                  <div className="mt-3 break-all font-mono text-sm text-slate-100">
+                    {displayedMatchState?.matchId || '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    state
+                  </div>
+                  <div className="mt-3 font-mono text-sm text-slate-100">
+                    {displayedMatchState?.state || '-'}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    score
+                  </div>
+                  <div className="mt-3 font-mono text-sm text-slate-100">
+                    T1 {displayedMatchState?.score.playerOne ?? 0} × T2{' '}
+                    {displayedMatchState?.score.playerTwo ?? 0}
+                  </div>
+                </div>
+              </div>
+
+              {displayedMatchState?.currentHand ? (
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                      Player one hand
+                    </div>
+                    <div className="mt-3 font-mono text-sm text-slate-100">
+                      {displayedMatchState.currentHand.playerOneHand.join(', ') || '-'}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                      Player two hand
+                    </div>
+                    <div className="mt-3 font-mono text-sm text-slate-100">
+                      {displayedMatchState.currentHand.playerTwoHand.join(', ') || '-'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm text-slate-400">
+                  No match-state payload received yet.
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">Event log</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Visibilidade operacional mantida, mas agora com menos peso visual que o fluxo
+                    principal da tela.
+                  </p>
+                </div>
+
+                <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  client-side
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-3xl border border-white/10 bg-slate-950/70 p-5">
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-7 text-slate-300">
+                  {eventLog.length > 0 ? eventLog.join('\n') : 'No events yet.'}
+                </pre>
+              </div>
+            </section>
           </div>
-        </section>
+        </div>
       </div>
     </section>
   );

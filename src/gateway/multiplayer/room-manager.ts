@@ -40,11 +40,19 @@ type RoomStatePlayer = {
   botProfile: BotProfile | null;
 };
 
+type InternalRoomState = {
+  matchId: string;
+  mode: MatchMode;
+  players: RoomStatePlayer[];
+  currentTurnSeatId: SeatId | null;
+};
+
 export type RoomState = {
   matchId: string;
   mode: MatchMode;
   players: RoomStatePlayer[];
   currentTurnSeatId: SeatId | null;
+  canStart: boolean;
 };
 
 type JoinIdentity = {
@@ -73,19 +81,19 @@ const DOMAIN_PLAYER_BY_TEAM: Record<TeamId, 'P1' | 'P2'> = {
 };
 
 export class RoomManager {
-  private readonly rooms = new Map<string, RoomState>();
+  private readonly rooms = new Map<string, InternalRoomState>();
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
   private readonly sessionByTokenAndMatch = new Map<string, PlayerSession>();
   private readonly ratingAppliedMatches = new Set<string>();
 
-  ensureRoom(matchId: string, mode: MatchMode = '2v2'): RoomState {
+  ensureRoom(matchId: string, mode: MatchMode = '2v2'): InternalRoomState {
     const existingRoom = this.rooms.get(matchId);
 
     if (existingRoom) {
       return existingRoom;
     }
 
-    const room: RoomState = {
+    const room: InternalRoomState = {
       matchId,
       mode,
       players: [],
@@ -106,6 +114,7 @@ export class RoomManager {
     return {
       ...room,
       players: room.players.map((player) => ({ ...player })),
+      canStart: this.canStart(matchId),
     };
   }
 
@@ -154,6 +163,7 @@ export class RoomManager {
     }
 
     const seatId = this.findAvailableSeat(room);
+
     if (!seatId) {
       throw new Error(`Room ${matchId} is full`);
     }
@@ -469,7 +479,7 @@ export class RoomManager {
     return existingSession ? { ...existingSession } : undefined;
   }
 
-  private findAvailableSeat(room: RoomState): SeatId | null {
+  private findAvailableSeat(room: InternalRoomState): SeatId | null {
     const seats = SEATS_BY_MODE[room.mode];
 
     for (const seatId of seats) {
@@ -492,7 +502,7 @@ export class RoomManager {
     return mode === '1v1' ? TURN_ORDER_1V1 : TURN_ORDER_2V2;
   }
 
-  private sortPlayers(room: RoomState): void {
+  private sortPlayers(room: InternalRoomState): void {
     const seats = SEATS_BY_MODE[room.mode];
     room.players.sort((left, right) => seats.indexOf(left.seatId) - seats.indexOf(right.seatId));
   }

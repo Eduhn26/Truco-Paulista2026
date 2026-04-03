@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
@@ -29,9 +30,68 @@ type TableSeatView = {
   isMine: boolean;
 };
 
-type HandOutcome = {
-  winnerLabel: string | null;
-  roundsPlayed: number;
+type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+
+type HandStatusVariant = 'neutral' | 'success' | 'warning';
+
+type PendingPlayedCard = {
+  owner: 'mine' | 'opponent';
+  card: string;
+  id: number;
+};
+
+type ClosingTableCards = {
+  mine: string | null;
+  opponent: string | null;
+};
+
+type MatchViewModel = {
+  resolvedMatchId: string;
+  mySeat: string | null;
+  isOneVsOne: boolean;
+  roomPlayers: TableSeatView[];
+  mySeatView: TableSeatView | null;
+  opponentSeatView: TableSeatView | null;
+  myCards: CardPayload[];
+  myPlayedCard: string | null;
+  opponentPlayedCard: string | null;
+  scoreLabel: string;
+  currentTurnSeatId: string | null;
+  canStartHand: boolean;
+  canPlayCard: boolean;
+  handFinished: boolean;
+  matchFinished: boolean;
+  tablePhase: TablePhase;
+  handStatusLabel: string;
+  handStatusTone: HandStatusVariant;
+  latestRound: MatchStatePayload['currentHand'] extends infer H
+    ? H extends { rounds: infer R }
+      ? R extends Array<infer Item>
+        ? Item | null
+        : null
+      : null
+    : null;
+  rounds: NonNullable<MatchStatePayload['currentHand']>['rounds'];
+  playedRoundsCount: number;
+  currentPublicHand: MatchStatePayload['currentHand'] | null;
+  currentPrivateHand: MatchStatePayload['currentHand'] | null;
+};
+
+const seatPulseAnimation = {
+  scale: [1, 1.03, 1],
+  boxShadow: [
+    '0 0 0 rgba(16,185,129,0)',
+    '0 0 28px rgba(16,185,129,0.22)',
+    '0 0 0 rgba(16,185,129,0)',
+  ],
+};
+
+const roundResolvedAnimation = {
+  boxShadow: [
+    '0 0 0 rgba(250,204,21,0)',
+    '0 0 26px rgba(250,204,21,0.24)',
+    '0 0 0 rgba(250,204,21,0)',
+  ],
 };
 
 export function MatchPage() {
@@ -40,10 +100,12 @@ export function MatchPage() {
 
   const routeMatchId = params.matchId ?? '';
   const effectiveMatchId = routeMatchId || getLastActiveMatchId() || '';
-
   const initialSnapshot = useMemo(() => loadMatchSnapshot(effectiveMatchId), [effectiveMatchId]);
 
   const clientRef = useRef<GameSocketClient | null>(null);
+  const mySeatRef = useRef<string | null>(initialSnapshot?.playerAssigned?.seatId ?? null);
+  const previousOpponentPlayedCardRef = useRef<string | null>(null);
+  const previousPlayedRoundsCountRef = useRef<number>(0);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(
@@ -60,6 +122,15 @@ export function MatchPage() {
   );
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [eventLog, setEventLog] = useState<string[]>([]);
+  const [launchingCardKey, setLaunchingCardKey] = useState<string | null>(null);
+  const [pendingPlayedCard, setPendingPlayedCard] = useState<PendingPlayedCard | null>(null);
+  const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({
+    mine: null,
+    opponent: null,
+  });
+  const [opponentRevealKey, setOpponentRevealKey] = useState(0);
+  const [roundIntroKey, setRoundIntroKey] = useState(0);
+  const [roundResolvedKey, setRoundResolvedKey] = useState(0);
 
   function appendLog(line: string): void {
     setEventLog((current) =>
@@ -91,6 +162,10 @@ export function MatchPage() {
       playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
     });
   }
+
+  useEffect(() => {
+    mySeatRef.current = playerAssigned?.seatId ?? null;
+  }, [playerAssigned]);
 
   useEffect(() => {
     if (!session?.backendUrl || !session?.authToken || !effectiveMatchId) {
@@ -125,6 +200,7 @@ export function MatchPage() {
         },
         onPlayerAssigned: (payload) => {
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
           if (!sameMatch) {
             return;
           }
@@ -167,7 +243,12 @@ export function MatchPage() {
             return;
           }
 
+          setClosingTableCards({
+            mine: null,
+            opponent: null,
+          });
           setViraRank(payload.viraRank);
+          setRoundIntroKey((current) => current + 1);
           appendLog(`Received hand-started (${payload.viraRank}).`);
         },
         onCardPlayed: (payload) => {
@@ -175,6 +256,18 @@ export function MatchPage() {
 
           if (!sameMatch) {
             return;
+          }
+
+          const owner = resolvePlayedCardOwner({
+            payloadPlayerId: payload.playerId,
+            mySeat: mySeatRef.current,
+          });
+
+          if (owner && payload.card) {
+            setClosingTableCards((current) => ({
+              ...current,
+              [owner]: payload.card,
+            }));
           }
 
           appendLog(
@@ -190,538 +283,1042 @@ export function MatchPage() {
     };
   }, [effectiveMatchId, session?.authToken, session?.backendUrl]);
 
-  const resolvedMatchId =
-    privateMatchState?.matchId ||
-    publicMatchState?.matchId ||
-    roomState?.matchId ||
-    effectiveMatchId;
+  const viewModel = useMemo<MatchViewModel>(() => {
+    const resolvedMatchId =
+      privateMatchState?.matchId ||
+      publicMatchState?.matchId ||
+      roomState?.matchId ||
+      effectiveMatchId;
 
-  const mySeat = playerAssigned?.seatId ?? null;
-  const currentPrivateHand = privateMatchState?.currentHand ?? null;
-  const currentPublicHand = publicMatchState?.currentHand ?? null;
-  const isOneVsOne = roomState?.mode === '1v1';
-  const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
+    const mySeat = playerAssigned?.seatId ?? null;
+    const currentPublicHand = publicMatchState?.currentHand ?? null;
+    const currentPrivateHand = privateMatchState?.currentHand ?? null;
+    const isOneVsOne = roomState?.mode === '1v1';
+    const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
 
-  const myCards = useMemo<CardPayload[]>(() => {
-    if (!currentPrivateHand || !currentPrivateHand.viewerPlayerId) {
-      return [];
-    }
+    const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
+      const player = roomState?.players.find((entry) => entry.seatId === seatId);
 
-    const cards =
-      currentPrivateHand.viewerPlayerId === 'P1'
-        ? currentPrivateHand.playerOneHand
-        : currentPrivateHand.playerTwoHand;
+      return {
+        seatId,
+        ready: player?.ready ?? false,
+        isBot: player?.isBot ?? false,
+        isCurrentTurn: roomState?.currentTurnSeatId === seatId,
+        isMine: mySeat === seatId,
+      };
+    });
 
-    return cards
-      .map((card) => {
-        const normalized = card.trim();
+    const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
+    const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
 
-        if (normalized === 'HIDDEN' || normalized.length < 2) {
-          return null;
-        }
+    const myCards = getViewerCards(currentPrivateHand);
 
-        return {
-          rank: normalized.slice(0, -1),
-          suit: normalized.slice(-1),
-        } as CardPayload;
-      })
-      .filter((card): card is CardPayload => card !== null);
-  }, [currentPrivateHand]);
+    const myIsPlayerOne = mySeat === 'T1A' || mySeat === 'T1B';
+    const rounds = currentPublicHand?.rounds ?? [];
+    const playedRounds = rounds.filter(
+      (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
+    );
+    const latestRound: MatchViewModel['latestRound'] =
+      playedRounds.length > 0 ? (playedRounds[playedRounds.length - 1] ?? null) : null;
 
-  const rounds = currentPublicHand?.rounds ?? [];
-  const playedRounds = rounds.filter(
-    (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
-  );
-  const latestRound = playedRounds.length > 0 ? playedRounds[playedRounds.length - 1] : null;
+    const myPlayedCard = latestRound
+      ? myIsPlayerOne
+        ? latestRound.playerOneCard
+        : latestRound.playerTwoCard
+      : null;
 
-  const playerOnePlayedCard = latestRound?.playerOneCard ?? null;
-  const playerTwoPlayedCard = latestRound?.playerTwoCard ?? null;
+    const opponentPlayedCard = latestRound
+      ? myIsPlayerOne
+        ? latestRound.playerTwoCard
+        : latestRound.playerOneCard
+      : null;
 
-  const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
-  const handFinished = Boolean(currentPublicHand?.finished);
-  const matchWaiting = publicMatchState?.state === 'waiting';
-  const canStartHand = Boolean(roomState?.canStart && matchWaiting && resolvedMatchId);
-  const canPlayCard = Boolean(
-    privateMatchState?.state === 'in_progress' &&
-      !handFinished &&
-      isMyTurn &&
-      mySeat &&
-      myCards.length > 0,
-  );
+    const handFinished = Boolean(currentPublicHand?.finished);
+    const matchFinished = publicMatchState?.state === 'finished';
+    const canStartHand = Boolean(roomState?.canStart && publicMatchState?.state === 'waiting');
+    const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
+    const canPlayCard = Boolean(
+      privateMatchState?.state === 'in_progress' &&
+        !handFinished &&
+        isMyTurn &&
+        mySeat &&
+        myCards.length > 0,
+    );
 
-  const seatCards: TableSeatView[] = visibleSeatOrder.map((seatId) => {
-    const player = roomState?.players.find((entry) => entry.seatId === seatId);
+    const tablePhase: TablePhase = !resolvedMatchId
+      ? 'missing_context'
+      : matchFinished
+        ? 'match_finished'
+        : handFinished
+          ? 'hand_finished'
+          : publicMatchState?.state === 'in_progress'
+            ? 'playing'
+            : 'waiting';
+
+    const { handStatusLabel, handStatusTone } = buildHandStatus({
+      publicMatchState,
+      currentPublicHand,
+      canStartHand,
+      canPlayCard,
+      isMyTurn,
+      myCardsCount: myCards.length,
+      playedRoundsCount: playedRounds.length,
+      latestRound,
+    });
 
     return {
-      seatId,
-      ready: player?.ready ?? false,
-      isBot: player?.isBot ?? false,
-      isCurrentTurn: roomState?.currentTurnSeatId === seatId,
-      isMine: mySeat === seatId,
+      resolvedMatchId,
+      mySeat,
+      isOneVsOne,
+      roomPlayers,
+      mySeatView,
+      opponentSeatView,
+      myCards,
+      myPlayedCard,
+      opponentPlayedCard,
+      scoreLabel: `T1 ${publicMatchState?.score.playerOne ?? 0} × T2 ${
+        publicMatchState?.score.playerTwo ?? 0
+      }`,
+      currentTurnSeatId: roomState?.currentTurnSeatId ?? null,
+      canStartHand,
+      canPlayCard,
+      handFinished,
+      matchFinished,
+      tablePhase,
+      handStatusLabel,
+      handStatusTone,
+      latestRound,
+      rounds,
+      playedRoundsCount: playedRounds.length,
+      currentPublicHand,
+      currentPrivateHand,
     };
-  });
+  }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
 
-  const handOutcome = getHandOutcome(playedRounds);
-  const handStatus = getHandStatus({
-    publicMatchState,
-    currentPublicHand,
-    isMyTurn,
-    canStartHand,
-    myCardsCount: myCards.length,
-    playedRoundsCount: playedRounds.length,
-    handOutcome,
-  });
+  const displayedMyPlayedCard =
+    viewModel.myPlayedCard ??
+    (pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.card : null) ??
+    closingTableCards.mine;
+
+  const displayedOpponentPlayedCard =
+    viewModel.opponentPlayedCard ??
+    (pendingPlayedCard?.owner === 'opponent' ? pendingPlayedCard.card : null) ??
+    closingTableCards.opponent;
+
+  useEffect(() => {
+    if (pendingPlayedCard?.owner === 'mine' && viewModel.myPlayedCard === pendingPlayedCard.card) {
+      setLaunchingCardKey(null);
+      setPendingPlayedCard(null);
+    }
+  }, [pendingPlayedCard, viewModel.myPlayedCard]);
+
+  useEffect(() => {
+    if (
+      displayedOpponentPlayedCard &&
+      displayedOpponentPlayedCard !== previousOpponentPlayedCardRef.current
+    ) {
+      setOpponentRevealKey((current) => current + 1);
+    }
+
+    previousOpponentPlayedCardRef.current = displayedOpponentPlayedCard;
+  }, [displayedOpponentPlayedCard]);
+
+  useEffect(() => {
+    const currentPlayedRoundsCount = viewModel.playedRoundsCount;
+    const previousPlayedRoundsCount = previousPlayedRoundsCountRef.current;
+
+    if (
+      currentPlayedRoundsCount > 0 &&
+      currentPlayedRoundsCount !== previousPlayedRoundsCount &&
+      viewModel.latestRound?.finished
+    ) {
+      setRoundResolvedKey((current) => current + 1);
+    }
+
+    previousPlayedRoundsCountRef.current = currentPlayedRoundsCount;
+  }, [viewModel.latestRound, viewModel.playedRoundsCount]);
 
   function handleRefreshState(): void {
-    if (!resolvedMatchId) {
+    if (!viewModel.resolvedMatchId) {
       appendLog('No matchId available for get-state.');
       return;
     }
 
-    clientRef.current?.emitGetState(resolvedMatchId);
-    appendLog(`Emitted get-state (${resolvedMatchId}).`);
+    clientRef.current?.emitGetState(viewModel.resolvedMatchId);
+    appendLog(`Emitted get-state (${viewModel.resolvedMatchId}).`);
   }
 
   function handleStartHand(): void {
-    if (!resolvedMatchId) {
+    if (!viewModel.resolvedMatchId) {
       appendLog('No matchId available for start-hand.');
       return;
     }
 
-    clientRef.current?.emitStartHand(resolvedMatchId, viraRank);
-    appendLog(`Emitted start-hand (${resolvedMatchId}, ${viraRank}).`);
+    setRoundIntroKey((current) => current + 1);
+    clientRef.current?.emitStartHand(viewModel.resolvedMatchId, viraRank);
+    appendLog(`Emitted start-hand (${viewModel.resolvedMatchId}, ${viraRank}).`);
   }
 
   function handlePlayCard(card: CardPayload): void {
-    if (!resolvedMatchId || !mySeat || !canPlayCard) {
+    if (!viewModel.resolvedMatchId || !viewModel.mySeat || !viewModel.canPlayCard) {
       appendLog('Cannot play card in the current state.');
       return;
     }
 
-    clientRef.current?.emitPlayCard(resolvedMatchId, card);
+    const cardKey = `${card.rank}|${card.suit}`;
+    const serverCard = `${card.rank}${card.suit}`;
+
+    setLaunchingCardKey(cardKey);
+    setPendingPlayedCard({
+      owner: 'mine',
+      card: serverCard,
+      id: Date.now(),
+    });
+
+    clientRef.current?.emitPlayCard(viewModel.resolvedMatchId, card);
     appendLog(`Emitted play-card (${card.rank}${suitSymbol(card.suit)}).`);
+
+    window.setTimeout(() => {
+      setLaunchingCardKey((current) => (current === cardKey ? null : current));
+    }, 700);
   }
 
-  const canRenderLiveState = Boolean(session?.backendUrl && session?.authToken && resolvedMatchId);
+  const canRenderLiveState = Boolean(
+    session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
+  );
 
   return (
-    <section className="grid gap-6">
-      <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-          Phase 12.O
-        </p>
+    <section className="grid gap-8">
+      <div className="overflow-hidden rounded-[36px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+          <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr] xl:items-end">
+            <div>
+              <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
+                Live match
+              </div>
 
-        <h1 className="mt-3 text-3xl font-black tracking-tight">Match {resolvedMatchId || '-'}</h1>
+              <h1 className="mt-5 max-w-4xl text-4xl font-black tracking-tight text-white lg:text-5xl">
+                Mesa pronta para jogar, ler turno e seguir o ritmo da mão.
+              </h1>
 
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          Agora a UI destaca melhor quem venceu a mão, em quantas rodadas ela terminou e qual é a
-          próxima ação correta.
-        </p>
+              <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
+                Reestruturada para ler o payload autoritativo primeiro, reduzir derivação ambígua
+                e tratar melhor a transição entre rodada, fim de mão e próxima mão.
+              </p>
+            </div>
 
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link
-            to="/lobby"
-            className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
-          >
-            Voltar para lobby
-          </Link>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <MetricCard
+                label="Connection"
+                value={connectionStatus}
+                tone={connectionStatus === 'online' ? 'success' : 'danger'}
+              />
+              <MetricCard label="Match ID" value={viewModel.resolvedMatchId || '-'} mono />
+              <MetricCard label="My seat" value={viewModel.mySeat || '-'} />
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={handleRefreshState}
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-          >
-            Get state
-          </button>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              to="/lobby"
+              className="rounded-3xl bg-emerald-500 px-5 py-4 text-sm font-black text-slate-950 transition hover:bg-emerald-400"
+            >
+              Voltar para lobby
+            </Link>
 
-          <select
-            value={viraRank}
-            onChange={(event) => setViraRank(event.target.value as Rank)}
-            className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-100 outline-none transition focus:border-emerald-400/40"
-          >
-            {VIRA_RANK_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                Vira {option}
-              </option>
-            ))}
-          </select>
+            <button
+              type="button"
+              onClick={handleRefreshState}
+              className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+            >
+              Get state
+            </button>
 
-          <button
-            type="button"
-            onClick={handleStartHand}
-            disabled={!canStartHand}
-            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-              canStartHand
-                ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20'
-                : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
-            }`}
-          >
-            Start next hand
-          </button>
+            <select
+              value={viraRank}
+              onChange={(event) => setViraRank(event.target.value as Rank)}
+              className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-sm font-bold text-slate-100 outline-none transition focus:border-emerald-400/40"
+            >
+              {VIRA_RANK_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  Vira {option}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={handleStartHand}
+              disabled={!viewModel.canStartHand}
+              className={`rounded-3xl border px-5 py-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                viewModel.canStartHand
+                  ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20'
+                  : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
+              }`}
+            >
+              Start next hand
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-        <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <div className="rounded-[2rem] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.18),_transparent_55%),linear-gradient(180deg,rgba(10,40,22,0.85),rgba(10,32,22,0.65))] p-6">
-            <div className="grid gap-6">
-              {handFinished ? (
-                <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5">
-                  <div className="text-xs uppercase tracking-[0.2em] text-emerald-300">
-                    Hand summary
-                  </div>
-                  <div className="mt-3 text-2xl font-black text-slate-100">
-                    {handOutcome.winnerLabel ?? 'Hand finished'}
-                  </div>
-                  <div className="mt-2 text-sm text-emerald-100/90">
-                    {handOutcome.roundsPlayed > 0
-                      ? `Hand finished in ${handOutcome.roundsPlayed} round(s).`
-                      : 'The hand has ended.'}
-                  </div>
-                  <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-slate-950/30 px-4 py-3 text-sm text-slate-100">
-                    {canStartHand
-                      ? 'All players are ready. Click "Start next hand" to continue.'
-                      : 'Waiting for the next hand to be started.'}
-                  </div>
-                </div>
-              ) : null}
-
-              <div
-                className={`grid gap-4 ${isOneVsOne ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-4'}`}
+        <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid gap-6">
+            <section className="rounded-[34px] border border-white/10 bg-slate-950/35 p-4 sm:p-6">
+              <motion.div
+                layout
+                className="relative overflow-hidden rounded-[32px] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.22),transparent_48%),linear-gradient(180deg,rgba(13,64,40,0.94),rgba(8,25,21,0.98))] px-5 py-6 sm:px-8 sm:py-8"
               >
-                {seatCards.map((seat) => (
-                  <div
-                    key={seat.seatId}
-                    className={`rounded-3xl border p-4 ${
-                      seat.isCurrentTurn
-                        ? 'border-emerald-400/40 bg-emerald-500/10'
-                        : 'border-white/10 bg-slate-950/50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-black tracking-wide text-slate-100">
-                        {seat.seatId}
-                      </div>
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,rgba(255,255,255,0.04),transparent_45%)]" />
+                <div className="pointer-events-none absolute bottom-3 left-1/2 h-12 w-[78%] -translate-x-1/2 rounded-full bg-black/20 blur-xl" />
 
-                      {seat.isMine ? (
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">
-                          You
-                        </span>
+                <div className="relative grid gap-7">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="text-lg font-black tracking-tight text-slate-100">
+                        Table state
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-emerald-50/75">
+                        Mesa centrada na verdade do payload: oponente em cima, você embaixo, slots
+                        centrais e próxima ação guiada pelo backend.
+                      </p>
+                    </div>
+
+                    <motion.div
+                      key={viewModel.handStatusLabel}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`rounded-3xl border px-4 py-3 text-sm font-bold ${statusToneClass(viewModel.handStatusTone)}`}
+                    >
+                      {viewModel.handStatusLabel}
+                    </motion.div>
+                  </div>
+
+                  <AnimatePresence>
+                    {roundIntroKey > 0 && viewModel.tablePhase === 'playing' ? (
+                      <motion.div
+                        key={`hand-intro-${roundIntroKey}`}
+                        initial={{ opacity: 0, y: -18, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -12, scale: 0.96 }}
+                        transition={{ duration: 0.45 }}
+                        className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-emerald-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-emerald-300 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
+                      >
+                        Nova mão iniciada · vira{' '}
+                        {viewModel.currentPrivateHand?.viraRank ??
+                          viewModel.currentPublicHand?.viraRank ??
+                          viraRank}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+
+                  <AnimatePresence>
+                    {roundResolvedKey > 0 && viewModel.latestRound?.finished ? (
+                      <motion.div
+                        key={`round-resolved-${roundResolvedKey}`}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.96 }}
+                        transition={{ duration: 0.35 }}
+                        className="absolute left-1/2 top-32 z-20 -translate-x-1/2 rounded-full border border-amber-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-amber-200 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
+                      >
+                        Round fechado · {formatRoundResult(viewModel.latestRound.result)}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+
+                  {(viewModel.tablePhase === 'hand_finished' ||
+                    viewModel.tablePhase === 'match_finished') && (
+                    <HandCompletionBanner
+                      tablePhase={viewModel.tablePhase}
+                      canStartHand={viewModel.canStartHand}
+                      scoreLabel={viewModel.scoreLabel}
+                    />
+                  )}
+
+                  <div className="grid gap-7">
+                    <div className="grid justify-center">
+                      {viewModel.opponentSeatView ? (
+                        <SeatBadge
+                          seat={viewModel.opponentSeatView}
+                          label={
+                            viewModel.isOneVsOne
+                              ? 'Opponent'
+                              : viewModel.opponentSeatView.seatId
+                          }
+                        />
                       ) : null}
                     </div>
 
-                    <div className="mt-4 text-sm text-slate-300">ready: {String(seat.ready)}</div>
-                    <div className="mt-1 text-sm text-slate-400">bot: {String(seat.isBot)}</div>
-                    <div className="mt-1 text-sm text-slate-400">
-                      turn: {seat.isCurrentTurn ? 'active' : 'idle'}
+                    <div className="relative grid gap-5 md:grid-cols-2">
+                      <div className="pointer-events-none absolute inset-x-0 top-1/2 hidden h-px -translate-y-1/2 bg-white/5 md:block" />
+
+                      <motion.div layout className="grid gap-3">
+                        <PlayedCardZone
+                          title={viewModel.isOneVsOne ? 'Opponent card' : 'Upper side card'}
+                          value={displayedOpponentPlayedCard}
+                          perspective="top"
+                          highlight={Boolean(viewModel.opponentSeatView?.isCurrentTurn)}
+                          revealKey={opponentRevealKey}
+                          isRevealed
+                        />
+                      </motion.div>
+
+                      <motion.div layout className="grid gap-3">
+                        <PlayedCardZone
+                          title={viewModel.isOneVsOne ? 'Your card' : 'Lower side card'}
+                          value={displayedMyPlayedCard}
+                          perspective="bottom"
+                          highlight={Boolean(viewModel.mySeatView?.isCurrentTurn)}
+                          revealKey={
+                            pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0
+                          }
+                          isRevealed={Boolean(displayedMyPlayedCard)}
+                          isLaunching={
+                            pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard
+                          }
+                        />
+                      </motion.div>
                     </div>
-                  </div>
-                ))}
-              </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                    Team T1 card
-                  </div>
-                  <div className="mt-4 flex min-h-24 items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 text-2xl font-black text-slate-100">
-                    {playerOnePlayedCard ?? '—'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-slate-950/50 p-5">
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                    Team T2 card
-                  </div>
-                  <div className="mt-4 flex min-h-24 items-center justify-center rounded-2xl border border-white/10 bg-slate-900/70 text-2xl font-black text-slate-100">
-                    {playerTwoPlayedCard ?? '—'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6">
-                <div className="grid gap-4 md:grid-cols-4">
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Mode</div>
-                    <div className="mt-2 text-sm font-bold text-slate-100">
-                      {roomState?.mode ?? '-'}
+                    <div className="grid justify-center">
+                      {viewModel.mySeatView ? (
+                        <SeatBadge
+                          seat={viewModel.mySeatView}
+                          label={viewModel.isOneVsOne ? 'You' : viewModel.mySeatView.seatId}
+                        />
+                      ) : null}
                     </div>
-                  </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Turn</div>
-                    <div className="mt-2 text-sm font-bold text-slate-100">
-                      {roomState?.currentTurnSeatId ?? '-'}
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <MetricCard label="Mode" value={roomState?.mode ?? '-'} />
+                      <MetricCard label="Turn" value={viewModel.currentTurnSeatId ?? '-'} />
+                      <MetricCard
+                        label="Last round"
+                        value={formatRoundResult(viewModel.latestRound?.result ?? null)}
+                      />
+                      <MetricCard label="Score" value={viewModel.scoreLabel} />
                     </div>
-                  </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                      Last round
-                    </div>
-                    <div className="mt-2 text-sm font-bold text-slate-100">
-                      {formatRoundResult(latestRound?.result ?? null)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Score</div>
-                    <div className="mt-2 text-sm font-bold text-slate-100">
-                      T1 {publicMatchState?.score.playerOne ?? 0} × T2{' '}
-                      {publicMatchState?.score.playerTwo ?? 0}
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className={`mt-4 rounded-2xl border px-4 py-3 text-sm font-bold ${
-                    handStatus.variant === 'success'
-                      ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300'
-                      : handStatus.variant === 'warning'
-                        ? 'border-amber-400/20 bg-amber-500/10 text-amber-200'
-                        : 'border-white/10 bg-slate-900/60 text-slate-200'
-                  }`}
-                >
-                  {handStatus.label}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-bold">Rounds played</h2>
-                  <span className="rounded-full bg-slate-700/50 px-3 py-1 text-xs font-bold text-slate-200">
-                    {playedRounds.length} / 3
-                  </span>
-                </div>
-
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  {[0, 1, 2].map((index) => {
-                    const round = rounds[index] ?? null;
-                    const played = Boolean(round?.playerOneCard || round?.playerTwoCard);
-
-                    return (
-                      <div
-                        key={index}
-                        className={`rounded-2xl border p-4 ${
-                          played
-                            ? 'border-white/10 bg-slate-900/60'
-                            : 'border-dashed border-white/10 bg-slate-950/30'
-                        }`}
-                      >
-                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                          Round {index + 1}
-                        </div>
-
-                        <div className="mt-3 grid gap-2 text-sm">
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-slate-400">T1</span>
-                            <span className="font-mono text-slate-100">
-                              {round?.playerOneCard ?? '—'}
-                            </span>
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-base font-black tracking-tight text-slate-100">
+                              Minha mão
+                            </div>
+                            <p className="mt-1 text-sm leading-6 text-slate-400">
+                              A mão visível vem exclusivamente do payload privado da partida.
+                            </p>
                           </div>
 
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-slate-400">T2</span>
-                            <span className="font-mono text-slate-100">
-                              {round?.playerTwoCard ?? '—'}
-                            </span>
-                          </div>
+                          <span
+                            className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
+                              viewModel.canPlayCard
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-white/5 text-slate-300'
+                            }`}
+                          >
+                            {viewModel.canPlayCard ? 'Your turn' : 'Waiting'}
+                          </span>
                         </div>
 
-                        <div className="mt-3 text-xs text-slate-400">
-                          Result: {formatRoundResult(round?.result ?? null)}
+                        <div className="mt-6 flex min-h-48 flex-wrap items-end gap-4">
+                          {viewModel.myCards.length === 0 ? (
+                            <HandEmptyState tablePhase={viewModel.tablePhase} />
+                          ) : (
+                            viewModel.myCards.map((card, index) => {
+                              const cardKey = `${card.rank}|${card.suit}`;
+                              const isLaunching = launchingCardKey === cardKey;
+                              const hoverAnimation =
+                                viewModel.canPlayCard && !isLaunching
+                                  ? { y: -22, scale: 1.06, rotate: index % 2 === 0 ? -2 : 2 }
+                                  : {};
+                              const tapAnimation =
+                                viewModel.canPlayCard && !isLaunching ? { scale: 0.96 } : {};
+                              const animateState = isLaunching
+                                ? {
+                                    opacity: 0,
+                                    y: -220,
+                                    x: 34,
+                                    rotate: 14,
+                                    scale: 0.72,
+                                    filter: 'blur(2px)',
+                                  }
+                                : {
+                                    opacity: 1,
+                                    y: 0,
+                                    rotate: 0,
+                                    scale: 1,
+                                    filter: 'blur(0px)',
+                                  };
+
+                              return (
+                                <motion.button
+                                  key={cardKey}
+                                  type="button"
+                                  onClick={() => handlePlayCard(card)}
+                                  disabled={!viewModel.canPlayCard || isLaunching}
+                                  initial={{
+                                    opacity: 0,
+                                    y: 34,
+                                    rotate: index % 2 === 0 ? -7 : 7,
+                                  }}
+                                  animate={animateState}
+                                  transition={{
+                                    delay: isLaunching ? 0 : index * 0.08,
+                                    type: 'spring',
+                                    stiffness: 240,
+                                    damping: 17,
+                                  }}
+                                  whileHover={hoverAnimation}
+                                  whileTap={tapAnimation}
+                                  className="flex h-44 w-28 flex-col items-center justify-between rounded-[24px] border border-white/15 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_20px_42px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
+                                  title={`Play ${card.rank}${suitSymbol(card.suit)}`}
+                                >
+                                  <span className="self-start text-lg font-black">{card.rank}</span>
+                                  <span className={`text-4xl ${suitColorClass(card.suit)}`}>
+                                    {suitSymbol(card.suit)}
+                                  </span>
+                                  <span className="self-end text-lg font-black">{card.rank}</span>
+                                </motion.button>
+                              );
+                            })
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
 
-              <div className="rounded-3xl border border-white/10 bg-slate-950/40 p-6">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-bold">Minha mão</h2>
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-bold ${
-                      canPlayCard
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-slate-700/50 text-slate-300'
-                    }`}
-                  >
-                    {canPlayCard ? 'Your turn' : 'Waiting'}
-                  </span>
-                </div>
-
-                <div className="mt-4 flex min-h-28 flex-wrap gap-3">
-                  {myCards.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/40 px-4 py-6 text-sm text-slate-400">
-                      {handFinished
-                        ? 'Hand ended. The 3rd card is not used when the winner is already defined.'
-                        : privateMatchState?.state === 'in_progress'
-                          ? 'Waiting for private hand state.'
-                          : 'Waiting for start-hand.'}
+                      <div className="grid gap-4">
+                        <MetricCard
+                          label="Vira"
+                          value={
+                            viewModel.currentPrivateHand?.viraRank ??
+                            viewModel.currentPublicHand?.viraRank ??
+                            '-'
+                          }
+                          mono
+                        />
+                        <MetricCard
+                          label="Viewer"
+                          value={viewModel.currentPrivateHand?.viewerPlayerId ?? '-'}
+                          mono
+                        />
+                        <MetricCard
+                          label="Hand finished"
+                          value={String(viewModel.currentPublicHand?.finished ?? false)}
+                          mono
+                        />
+                      </div>
                     </div>
-                  ) : (
-                    myCards.map((card) => (
-                      <button
-                        key={`${card.rank}|${card.suit}`}
-                        type="button"
-                        onClick={() => handlePlayCard(card)}
-                        disabled={!canPlayCard}
-                        className="flex h-28 w-20 flex-col items-center justify-between rounded-2xl border border-white/10 bg-slate-950 px-3 py-3 text-sm font-black text-slate-100 transition hover:-translate-y-1 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
-                        title={`Play ${card.rank}${suitSymbol(card.suit)}`}
-                      >
-                        <span>{card.rank}</span>
-                        <span className={suitColorClass(card.suit)}>{suitSymbol(card.suit)}</span>
-                        <span>{card.rank}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-6 text-sm text-slate-400">
-                  <div>
-                    Vira:{' '}
-                    <span className="font-mono text-slate-200">
-                      {currentPrivateHand?.viraRank ?? currentPublicHand?.viraRank ?? '-'}
-                    </span>
-                  </div>
-
-                  <div>
-                    Viewer:{' '}
-                    <span className="font-mono text-slate-200">
-                      {currentPrivateHand?.viewerPlayerId ?? '-'}
-                    </span>
-                  </div>
-
-                  <div>
-                    Hand finished:{' '}
-                    <span className="font-mono text-slate-200">
-                      {String(currentPublicHand?.finished ?? false)}
-                    </span>
                   </div>
                 </div>
+              </motion.div>
+            </section>
+
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/40 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Rounds played
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Histórico vindo do `currentHand.rounds`, sem depender de narrativa local.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                  {viewModel.playedRoundsCount} / 3
+                </span>
               </div>
-            </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-3">
+                {[0, 1, 2].map((index) => {
+                  const round = viewModel.rounds[index] ?? null;
+                  const played = Boolean(round?.playerOneCard || round?.playerTwoCard);
+                  const isLatestResolved =
+                    viewModel.latestRound != null &&
+                    viewModel.latestRound.finished &&
+                    viewModel.rounds.indexOf(viewModel.latestRound) === index;
+
+                  return (
+                    <motion.div
+                      key={index}
+                      animate={isLatestResolved ? roundResolvedAnimation : {}}
+                      transition={{ duration: 1.2 }}
+                      className={`rounded-[28px] border p-5 ${
+                        played
+                          ? 'border-white/10 bg-white/[0.03]'
+                          : 'border-dashed border-white/10 bg-white/[0.02]'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                        Round {index + 1}
+                      </div>
+
+                      <div className="mt-4 grid gap-3 text-sm">
+                        <RoundLine label="T1" value={round?.playerOneCard ?? '—'} />
+                        <RoundLine label="T2" value={round?.playerTwoCard ?? '—'} />
+                      </div>
+
+                      <div className="mt-4 text-xs text-slate-400">
+                        Result: {formatRoundResult(round?.result ?? null)}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
-        </section>
 
-        <aside className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-          <h2 className="text-lg font-bold">Match live state</h2>
+          <aside className="grid gap-6 self-start">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Match live state
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Painel técnico segue secundário, mas fiel ao payload.
+                  </p>
+                </div>
 
-          <div className="mt-4 grid gap-3">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">connection</div>
-              <div
-                className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-bold ${
-                  connectionStatus === 'online'
-                    ? 'bg-emerald-500/15 text-emerald-300'
-                    : 'bg-rose-500/15 text-rose-300'
-                }`}
-              >
-                {connectionStatus}
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  server-driven
+                </span>
               </div>
-            </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">matchId</div>
-              <div className="mt-2 break-all font-mono text-sm text-slate-100">
-                {resolvedMatchId || '-'}
-              </div>
-            </div>
+              <div className="mt-6 grid gap-4">
+                <MetricCard
+                  label="Connection"
+                  value={connectionStatus}
+                  tone={connectionStatus === 'online' ? 'success' : 'danger'}
+                />
+                <MetricCard label="Match ID" value={viewModel.resolvedMatchId || '-'} mono />
+                <MetricCard label="Public state" value={publicMatchState?.state || '-'} mono />
+                <MetricCard label="Private state" value={privateMatchState?.state || '-'} mono />
+                <MetricCard label="My seat" value={viewModel.mySeat || '-'} mono />
+                <MetricCard
+                  label="Current turn seat"
+                  value={viewModel.currentTurnSeatId ?? '-'}
+                  mono
+                />
+                <MetricCard label="Can start" value={String(viewModel.canStartHand)} mono />
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">public state</div>
-              <div className="mt-2 font-mono text-sm text-slate-100">
-                {publicMatchState?.state || '-'}
+                {!canRenderLiveState ? (
+                  <div className="rounded-[28px] border border-amber-400/15 bg-amber-500/5 p-5 text-sm leading-6 text-amber-200">
+                    Missing authenticated session or matchId to hydrate the live table.
+                  </div>
+                ) : null}
               </div>
-            </div>
+            </section>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">private state</div>
-              <div className="mt-2 font-mono text-sm text-slate-100">
-                {privateMatchState?.state || '-'}
-              </div>
-            </div>
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">Event log</div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Visibilidade operacional mantida sem dominar a mesa.
+                  </p>
+                </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">mySeat</div>
-              <div className="mt-2 font-mono text-sm text-slate-100">{mySeat || '-'}</div>
-            </div>
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  client-side
+                </span>
+              </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                currentTurnSeatId
+              <div className="mt-6 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-7 text-slate-300">
+                  {eventLog.length > 0 ? eventLog.join('\n') : 'No events yet.'}
+                </pre>
               </div>
-              <div className="mt-2 font-mono text-sm text-slate-100">
-                {roomState?.currentTurnSeatId || '-'}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">canStart</div>
-              <div className="mt-2 font-mono text-sm text-slate-100">
-                {String(roomState?.canStart ?? false)}
-              </div>
-            </div>
-
-            {!canRenderLiveState ? (
-              <div className="rounded-2xl border border-amber-400/15 bg-amber-500/5 p-4 text-sm text-amber-200">
-                Missing authenticated session or matchId to hydrate the live table.
-              </div>
-            ) : null}
-          </div>
-        </aside>
+            </section>
+          </aside>
+        </div>
       </div>
-
-      <section className="rounded-3xl border border-white/10 bg-slate-900/70 p-6">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold">Event log</h2>
-          <span className="text-xs text-slate-500">client-side</span>
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs text-slate-300">
-            {eventLog.length > 0 ? eventLog.join('\n') : 'No events yet.'}
-          </pre>
-        </div>
-      </section>
     </section>
   );
 }
 
-function getHandOutcome(
-  playedRounds: Array<{ result: string | null }>,
-): HandOutcome {
-  let playerOneWins = 0;
-  let playerTwoWins = 0;
+function HandCompletionBanner({
+  tablePhase,
+  canStartHand,
+  scoreLabel,
+}: {
+  tablePhase: TablePhase;
+  canStartHand: boolean;
+  scoreLabel: string;
+}) {
+  const isMatchFinished = tablePhase === 'match_finished';
 
-  for (const round of playedRounds) {
-    if (round.result === 'P1') {
-      playerOneWins += 1;
-    }
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className={`rounded-[28px] border p-6 ${
+        isMatchFinished
+          ? 'border-emerald-400/25 bg-emerald-500/10'
+          : 'border-amber-400/20 bg-amber-500/10'
+      }`}
+    >
+      <div
+        className={`text-[11px] font-bold uppercase tracking-[0.22em] ${
+          isMatchFinished ? 'text-emerald-300' : 'text-amber-200'
+        }`}
+      >
+        {isMatchFinished ? 'Match summary' : 'Hand summary'}
+      </div>
 
-    if (round.result === 'P2') {
-      playerTwoWins += 1;
-    }
+      <div className="mt-4 text-2xl font-black text-slate-100">
+        {isMatchFinished ? 'Partida encerrada' : 'Mão encerrada'}
+      </div>
+
+      <div className="mt-2 text-sm leading-6 text-slate-200">
+        {isMatchFinished
+          ? `O backend já fechou a partida com placar final ${scoreLabel}.`
+          : canStartHand
+            ? 'O backend já fechou a mão e liberou o início da próxima.'
+            : 'O backend já fechou a mão. Aguarde a próxima condição válida para começar outra.'}
+      </div>
+    </motion.div>
+  );
+}
+
+function HandEmptyState({ tablePhase }: { tablePhase: TablePhase }) {
+  let message = 'Waiting for start-hand.';
+
+  if (tablePhase === 'playing') {
+    message = 'Waiting for private hand state.';
   }
 
-  if (playerOneWins > playerTwoWins) {
+  if (tablePhase === 'hand_finished') {
+    message =
+      'Mão encerrada. A ausência da terceira carta pode ser comportamento legítimo quando a mão termina antes.';
+  }
+
+  if (tablePhase === 'match_finished') {
+    message = 'Partida encerrada. Não há mais cartas para esta mesa.';
+  }
+
+  return (
+    <div className="rounded-[28px] border border-dashed border-white/10 bg-white/[0.02] px-5 py-6 text-sm leading-6 text-slate-400">
+      {message}
+    </div>
+  );
+}
+
+function SeatBadge({
+  seat,
+  label,
+}: {
+  seat: TableSeatView;
+  label: string;
+}) {
+  const animateState = seat.isCurrentTurn ? seatPulseAnimation : {};
+
+  return (
+    <motion.div
+      animate={animateState}
+      transition={{ repeat: seat.isCurrentTurn ? Infinity : 0, duration: 1.6 }}
+      className={`min-w-[190px] rounded-[30px] border px-5 py-4 ${
+        seat.isCurrentTurn
+          ? 'border-emerald-400/35 bg-emerald-500/10'
+          : 'border-white/10 bg-slate-950/40'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+            {label}
+          </div>
+          <div className="mt-2 text-lg font-black text-slate-100">{seat.seatId}</div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {seat.isMine ? (
+            <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+              You
+            </span>
+          ) : null}
+
+          <span
+            className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
+              seat.isCurrentTurn
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : 'bg-white/5 text-slate-400'
+            }`}
+          >
+            {seat.isCurrentTurn ? 'Turn' : 'Idle'}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-1.5 text-sm text-slate-300">
+        <div>ready: {String(seat.ready)}</div>
+        <div className="text-slate-400">bot: {String(seat.isBot)}</div>
+      </div>
+    </motion.div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  mono = false,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  tone?: 'default' | 'success' | 'danger';
+}) {
+  const toneClass =
+    tone === 'success'
+      ? 'text-emerald-300'
+      : tone === 'danger'
+        ? 'text-rose-300'
+        : 'text-slate-100';
+
+  return (
+    <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-3 break-all text-sm font-bold ${mono ? 'font-mono' : ''} ${toneClass}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PlayedCardZone({
+  title,
+  value,
+  perspective,
+  highlight,
+  revealKey,
+  isRevealed,
+  isLaunching = false,
+}: {
+  title: string;
+  value: string | null;
+  perspective: 'top' | 'bottom';
+  highlight: boolean;
+  revealKey: number;
+  isRevealed: boolean;
+  isLaunching?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-[30px] border p-5 ${
+        highlight ? 'border-emerald-400/25 bg-emerald-500/8' : 'border-white/10 bg-slate-950/35'
+      }`}
+    >
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {title}
+      </div>
+
+      <div className="mt-4 flex min-h-44 items-center justify-center rounded-[26px] border border-white/10 bg-slate-950/50 p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.02)]">
+        <AnimatePresence mode="popLayout">
+          {value ? (
+            <motion.div
+              key={`${value}-${revealKey}`}
+              initial={{
+                opacity: 0,
+                y: perspective === 'top' ? -90 : 90,
+                rotateX: perspective === 'top' ? -82 : 82,
+                scale: 0.68,
+                filter: 'blur(6px)',
+              }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                rotateX: 0,
+                scale: 1,
+                filter: 'blur(0px)',
+              }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+              className={isLaunching ? 'drop-shadow-[0_18px_42px_rgba(255,255,255,0.1)]' : ''}
+            >
+              <TableCardFace card={value} isRevealed={isRevealed} />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0.35 }}
+              animate={{ opacity: 1 }}
+              className="flex h-32 w-24 items-center justify-center rounded-[22px] border border-dashed border-white/10 bg-slate-900/70 text-3xl font-black text-slate-500"
+            >
+              —
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function TableCardFace({
+  card,
+  isRevealed,
+}: {
+  card: string;
+  isRevealed: boolean;
+}) {
+  const normalized = parseCardLabel(card);
+
+  if (!normalized) {
+    return (
+      <div className="flex h-36 w-28 items-center justify-center rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] text-xl font-black text-slate-900 shadow-[0_22px_46px_rgba(2,6,23,0.4)]">
+        {card}
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      initial={isRevealed ? { rotateY: 90 } : false}
+      animate={{ rotateY: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      style={{ transformStyle: 'preserve-3d' }}
+      className="flex h-36 w-28 flex-col items-center justify-between rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_22px_46px_rgba(2,6,23,0.4)]"
+    >
+      <span className="self-start text-xl font-black">{normalized.rank}</span>
+      <span className={`text-5xl ${suitColorClass(normalized.suit)}`}>
+        {suitSymbol(normalized.suit)}
+      </span>
+      <span className="self-end text-xl font-black">{normalized.rank}</span>
+    </motion.div>
+  );
+}
+
+function RoundLine({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-slate-400">{label}</span>
+      <span className="font-mono text-slate-100">{value}</span>
+    </div>
+  );
+}
+
+function getViewerCards(currentPrivateHand: MatchStatePayload['currentHand'] | null): CardPayload[] {
+  if (!currentPrivateHand || !currentPrivateHand.viewerPlayerId) {
+    return [];
+  }
+
+  const cards =
+    currentPrivateHand.viewerPlayerId === 'P1'
+      ? currentPrivateHand.playerOneHand
+      : currentPrivateHand.playerTwoHand;
+
+  return cards
+    .map((card) => {
+      const normalized = card.trim();
+
+      if (normalized === 'HIDDEN' || normalized.length < 2) {
+        return null;
+      }
+
+      return {
+        rank: normalized.slice(0, -1),
+        suit: normalized.slice(-1),
+      } as CardPayload;
+    })
+    .filter((card): card is CardPayload => card !== null);
+}
+
+function resolvePlayedCardOwner(input: {
+  payloadPlayerId: string | undefined;
+  mySeat: string | null;
+}): 'mine' | 'opponent' | null {
+  if (!input.payloadPlayerId || !input.mySeat) {
+    return null;
+  }
+
+  const myIsPlayerOne = input.mySeat === 'T1A' || input.mySeat === 'T1B';
+
+  if (myIsPlayerOne && input.payloadPlayerId === 'P1') {
+    return 'mine';
+  }
+
+  if (!myIsPlayerOne && input.payloadPlayerId === 'P2') {
+    return 'mine';
+  }
+
+  return 'opponent';
+}
+
+function buildHandStatus(input: {
+  publicMatchState: MatchStatePayload | null;
+  currentPublicHand: MatchStatePayload['currentHand'] | null;
+  canStartHand: boolean;
+  canPlayCard: boolean;
+  isMyTurn: boolean;
+  myCardsCount: number;
+  playedRoundsCount: number;
+  latestRound: MatchViewModel['latestRound'];
+}): { handStatusLabel: string; handStatusTone: HandStatusVariant } {
+  if (input.publicMatchState?.state === 'finished') {
     return {
-      winnerLabel: 'Team T1 won the hand',
-      roundsPlayed: playedRounds.length,
+      handStatusLabel: 'Partida encerrada. O placar final já foi definido.',
+      handStatusTone: 'success',
     };
   }
 
-  if (playerTwoWins > playerOneWins) {
+  if (input.currentPublicHand?.finished) {
     return {
-      winnerLabel: 'Team T2 won the hand',
-      roundsPlayed: playedRounds.length,
+      handStatusLabel: input.canStartHand
+        ? 'Mão encerrada. O backend já liberou a próxima mão.'
+        : 'Mão encerrada. Aguarde a próxima condição válida para continuar.',
+      handStatusTone: 'success',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'waiting' && input.canStartHand) {
+    return {
+      handStatusLabel: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
+      handStatusTone: 'neutral',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'in_progress' && input.canPlayCard) {
+    return {
+      handStatusLabel: 'É o seu turno. Escolha uma carta da sua mão.',
+      handStatusTone: 'warning',
+    };
+  }
+
+  if (input.publicMatchState?.state === 'in_progress' && !input.isMyTurn) {
+    return {
+      handStatusLabel:
+        input.latestRound?.finished && input.playedRoundsCount > 0
+          ? 'Rodada encerrada. Aguarde o próximo turno definido pelo backend.'
+          : 'A mão está em andamento. Aguarde a próxima jogada.',
+      handStatusTone: 'neutral',
     };
   }
 
   return {
-    winnerLabel: null,
-    roundsPlayed: playedRounds.length,
+    handStatusLabel: 'Aguardando início da mão.',
+    handStatusTone: 'neutral',
+  };
+}
+
+function parseCardLabel(card: string): { rank: string; suit: string } | null {
+  const normalized = card.trim();
+
+  if (normalized.length < 2) {
+    return null;
+  }
+
+  return {
+    rank: normalized.slice(0, -1),
+    suit: normalized.slice(-1),
   };
 }
 
@@ -733,60 +1330,6 @@ function formatRoundResult(result: string | null): string {
   return result;
 }
 
-function getHandStatus(input: {
-  publicMatchState: MatchStatePayload | null;
-  currentPublicHand: MatchStatePayload['currentHand'] | null;
-  isMyTurn: boolean;
-  canStartHand: boolean;
-  myCardsCount: number;
-  playedRoundsCount: number;
-  handOutcome: HandOutcome;
-}): { label: string; variant: 'neutral' | 'success' | 'warning' } {
-  if (input.publicMatchState?.state === 'finished') {
-    return {
-      label: 'Partida encerrada. O placar final já foi definido.',
-      variant: 'success',
-    };
-  }
-
-  if (input.currentPublicHand?.finished) {
-    const winnerSegment = input.handOutcome.winnerLabel
-      ? `${input.handOutcome.winnerLabel}. `
-      : '';
-
-    return {
-      label: `${winnerSegment}Hand finished in ${input.playedRoundsCount} round(s). You can start the next hand now.`,
-      variant: 'success',
-    };
-  }
-
-  if (input.publicMatchState?.state === 'waiting' && input.canStartHand) {
-    return {
-      label: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
-      variant: 'neutral',
-    };
-  }
-
-  if (input.publicMatchState?.state === 'in_progress' && input.isMyTurn && input.myCardsCount > 0) {
-    return {
-      label: 'É o seu turno. Escolha uma carta da sua mão.',
-      variant: 'warning',
-    };
-  }
-
-  if (input.publicMatchState?.state === 'in_progress') {
-    return {
-      label: 'A mão está em andamento. Aguarde a próxima jogada.',
-      variant: 'neutral',
-    };
-  }
-
-  return {
-    label: 'Aguardando início da mão.',
-    variant: 'neutral',
-  };
-}
-
 function suitSymbol(suit: string): string {
   if (suit === 'C') return '♥';
   if (suit === 'O') return '♦';
@@ -795,5 +1338,17 @@ function suitSymbol(suit: string): string {
 }
 
 function suitColorClass(suit: string): string {
-  return suit === 'C' || suit === 'O' ? 'text-rose-300' : 'text-slate-100';
+  return suit === 'C' || suit === 'O' ? 'text-rose-500' : 'text-slate-900';
+}
+
+function statusToneClass(variant: HandStatusVariant): string {
+  if (variant === 'success') {
+    return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300';
+  }
+
+  if (variant === 'warning') {
+    return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
+  }
+
+  return 'border-white/10 bg-slate-900/60 text-slate-200';
 }
