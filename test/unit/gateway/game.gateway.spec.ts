@@ -97,6 +97,12 @@ describe('GameGateway bot profile flow', () => {
     const declineBetUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
+    const acceptMaoDeOnzeUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const declineMaoDeOnzeUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
     const raiseToSixUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
@@ -427,6 +433,8 @@ describe('GameGateway bot profile flow', () => {
       requestTrucoUseCase as never,
       acceptBetUseCase as never,
       declineBetUseCase as never,
+      acceptMaoDeOnzeUseCase as never,
+      declineMaoDeOnzeUseCase as never,
       raiseToSixUseCase as never,
       raiseToNineUseCase as never,
       raiseToTwelveUseCase as never,
@@ -466,6 +474,8 @@ describe('GameGateway bot profile flow', () => {
         requestTrucoUseCase,
         acceptBetUseCase,
         declineBetUseCase,
+        acceptMaoDeOnzeUseCase,
+        declineMaoDeOnzeUseCase,
         raiseToSixUseCase,
         raiseToNineUseCase,
         raiseToTwelveUseCase,
@@ -1381,6 +1391,158 @@ describe('GameGateway bot profile flow', () => {
     });
 
     const response = await gateway.handleGetMatchReplay(socket as never, {});
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'validation_error',
+        message: 'Invalid payload: matchId is required.',
+      },
+    });
+  });
+
+  it('accepts mao de onze using the authenticated session player and emits updated state', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-accept',
+      authToken: 'auth-token-mao-de-onze-accept',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-mao-de-onze',
+      state: 'in_progress',
+      score: {
+        playerOne: 11,
+        playerTwo: 8,
+      },
+      currentHand: {
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: null,
+        currentValue: 3,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'mao_de_onze',
+        specialDecisionPending: false,
+        specialDecisionBy: 'P1',
+        winner: null,
+        awardedPoints: null,
+        playerOneHand: ['4O', 'AO', '3P'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    });
+
+    const response = await gateway.handleAcceptMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(deps.acceptMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-mao-de-onze',
+      playerId: 'P1',
+    });
+
+    expect(response).toEqual({
+      event: 'mao-de-onze-accepted',
+      data: {
+        matchId: 'match-1',
+      },
+    });
+  });
+
+  it('declines mao de onze using the authenticated session player and emits updated state', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-decline',
+      authToken: 'auth-token-mao-de-onze-decline',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-mao-de-onze',
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    });
+
+    const response = await gateway.handleDeclineMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(deps.declineMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-mao-de-onze',
+      playerId: 'P1',
+    });
+
+    expect(response).toEqual({
+      event: 'mao-de-onze-declined',
+      data: {
+        matchId: 'match-1',
+      },
+    });
+  });
+
+  it('rejects accept-mao-de-onze when player is not assigned to a room', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-no-session',
+      authToken: 'auth-token-mao-de-onze-no-session',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue(undefined);
+
+    const response = await gateway.handleAcceptMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'transport_error',
+        message: 'Player is not assigned to any room.',
+      },
+    });
+  });
+
+  it('rejects decline-mao-de-onze when matchId is missing', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-invalid',
+      authToken: 'auth-token-mao-de-onze-invalid',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    const response = await gateway.handleDeclineMaoDeOnze(socket as never, {});
 
     expect(response).toEqual({
       event: 'error',

@@ -6,8 +6,10 @@ import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import type { UserRepository } from '@game/application/ports/user.repository';
 import { AcceptBetUseCase } from '@game/application/use-cases/accept-bet.use-case';
+import { AcceptMaoDeOnzeUseCase } from '@game/application/use-cases/accept-mao-de-onze.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { DeclineBetUseCase } from '@game/application/use-cases/decline-bet.use-case';
+import { DeclineMaoDeOnzeUseCase } from '@game/application/use-cases/decline-mao-de-onze.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
@@ -135,6 +137,16 @@ const gameModuleLogger = new Logger('GameModule');
     {
       provide: DeclineBetUseCase,
       useFactory: (repo: MatchRepository) => new DeclineBetUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: AcceptMaoDeOnzeUseCase,
+      useFactory: (repo: MatchRepository) => new AcceptMaoDeOnzeUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: DeclineMaoDeOnzeUseCase,
+      useFactory: (repo: MatchRepository) => new DeclineMaoDeOnzeUseCase(repo),
       inject: [MATCH_REPOSITORY],
     },
     {

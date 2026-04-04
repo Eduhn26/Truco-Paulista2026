@@ -18,7 +18,9 @@ import type {
 } from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import type { AcceptBetRequestDto } from '@game/application/dtos/requests/accept-bet.request.dto';
+import type { AcceptMaoDeOnzeRequestDto } from '@game/application/dtos/requests/accept-mao-de-onze.request.dto';
 import type { DeclineBetRequestDto } from '@game/application/dtos/requests/decline-bet.request.dto';
+import type { DeclineMaoDeOnzeRequestDto } from '@game/application/dtos/requests/decline-mao-de-onze.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
 import type { RaiseToNineRequestDto } from '@game/application/dtos/requests/raise-to-nine.request.dto';
 import type { RaiseToSixRequestDto } from '@game/application/dtos/requests/raise-to-six.request.dto';
@@ -34,8 +36,10 @@ import {
 } from '@game/application/ports/bot-decision.port';
 import { readGatewayCorsOrigin } from '@game/application/runtime/env/runtime-config';
 import { AcceptBetUseCase } from '@game/application/use-cases/accept-bet.use-case';
+import { AcceptMaoDeOnzeUseCase } from '@game/application/use-cases/accept-mao-de-onze.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
 import { DeclineBetUseCase } from '@game/application/use-cases/decline-bet.use-case';
+import { DeclineMaoDeOnzeUseCase } from '@game/application/use-cases/decline-mao-de-onze.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
@@ -232,6 +236,12 @@ type GatewayLogContext = {
     | 'raise_to_twelve_requested'
     | 'raise_to_twelve_succeeded'
     | 'raise_to_twelve_rejected'
+    | 'accept_mao_de_onze_requested'
+    | 'accept_mao_de_onze_succeeded'
+    | 'accept_mao_de_onze_rejected'
+    | 'decline_mao_de_onze_requested'
+    | 'decline_mao_de_onze_succeeded'
+    | 'decline_mao_de_onze_rejected'
     | 'match_finished'
     | 'get_ranking_requested'
     | 'get_ranking_succeeded'
@@ -300,6 +310,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly requestTrucoUseCase: RequestTrucoUseCase,
     private readonly acceptBetUseCase: AcceptBetUseCase,
     private readonly declineBetUseCase: DeclineBetUseCase,
+    private readonly acceptMaoDeOnzeUseCase: AcceptMaoDeOnzeUseCase,
+    private readonly declineMaoDeOnzeUseCase: DeclineMaoDeOnzeUseCase,
     private readonly raiseToSixUseCase: RaiseToSixUseCase,
     private readonly raiseToNineUseCase: RaiseToNineUseCase,
     private readonly raiseToTwelveUseCase: RaiseToTwelveUseCase,
@@ -2381,6 +2393,154 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     } catch (error) {
       return this.rejectFromError('raise_to_twelve_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('accept-mao-de-onze')
+  async handleAcceptMaoDeOnze(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'accept_mao_de_onze_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'accept_mao_de_onze_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'accept_mao_de_onze_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: AcceptMaoDeOnzeRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.acceptMaoDeOnzeUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'accept_mao_de_onze_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'mao-de-onze-accepted',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('accept_mao_de_onze_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('decline-mao-de-onze')
+  async handleDeclineMaoDeOnze(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'decline_mao_de_onze_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'decline_mao_de_onze_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'decline_mao_de_onze_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: DeclineMaoDeOnzeRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.declineMaoDeOnzeUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'decline_mao_de_onze_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'mao-de-onze-declined',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('decline_mao_de_onze_rejected', error, {
         socketId: socket.id,
       });
     }
