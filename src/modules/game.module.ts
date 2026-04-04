@@ -5,13 +5,16 @@ import type { MatchRecordRepository } from '@game/application/ports/match-record
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import type { UserRepository } from '@game/application/ports/user.repository';
+import { AcceptBetUseCase } from '@game/application/use-cases/accept-bet.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import { DeclineBetUseCase } from '@game/application/use-cases/decline-bet.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
@@ -65,7 +68,10 @@ const gameModuleLogger = new Logger('GameModule');
       inject: [PythonBotConfigService],
     },
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
-    { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
+    {
+      provide: PLAYER_PROFILE_REPOSITORY,
+      useClass: PrismaPlayerProfileRepository,
+    },
     { provide: MATCH_RECORD_REPOSITORY, useClass: PrismaMatchRecordRepository },
     {
       provide: BOT_DECISION_PORT,
@@ -116,6 +122,21 @@ const gameModuleLogger = new Logger('GameModule');
     {
       provide: ViewMatchStateUseCase,
       useFactory: (repo: MatchRepository) => new ViewMatchStateUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RequestTrucoUseCase,
+      useFactory: (repo: MatchRepository) => new RequestTrucoUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: AcceptBetUseCase,
+      useFactory: (repo: MatchRepository) => new AcceptBetUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: DeclineBetUseCase,
+      useFactory: (repo: MatchRepository) => new DeclineBetUseCase(repo),
       inject: [MATCH_REPOSITORY],
     },
     {

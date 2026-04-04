@@ -17,8 +17,11 @@ import type {
   MatchMode,
 } from '@game/application/dtos/requests/create-match.request.dto';
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
-import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
+import type { AcceptBetRequestDto } from '@game/application/dtos/requests/accept-bet.request.dto';
+import type { DeclineBetRequestDto } from '@game/application/dtos/requests/decline-bet.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import type { RequestTrucoRequestDto } from '@game/application/dtos/requests/request-truco.request.dto';
+import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import {
   BOT_DECISION_PORT,
   type BotDecisionContext,
@@ -27,13 +30,16 @@ import {
   type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
 import { readGatewayCorsOrigin } from '@game/application/runtime/env/runtime-config';
+import { AcceptBetUseCase } from '@game/application/use-cases/accept-bet.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import { DeclineBetUseCase } from '@game/application/use-cases/decline-bet.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
@@ -202,6 +208,15 @@ type GatewayLogContext = {
     | 'play_card_requested'
     | 'play_card_succeeded'
     | 'play_card_rejected'
+    | 'request_truco_requested'
+    | 'request_truco_succeeded'
+    | 'request_truco_rejected'
+    | 'accept_bet_requested'
+    | 'accept_bet_succeeded'
+    | 'accept_bet_rejected'
+    | 'decline_bet_requested'
+    | 'decline_bet_succeeded'
+    | 'decline_bet_rejected'
     | 'match_finished'
     | 'get_ranking_requested'
     | 'get_ranking_succeeded'
@@ -267,6 +282,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly createMatchUseCase: CreateMatchUseCase,
     private readonly startHandUseCase: StartHandUseCase,
     private readonly playCardUseCase: PlayCardUseCase,
+    private readonly requestTrucoUseCase: RequestTrucoUseCase,
+    private readonly acceptBetUseCase: AcceptBetUseCase,
+    private readonly declineBetUseCase: DeclineBetUseCase,
     private readonly viewMatchStateUseCase: ViewMatchStateUseCase,
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
@@ -1045,7 +1063,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logGateway('log', successLog);
       return { event: 'created', data: result };
     } catch (error) {
-      return this.rejectFromError('create_match_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('create_match_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1097,7 +1117,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'joined', data: { matchId } };
     } catch (error) {
-      return this.rejectFromError('join_match_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('join_match_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1179,7 +1201,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'queue-joined', data: snapshot };
     } catch (error) {
-      return this.rejectFromError('join_queue_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('join_queue_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1299,7 +1323,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       };
     } catch (error) {
-      return this.rejectFromError('continue_queue_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('continue_queue_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1343,7 +1369,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data: botMatch,
       };
     } catch (error) {
-      return this.rejectFromError('start_bot_match_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('start_bot_match_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1386,7 +1414,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       };
     } catch (error) {
-      return this.rejectFromError('decline_fallback_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('decline_fallback_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1440,7 +1470,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         },
       };
     } catch (error) {
-      return this.rejectFromError('leave_queue_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('leave_queue_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1484,7 +1516,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         data: snapshot,
       };
     } catch (error) {
-      return this.rejectFromError('get_queue_state_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('get_queue_state_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1540,7 +1574,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'ready-updated', data: { ready: readyRaw } };
     } catch (error) {
-      return this.rejectFromError('set_ready_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('set_ready_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1625,7 +1661,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'hand-started', data: result };
     } catch (error) {
-      return this.rejectFromError('start_hand_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('start_hand_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1733,7 +1771,222 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'card-played', data: { matchId: result.matchId } };
     } catch (error) {
-      return this.rejectFromError('play_card_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('play_card_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('request-truco')
+  async handleRequestTruco(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'request_truco_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'request_truco_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'request_truco_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: RequestTrucoRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.requestTrucoUseCase.execute(dto);
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'request_truco_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'truco-requested',
+        data: { matchId: result.matchId },
+      };
+    } catch (error) {
+      return this.rejectFromError('request_truco_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('accept-bet')
+  async handleAcceptBet(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'accept_bet_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'accept_bet_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'accept_bet_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: AcceptBetRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.acceptBetUseCase.execute(dto);
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'accept_bet_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-accepted',
+        data: { matchId: result.matchId },
+      };
+    } catch (error) {
+      return this.rejectFromError('accept_bet_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('decline-bet')
+  async handleDeclineBet(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'decline_bet_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'decline_bet_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'decline_bet_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: DeclineBetRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.declineBetUseCase.execute(dto);
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'decline_bet_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-declined',
+        data: { matchId: result.matchId },
+      };
+    } catch (error) {
+      return this.rejectFromError('decline_bet_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1767,7 +2020,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'ranking', data: { ok: true } };
     } catch (error) {
-      return this.rejectFromError('get_ranking_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('get_ranking_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 
@@ -1925,7 +2180,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { event: 'state', data: state };
     } catch (error) {
-      return this.rejectFromError('get_state_rejected', error, { socketId: socket.id });
+      return this.rejectFromError('get_state_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 }
