@@ -1,7 +1,7 @@
-import type { Match } from '../../domain/entities/match';
-import { Round } from '../../domain/entities/round';
-import type { PlayerId } from '../../domain/value-objects/player-id';
-import type { ViewMatchStateResponseDto } from '../dtos/responses/view-match-state.response.dto';
+import type { Match } from '@game/domain/entities/match';
+import { Round } from '@game/domain/entities/round';
+import type { PlayerId } from '@game/domain/value-objects/player-id';
+import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 
 function maskHand(cards: string[]): string[] {
   return cards.map(() => 'HIDDEN');
@@ -57,6 +57,15 @@ export function mapMatchToViewMatchState(
       viraRank: snapshot.viraRank,
       finished: snapshot.finished,
       viewerPlayerId: viewerPlayerId ?? null,
+      currentValue: snapshot.currentValue,
+      betState: snapshot.betState,
+      pendingValue: snapshot.pendingValue,
+      requestedBy: snapshot.requestedBy,
+      specialState: snapshot.specialState,
+      specialDecisionPending: snapshot.specialDecisionPending,
+      specialDecisionBy: snapshot.specialDecisionBy,
+      winner: snapshot.winner,
+      awardedPoints: snapshot.awardedPoints,
       playerOneHand: visiblePlayerOneHand,
       playerTwoHand: visiblePlayerTwoHand,
       rounds: snapshot.rounds.map((round) => ({

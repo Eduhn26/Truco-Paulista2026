@@ -1,6 +1,7 @@
-import { InMemoryMatchRepository } from '../../../src/infrastructure/persistence/in-memory/in-memory-match.repository';
 import { CreateMatchUseCase } from '../../../src/application/use-cases/create-match.use-case';
 import { ViewMatchStateUseCase } from '../../../src/application/use-cases/view-match-state.use-case';
+import { Match } from '../../../src/domain/entities/match';
+import { InMemoryMatchRepository } from '../../../src/infrastructure/persistence/in-memory/in-memory-match.repository';
 
 describe('ViewMatchStateUseCase (Application)', () => {
   it('returns match state and score', async () => {
@@ -14,6 +15,126 @@ describe('ViewMatchStateUseCase (Application)', () => {
     expect(state.matchId).toBe(created.matchId);
     expect(state.state).toBe('waiting');
     expect(state.score).toEqual({ playerOne: 0, playerTwo: 0 });
+    expect(state.currentHand).toBeNull();
+  });
+
+  it('returns enriched current hand state for a pending truco response', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = new Match(12);
+
+    match.start('4');
+    match.requestTruco('P1');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P1',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand).toMatchObject({
+      viraRank: '4',
+      finished: false,
+      viewerPlayerId: 'P1',
+      currentValue: 1,
+      betState: 'awaiting_response',
+      pendingValue: 3,
+      requestedBy: 'P1',
+      specialState: 'normal',
+      specialDecisionPending: false,
+      specialDecisionBy: null,
+      winner: null,
+      awardedPoints: null,
+    });
+  });
+
+  it('masks the opponent hand for a viewer player', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = new Match(12);
+
+    match.start('4');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P1',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand!.playerOneHand).not.toEqual(['HIDDEN', 'HIDDEN', 'HIDDEN']);
+    expect(state.currentHand!.playerTwoHand).toEqual(['HIDDEN', 'HIDDEN', 'HIDDEN']);
+  });
+
+  it('returns mao de onze fields when a special decision is pending', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = Match.fromSnapshot({
+      pointsToWin: 12,
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 8,
+      },
+      currentHand: null,
+    });
+
+    match.start('4');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P1',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand).toMatchObject({
+      specialState: 'mao_de_onze',
+      specialDecisionPending: true,
+      specialDecisionBy: 'P1',
+      currentValue: 1,
+      betState: 'idle',
+    });
+  });
+
+  it('returns mao de ferro fields for the special 11x11 hand', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = Match.fromSnapshot({
+      pointsToWin: 12,
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    });
+
+    match.start('4');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P2',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand).toMatchObject({
+      specialState: 'mao_de_ferro',
+      specialDecisionPending: false,
+      specialDecisionBy: null,
+      currentValue: 1,
+      betState: 'idle',
+    });
   });
 
   it('throws when match does not exist', async () => {

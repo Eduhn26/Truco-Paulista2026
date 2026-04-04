@@ -1,12 +1,8 @@
-import type { MatchState } from '../../../domain/value-objects/match-state';
-import type { Rank } from '../../../domain/value-objects/rank';
-import type { RoundResult } from '../../../domain/value-objects/round-result';
-import type { PlayerId } from '../../../domain/value-objects/player-id';
-
-export type ViewMatchStateRequestDto = {
-  matchId: string;
-  viewerPlayerId?: PlayerId;
-};
+import type { HandBetState, HandSpecialState, HandValue } from '@game/domain/entities/hand';
+import type { MatchState } from '@game/domain/value-objects/match-state';
+import type { PlayerId } from '@game/domain/value-objects/player-id';
+import type { Rank } from '@game/domain/value-objects/rank';
+import type { RoundResult } from '@game/domain/value-objects/round-result';
 
 export type ViewMatchStateResponseDto = {
   matchId: string;
@@ -19,6 +15,15 @@ export type ViewMatchStateResponseDto = {
     viraRank: Rank;
     finished: boolean;
     viewerPlayerId: PlayerId | null;
+    currentValue: HandValue;
+    betState: HandBetState;
+    pendingValue: HandValue | null;
+    requestedBy: PlayerId | null;
+    specialState: HandSpecialState;
+    specialDecisionPending: boolean;
+    specialDecisionBy: PlayerId | null;
+    winner: PlayerId | null;
+    awardedPoints: HandValue | null;
     playerOneHand: string[];
     playerTwoHand: string[];
     rounds: Array<{
