@@ -99,4 +99,63 @@ describe('Match (Domain)', () => {
     expect(currentHand!.isSpecialDecisionPending()).toBe(false);
     expect(currentHand!.getCurrentValue()).toBe(3);
   });
+
+  it('starts the next hand as mao de ferro when the score is 11x11', () => {
+    const match = Match.fromSnapshot({
+      pointsToWin: 12,
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    });
+
+    match.start('4');
+
+    const currentHand = match.getCurrentHand();
+
+    expect(currentHand).not.toBeNull();
+    expect(currentHand!.getSpecialState()).toBe('mao_de_ferro');
+    expect(currentHand!.isSpecialDecisionPending()).toBe(false);
+    expect(currentHand!.getSpecialDecisionBy()).toBeNull();
+    expect(currentHand!.getCurrentValue()).toBe(1);
+  });
+
+  it('finishes the match when mao de ferro is won', () => {
+    const match = Match.fromSnapshot({
+      pointsToWin: 12,
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    });
+
+    match.start('4');
+
+    const currentHand = match.getCurrentHand();
+    expect(currentHand).not.toBeNull();
+
+    const scriptedHand = currentHand!.toSnapshot();
+
+    scriptedHand.playerOneHand = ['3P', '2C', 'AO'];
+    scriptedHand.playerTwoHand = ['4E', 'AC', 'KO'];
+
+    const controlledMatch = Match.fromSnapshot({
+      ...match.toSnapshot(),
+      currentHand: scriptedHand,
+    });
+
+    controlledMatch.play('P1', Card.from('3P'));
+    controlledMatch.play('P2', Card.from('4E'));
+
+    controlledMatch.play('P1', Card.from('2C'));
+    controlledMatch.play('P2', Card.from('AC'));
+
+    expect(controlledMatch.getState()).toBe('finished');
+    expect(controlledMatch.getScore().playerOne).toBe(12);
+    expect(controlledMatch.getScore().playerTwo).toBe(11);
+  });
 });

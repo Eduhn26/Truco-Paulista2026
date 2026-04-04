@@ -196,7 +196,7 @@ describe('Hand (Domain)', () => {
 
     expect(hand.isSpecialDecisionPending()).toBe(false);
     expect(hand.getCurrentValue()).toBe(3);
-    expect(() => hand.requestTruco('P1')).toThrow('Cannot request truco during mao de onze.');
+    expect(() => hand.requestTruco('P1')).toThrow('Cannot request truco during mao_de_onze.');
   });
 
   it('declines mao de onze and awards 1 point to the opponent', () => {

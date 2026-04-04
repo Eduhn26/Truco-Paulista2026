@@ -290,8 +290,8 @@ export class Hand {
   private requestBet(player: PlayerId, targetValue: HandValue): void {
     this.ensureHandCanChangeBet();
 
-    if (this.specialState === 'mao_de_onze') {
-      throw new InvalidMoveError('Cannot request truco during mao de onze.');
+    if (this.specialState === 'mao_de_onze' || this.specialState === 'mao_de_ferro') {
+      throw new InvalidMoveError(`Cannot request truco during ${this.specialState}.`);
     }
 
     if (this.betState === 'awaiting_response') {
@@ -534,6 +534,16 @@ export class Hand {
 
       if (!this.specialDecisionPending && this.currentValue !== 3 && !this.finished) {
         throw new InvalidMoveError('Accepted mao de onze must be worth 3 points.');
+      }
+    }
+
+    if (this.specialState === 'mao_de_ferro') {
+      if (this.currentValue !== 1 && !this.finished) {
+        throw new InvalidMoveError('Mao de ferro must keep the hand value at 1 point.');
+      }
+
+      if (this.betState !== 'idle') {
+        throw new InvalidMoveError('Mao de ferro cannot have an active bet state.');
       }
     }
 

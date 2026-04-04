@@ -131,6 +131,12 @@ export class Match {
   }
 
   private buildInitialHandState() {
+    if (this.score.playerOne === 11 && this.score.playerTwo === 11) {
+      return {
+        specialState: 'mao_de_ferro' as const,
+      };
+    }
+
     if (this.score.playerOne === 11 && this.score.playerTwo < 11) {
       return {
         specialState: 'mao_de_onze' as const,
