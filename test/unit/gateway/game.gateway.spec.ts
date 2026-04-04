@@ -87,9 +87,7 @@ describe('GameGateway bot profile flow', () => {
       execute: jest.fn().mockResolvedValue({ matchId: 'queue-match-1' }),
     };
     const startHandUseCase = { execute: jest.fn() };
-    const playCardUseCase = {
-      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
-    };
+    const playCardUseCase = { execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }) };
     const requestTrucoUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
@@ -97,6 +95,15 @@ describe('GameGateway bot profile flow', () => {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
     const declineBetUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToSixUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToNineUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToTwelveUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
     const viewMatchStateUseCase = { execute: jest.fn() };
@@ -420,6 +427,9 @@ describe('GameGateway bot profile flow', () => {
       requestTrucoUseCase as never,
       acceptBetUseCase as never,
       declineBetUseCase as never,
+      raiseToSixUseCase as never,
+      raiseToNineUseCase as never,
+      raiseToTwelveUseCase as never,
       viewMatchStateUseCase as never,
       getOrCreatePlayerProfileUseCase as never,
       updateRatingUseCase as never,
@@ -456,6 +466,9 @@ describe('GameGateway bot profile flow', () => {
         requestTrucoUseCase,
         acceptBetUseCase,
         declineBetUseCase,
+        raiseToSixUseCase,
+        raiseToNineUseCase,
+        raiseToTwelveUseCase,
         viewMatchStateUseCase,
         getOrCreatePlayerProfileUseCase,
         updateRatingUseCase,
@@ -816,9 +829,7 @@ describe('GameGateway bot profile flow', () => {
       authToken: 'auth-token-state-1',
     });
 
-    deps.authTokenService.verifyToken.mockReturnValueOnce({
-      sub: 'auth-user-state-1',
-    });
+    deps.authTokenService.verifyToken.mockReturnValueOnce({ sub: 'auth-user-state-1' });
 
     deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValueOnce({
       profile: {
@@ -918,9 +929,7 @@ describe('GameGateway bot profile flow', () => {
     });
 
     await gateway.handleJoinQueue(firstSocket as never, { mode: '1v1' });
-    const response = await gateway.handleJoinQueue(secondSocket as never, {
-      mode: '1v1',
-    });
+    const response = await gateway.handleJoinQueue(secondSocket as never, { mode: '1v1' });
 
     expect(deps.createMatchUseCase.execute).toHaveBeenCalledWith({
       mode: '1v1',
@@ -993,9 +1002,7 @@ describe('GameGateway bot profile flow', () => {
       authToken: 'auth-token-expired-1',
     });
 
-    deps.authTokenService.verifyToken.mockReturnValueOnce({
-      sub: 'auth-user-expired-1',
-    });
+    deps.authTokenService.verifyToken.mockReturnValueOnce({ sub: 'auth-user-expired-1' });
     deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValueOnce({
       profile: {
         id: 'profile-expired-1',
@@ -1382,162 +1389,5 @@ describe('GameGateway bot profile flow', () => {
         message: 'Invalid payload: matchId is required.',
       },
     });
-  });
-
-  it('requests truco for the assigned player and emits updated state', async () => {
-    const { gateway, deps, server } = createGateway();
-    const socket = createSocket({
-      id: 'socket-truco-1',
-      authToken: 'auth-token-truco-1',
-    });
-
-    deps.roomManager.getSessionBySocketId.mockReturnValue({
-      matchId: 'match-1',
-      seatId: 'T1A',
-      teamId: 'T1',
-      domainPlayerId: 'P1',
-    });
-
-    deps.viewMatchStateUseCase.execute.mockResolvedValue({
-      matchId: 'match-1',
-      state: 'in_progress',
-      score: { playerOne: 0, playerTwo: 0 },
-      currentHand: null,
-    });
-
-    const response = await gateway.handleRequestTruco(socket as never, {
-      matchId: 'match-1',
-    });
-
-    expect(deps.requestTrucoUseCase.execute).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      playerId: 'P1',
-    });
-    expect(server.to).toHaveBeenCalledWith('match-1');
-    expect(response).toEqual({
-      event: 'truco-requested',
-      data: { matchId: 'match-1' },
-    });
-  });
-
-  it('accepts bet for the assigned player and emits updated state', async () => {
-    const { gateway, deps, server } = createGateway();
-    const socket = createSocket({
-      id: 'socket-accept-bet-1',
-      authToken: 'auth-token-accept-bet-1',
-    });
-
-    deps.roomManager.getSessionBySocketId.mockReturnValue({
-      matchId: 'match-1',
-      seatId: 'T2A',
-      teamId: 'T2',
-      domainPlayerId: 'P2',
-    });
-
-    deps.viewMatchStateUseCase.execute.mockResolvedValue({
-      matchId: 'match-1',
-      state: 'in_progress',
-      score: { playerOne: 0, playerTwo: 0 },
-      currentHand: null,
-    });
-
-    const response = await gateway.handleAcceptBet(socket as never, {
-      matchId: 'match-1',
-    });
-
-    expect(deps.acceptBetUseCase.execute).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      playerId: 'P2',
-    });
-    expect(server.to).toHaveBeenCalledWith('match-1');
-    expect(response).toEqual({
-      event: 'bet-accepted',
-      data: { matchId: 'match-1' },
-    });
-  });
-
-  it('declines bet for the assigned player and emits updated state', async () => {
-    const { gateway, deps, server } = createGateway();
-    const socket = createSocket({
-      id: 'socket-decline-bet-1',
-      authToken: 'auth-token-decline-bet-1',
-    });
-
-    deps.roomManager.getSessionBySocketId.mockReturnValue({
-      matchId: 'match-1',
-      seatId: 'T2A',
-      teamId: 'T2',
-      domainPlayerId: 'P2',
-    });
-
-    deps.viewMatchStateUseCase.execute.mockResolvedValue({
-      matchId: 'match-1',
-      state: 'waiting',
-      score: { playerOne: 1, playerTwo: 0 },
-      currentHand: null,
-    });
-
-    const response = await gateway.handleDeclineBet(socket as never, {
-      matchId: 'match-1',
-    });
-
-    expect(deps.declineBetUseCase.execute).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      playerId: 'P2',
-    });
-    expect(server.to).toHaveBeenCalledWith('match-1');
-    expect(response).toEqual({
-      event: 'bet-declined',
-      data: { matchId: 'match-1' },
-    });
-  });
-
-  it('rejects request truco when socket is not assigned to a room', async () => {
-    const { gateway, deps } = createGateway();
-    const socket = createSocket({
-      id: 'socket-truco-no-room',
-      authToken: 'auth-token-truco-no-room',
-    });
-
-    deps.roomManager.getSessionBySocketId.mockReturnValue(undefined);
-
-    const response = await gateway.handleRequestTruco(socket as never, {
-      matchId: 'match-1',
-    });
-
-    expect(response).toEqual({
-      event: 'error',
-      data: {
-        code: 'transport_error',
-        message: 'Player is not assigned to any room.',
-      },
-    });
-    expect(deps.requestTrucoUseCase.execute).not.toHaveBeenCalled();
-  });
-
-  it('rejects accept bet when matchId is missing', async () => {
-    const { gateway, deps } = createGateway();
-    const socket = createSocket({
-      id: 'socket-accept-bet-invalid',
-      authToken: 'auth-token-accept-bet-invalid',
-    });
-
-    deps.roomManager.getSessionBySocketId.mockReturnValue({
-      matchId: 'match-1',
-      seatId: 'T2A',
-      teamId: 'T2',
-      domainPlayerId: 'P2',
-    });
-
-    const response = await gateway.handleAcceptBet(socket as never, {});
-
-    expect(response).toEqual({
-      event: 'error',
-      data: {
-        code: 'validation_error',
-        message: 'Invalid payload: matchId is required.',
-      },
-    });
-    expect(deps.acceptBetUseCase.execute).not.toHaveBeenCalled();
   });
 });

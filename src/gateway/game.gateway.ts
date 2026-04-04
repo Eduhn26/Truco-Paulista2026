@@ -20,6 +20,9 @@ import type { CreateMatchResponseDto } from '@game/application/dtos/responses/cr
 import type { AcceptBetRequestDto } from '@game/application/dtos/requests/accept-bet.request.dto';
 import type { DeclineBetRequestDto } from '@game/application/dtos/requests/decline-bet.request.dto';
 import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import type { RaiseToNineRequestDto } from '@game/application/dtos/requests/raise-to-nine.request.dto';
+import type { RaiseToSixRequestDto } from '@game/application/dtos/requests/raise-to-six.request.dto';
+import type { RaiseToTwelveRequestDto } from '@game/application/dtos/requests/raise-to-twelve.request.dto';
 import type { RequestTrucoRequestDto } from '@game/application/dtos/requests/request-truco.request.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import {
@@ -39,6 +42,9 @@ import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { RaiseToNineUseCase } from '@game/application/use-cases/raise-to-nine.use-case';
+import { RaiseToSixUseCase } from '@game/application/use-cases/raise-to-six.use-case';
+import { RaiseToTwelveUseCase } from '@game/application/use-cases/raise-to-twelve.use-case';
 import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
@@ -217,6 +223,15 @@ type GatewayLogContext = {
     | 'decline_bet_requested'
     | 'decline_bet_succeeded'
     | 'decline_bet_rejected'
+    | 'raise_to_six_requested'
+    | 'raise_to_six_succeeded'
+    | 'raise_to_six_rejected'
+    | 'raise_to_nine_requested'
+    | 'raise_to_nine_succeeded'
+    | 'raise_to_nine_rejected'
+    | 'raise_to_twelve_requested'
+    | 'raise_to_twelve_succeeded'
+    | 'raise_to_twelve_rejected'
     | 'match_finished'
     | 'get_ranking_requested'
     | 'get_ranking_succeeded'
@@ -285,6 +300,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly requestTrucoUseCase: RequestTrucoUseCase,
     private readonly acceptBetUseCase: AcceptBetUseCase,
     private readonly declineBetUseCase: DeclineBetUseCase,
+    private readonly raiseToSixUseCase: RaiseToSixUseCase,
+    private readonly raiseToNineUseCase: RaiseToNineUseCase,
+    private readonly raiseToTwelveUseCase: RaiseToTwelveUseCase,
     private readonly viewMatchStateUseCase: ViewMatchStateUseCase,
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
@@ -1777,219 +1795,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('request-truco')
-  async handleRequestTruco(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() payload: GetStatePayload,
-  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
-    this.logGateway('debug', {
-      layer: 'gateway',
-      event: 'request_truco_requested',
-      status: 'started',
-      socketId: socket.id,
-    });
-
-    try {
-      const session = this.roomManager.getSessionBySocketId(socket.id);
-
-      if (!session) {
-        return this.reject(
-          'request_truco_rejected',
-          'Player is not assigned to any room.',
-          { socketId: socket.id },
-          'transport_error',
-        );
-      }
-
-      const matchIdRaw = payload?.matchId;
-      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
-
-      if (!matchId) {
-        return this.reject(
-          'request_truco_rejected',
-          'Invalid payload: matchId is required.',
-          {
-            socketId: socket.id,
-            matchId: session.matchId,
-          },
-          'validation_error',
-        );
-      }
-
-      const dto: RequestTrucoRequestDto = {
-        matchId,
-        playerId: session.domainPlayerId,
-      };
-
-      const result = await this.requestTrucoUseCase.execute(dto);
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
-
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'request_truco_succeeded',
-        status: 'succeeded',
-        socketId: socket.id,
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-      });
-
-      return {
-        event: 'truco-requested',
-        data: { matchId: result.matchId },
-      };
-    } catch (error) {
-      return this.rejectFromError('request_truco_rejected', error, {
-        socketId: socket.id,
-      });
-    }
-  }
-
-  @SubscribeMessage('accept-bet')
-  async handleAcceptBet(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() payload: GetStatePayload,
-  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
-    this.logGateway('debug', {
-      layer: 'gateway',
-      event: 'accept_bet_requested',
-      status: 'started',
-      socketId: socket.id,
-    });
-
-    try {
-      const session = this.roomManager.getSessionBySocketId(socket.id);
-
-      if (!session) {
-        return this.reject(
-          'accept_bet_rejected',
-          'Player is not assigned to any room.',
-          { socketId: socket.id },
-          'transport_error',
-        );
-      }
-
-      const matchIdRaw = payload?.matchId;
-      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
-
-      if (!matchId) {
-        return this.reject(
-          'accept_bet_rejected',
-          'Invalid payload: matchId is required.',
-          {
-            socketId: socket.id,
-            matchId: session.matchId,
-          },
-          'validation_error',
-        );
-      }
-
-      const dto: AcceptBetRequestDto = {
-        matchId,
-        playerId: session.domainPlayerId,
-      };
-
-      const result = await this.acceptBetUseCase.execute(dto);
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
-
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'accept_bet_succeeded',
-        status: 'succeeded',
-        socketId: socket.id,
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-      });
-
-      return {
-        event: 'bet-accepted',
-        data: { matchId: result.matchId },
-      };
-    } catch (error) {
-      return this.rejectFromError('accept_bet_rejected', error, {
-        socketId: socket.id,
-      });
-    }
-  }
-
-  @SubscribeMessage('decline-bet')
-  async handleDeclineBet(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() payload: GetStatePayload,
-  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
-    this.logGateway('debug', {
-      layer: 'gateway',
-      event: 'decline_bet_requested',
-      status: 'started',
-      socketId: socket.id,
-    });
-
-    try {
-      const session = this.roomManager.getSessionBySocketId(socket.id);
-
-      if (!session) {
-        return this.reject(
-          'decline_bet_rejected',
-          'Player is not assigned to any room.',
-          { socketId: socket.id },
-          'transport_error',
-        );
-      }
-
-      const matchIdRaw = payload?.matchId;
-      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
-
-      if (!matchId) {
-        return this.reject(
-          'decline_bet_rejected',
-          'Invalid payload: matchId is required.',
-          {
-            socketId: socket.id,
-            matchId: session.matchId,
-          },
-          'validation_error',
-        );
-      }
-
-      const dto: DeclineBetRequestDto = {
-        matchId,
-        playerId: session.domainPlayerId,
-      };
-
-      const result = await this.declineBetUseCase.execute(dto);
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
-
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'decline_bet_succeeded',
-        status: 'succeeded',
-        socketId: socket.id,
-        matchId,
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-      });
-
-      return {
-        event: 'bet-declined',
-        data: { matchId: result.matchId },
-      };
-    } catch (error) {
-      return this.rejectFromError('decline_bet_rejected', error, {
-        socketId: socket.id,
-      });
-    }
-  }
-
   @SubscribeMessage('get-ranking')
   async handleGetRanking(
     @ConnectedSocket() socket: Socket,
@@ -2134,6 +1939,450 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       return this.rejectFromError('get_match_replay_rejected', error, rejectContext);
+    }
+  }
+
+  @SubscribeMessage('request-truco')
+  async handleRequestTruco(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'request_truco_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'request_truco_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'request_truco_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: RequestTrucoRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.requestTrucoUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'request_truco_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'truco-requested',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('request_truco_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('accept-bet')
+  async handleAcceptBet(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'accept_bet_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'accept_bet_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'accept_bet_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: AcceptBetRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.acceptBetUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'accept_bet_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-accepted',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('accept_bet_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('decline-bet')
+  async handleDeclineBet(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'decline_bet_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'decline_bet_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'decline_bet_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: DeclineBetRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.declineBetUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'decline_bet_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-declined',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('decline_bet_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('raise-to-six')
+  async handleRaiseToSix(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'raise_to_six_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'raise_to_six_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'raise_to_six_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: RaiseToSixRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.raiseToSixUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'raise_to_six_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-raised-to-six',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('raise_to_six_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('raise-to-nine')
+  async handleRaiseToNine(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'raise_to_nine_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'raise_to_nine_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'raise_to_nine_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: RaiseToNineRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.raiseToNineUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'raise_to_nine_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-raised-to-nine',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('raise_to_nine_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('raise-to-twelve')
+  async handleRaiseToTwelve(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: GetStatePayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'raise_to_twelve_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'raise_to_twelve_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+
+      if (!matchId) {
+        return this.reject(
+          'raise_to_twelve_rejected',
+          'Invalid payload: matchId is required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      const dto: RaiseToTwelveRequestDto = {
+        matchId,
+        playerId: session.domainPlayerId,
+      };
+
+      const result = await this.raiseToTwelveUseCase.execute(dto);
+
+      const state = await this.emitPublicMatchState(matchId);
+      await this.emitPrivateMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'raise_to_twelve_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'bet-raised-to-twelve',
+        data: {
+          matchId: result.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('raise_to_twelve_rejected', error, {
+        socketId: socket.id,
+      });
     }
   }
 

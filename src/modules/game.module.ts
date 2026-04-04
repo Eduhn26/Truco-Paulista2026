@@ -14,6 +14,9 @@ import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { RaiseToNineUseCase } from '@game/application/use-cases/raise-to-nine.use-case';
+import { RaiseToSixUseCase } from '@game/application/use-cases/raise-to-six.use-case';
+import { RaiseToTwelveUseCase } from '@game/application/use-cases/raise-to-twelve.use-case';
 import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
@@ -120,11 +123,6 @@ const gameModuleLogger = new Logger('GameModule');
       inject: [MATCH_REPOSITORY],
     },
     {
-      provide: ViewMatchStateUseCase,
-      useFactory: (repo: MatchRepository) => new ViewMatchStateUseCase(repo),
-      inject: [MATCH_REPOSITORY],
-    },
-    {
       provide: RequestTrucoUseCase,
       useFactory: (repo: MatchRepository) => new RequestTrucoUseCase(repo),
       inject: [MATCH_REPOSITORY],
@@ -137,6 +135,26 @@ const gameModuleLogger = new Logger('GameModule');
     {
       provide: DeclineBetUseCase,
       useFactory: (repo: MatchRepository) => new DeclineBetUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToSixUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToSixUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToNineUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToNineUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToTwelveUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToTwelveUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: ViewMatchStateUseCase,
+      useFactory: (repo: MatchRepository) => new ViewMatchStateUseCase(repo),
       inject: [MATCH_REPOSITORY],
     },
     {
