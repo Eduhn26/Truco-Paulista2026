@@ -144,4 +144,77 @@ describe('Hand (Domain)', () => {
     expect(hand.getWinner()).toBe('P1');
     expect(hand.getAwardedPoints()).toBe(3);
   });
+
+  it('marks mao de onze as pending for the deciding team', () => {
+    const hand = new Hand(
+      '7',
+      [Card.from('3E'), Card.from('2C'), Card.from('AO')],
+      [Card.from('4E'), Card.from('AC'), Card.from('KO')],
+      {
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        specialDecisionBy: 'P1',
+      },
+    );
+
+    expect(hand.getSpecialState()).toBe('mao_de_onze');
+    expect(hand.isSpecialDecisionPending()).toBe(true);
+    expect(hand.getSpecialDecisionBy()).toBe('P1');
+    expect(hand.getCurrentValue()).toBe(1);
+  });
+
+  it('blocks card play while mao de onze decision is pending', () => {
+    const hand = new Hand(
+      '7',
+      [Card.from('3E'), Card.from('2C'), Card.from('AO')],
+      [Card.from('4E'), Card.from('AC'), Card.from('KO')],
+      {
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        specialDecisionBy: 'P1',
+      },
+    );
+
+    expect(() => hand.play('P1', Card.from('3E'))).toThrow(
+      'Cannot play cards while mao de onze decision is pending.',
+    );
+  });
+
+  it('accepts mao de onze and upgrades the hand value to 3', () => {
+    const hand = new Hand(
+      '7',
+      [Card.from('3E'), Card.from('2C'), Card.from('AO')],
+      [Card.from('4E'), Card.from('AC'), Card.from('KO')],
+      {
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        specialDecisionBy: 'P1',
+      },
+    );
+
+    hand.acceptMaoDeOnze('P1');
+
+    expect(hand.isSpecialDecisionPending()).toBe(false);
+    expect(hand.getCurrentValue()).toBe(3);
+    expect(() => hand.requestTruco('P1')).toThrow('Cannot request truco during mao de onze.');
+  });
+
+  it('declines mao de onze and awards 1 point to the opponent', () => {
+    const hand = new Hand(
+      '7',
+      [Card.from('3E'), Card.from('2C'), Card.from('AO')],
+      [Card.from('4E'), Card.from('AC'), Card.from('KO')],
+      {
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        specialDecisionBy: 'P1',
+      },
+    );
+
+    hand.declineMaoDeOnze('P1');
+
+    expect(hand.isFinished()).toBe(true);
+    expect(hand.getWinner()).toBe('P2');
+    expect(hand.getAwardedPoints()).toBe(1);
+  });
 });

@@ -55,7 +55,7 @@ export class Match {
       return;
     }
 
-    this.currentHand = Hand.start(viraRank);
+    this.currentHand = Hand.start(viraRank, this.buildInitialHandState());
     this.state = 'in_progress';
   }
 
@@ -103,6 +103,19 @@ export class Match {
     this.resolveFinishedHandIfNeeded();
   }
 
+  acceptMaoDeOnze(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
+
+    currentHand.acceptMaoDeOnze(player);
+  }
+
+  declineMaoDeOnze(player: PlayerId): void {
+    const currentHand = this.ensureCurrentHandInProgress();
+
+    currentHand.declineMaoDeOnze(player);
+    this.resolveFinishedHandIfNeeded();
+  }
+
   toSnapshot(): MatchSnapshot {
     const score = this.getScore();
 
@@ -115,6 +128,26 @@ export class Match {
       },
       currentHand: this.currentHand ? this.currentHand.toSnapshot() : null,
     };
+  }
+
+  private buildInitialHandState() {
+    if (this.score.playerOne === 11 && this.score.playerTwo < 11) {
+      return {
+        specialState: 'mao_de_onze' as const,
+        specialDecisionPending: true,
+        specialDecisionBy: 'P1' as const,
+      };
+    }
+
+    if (this.score.playerTwo === 11 && this.score.playerOne < 11) {
+      return {
+        specialState: 'mao_de_onze' as const,
+        specialDecisionPending: true,
+        specialDecisionBy: 'P2' as const,
+      };
+    }
+
+    return {};
   }
 
   private ensureCurrentHandInProgress(): Hand {

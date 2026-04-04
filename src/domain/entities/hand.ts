@@ -22,6 +22,8 @@ export type HandSnapshot = {
   pendingValue: HandValue | null;
   requestedBy: PlayerId | null;
   specialState: HandSpecialState;
+  specialDecisionPending: boolean;
+  specialDecisionBy: PlayerId | null;
   winner: PlayerId | null;
   awardedPoints: HandValue | null;
 };
@@ -32,6 +34,8 @@ type HandStateConfig = {
   pendingValue?: HandValue | null;
   requestedBy?: PlayerId | null;
   specialState?: HandSpecialState;
+  specialDecisionPending?: boolean;
+  specialDecisionBy?: PlayerId | null;
   winner?: PlayerId | null;
   awardedPoints?: HandValue | null;
 };
@@ -46,6 +50,8 @@ export class Hand {
   private pendingValue: HandValue | null;
   private requestedBy: PlayerId | null;
   private specialState: HandSpecialState;
+  private specialDecisionPending: boolean;
+  private specialDecisionBy: PlayerId | null;
   private winner: PlayerId | null;
   private awardedPoints: HandValue | null;
 
@@ -63,6 +69,8 @@ export class Hand {
     this.pendingValue = state.pendingValue ?? null;
     this.requestedBy = state.requestedBy ?? null;
     this.specialState = state.specialState ?? 'normal';
+    this.specialDecisionPending = state.specialDecisionPending ?? false;
+    this.specialDecisionBy = state.specialDecisionBy ?? null;
     this.winner = state.winner ?? null;
     this.awardedPoints = state.awardedPoints ?? null;
 
@@ -86,6 +94,8 @@ export class Hand {
         pendingValue: snapshot.pendingValue ?? null,
         requestedBy: snapshot.requestedBy ?? null,
         specialState: snapshot.specialState ?? 'normal',
+        specialDecisionPending: snapshot.specialDecisionPending ?? false,
+        specialDecisionBy: snapshot.specialDecisionBy ?? null,
         winner: snapshot.winner ?? null,
         awardedPoints: snapshot.awardedPoints ?? null,
       },
@@ -106,6 +116,10 @@ export class Hand {
   play(player: PlayerId, card: Card): void {
     if (this.finished) {
       throw new InvalidMoveError('Hand is already finished.');
+    }
+
+    if (this.specialDecisionPending) {
+      throw new InvalidMoveError('Cannot play cards while mao de onze decision is pending.');
     }
 
     if (this.betState === 'awaiting_response') {
@@ -168,6 +182,28 @@ export class Hand {
     this.finishWithWinner(this.requestedBy!, this.currentValue);
   }
 
+  acceptMaoDeOnze(player: PlayerId): void {
+    this.ensurePendingSpecialDecision('mao_de_onze');
+
+    if (this.specialDecisionBy !== player) {
+      throw new InvalidMoveError('Only the mao de onze team can accept the special hand.');
+    }
+
+    this.currentValue = 3;
+    this.specialDecisionPending = false;
+    this.assertStateInvariants();
+  }
+
+  declineMaoDeOnze(player: PlayerId): void {
+    this.ensurePendingSpecialDecision('mao_de_onze');
+
+    if (this.specialDecisionBy !== player) {
+      throw new InvalidMoveError('Only the mao de onze team can decline the special hand.');
+    }
+
+    this.finishWithWinner(this.getOpponent(player), 1);
+  }
+
   isFinished(): boolean {
     return this.finished;
   }
@@ -216,6 +252,14 @@ export class Hand {
     return this.specialState;
   }
 
+  isSpecialDecisionPending(): boolean {
+    return this.specialDecisionPending;
+  }
+
+  getSpecialDecisionBy(): PlayerId | null {
+    return this.specialDecisionBy;
+  }
+
   hasPendingBetResponse(): boolean {
     return this.betState === 'awaiting_response';
   }
@@ -236,6 +280,8 @@ export class Hand {
       pendingValue: this.pendingValue,
       requestedBy: this.requestedBy,
       specialState: this.specialState,
+      specialDecisionPending: this.specialDecisionPending,
+      specialDecisionBy: this.specialDecisionBy,
       winner: this.winner,
       awardedPoints: this.awardedPoints,
     };
@@ -243,6 +289,10 @@ export class Hand {
 
   private requestBet(player: PlayerId, targetValue: HandValue): void {
     this.ensureHandCanChangeBet();
+
+    if (this.specialState === 'mao_de_onze') {
+      throw new InvalidMoveError('Cannot request truco during mao de onze.');
+    }
 
     if (this.betState === 'awaiting_response') {
       throw new InvalidMoveError('Cannot request a new bet while another response is pending.');
@@ -278,12 +328,34 @@ export class Hand {
     if (this.finished) {
       throw new InvalidMoveError('Hand is already finished.');
     }
+
+    if (this.specialDecisionPending) {
+      throw new InvalidMoveError('Cannot change hand state while mao de onze decision is pending.');
+    }
   }
 
   private ensurePendingBetExists(): void {
     if (this.betState !== 'awaiting_response' || this.pendingValue === null || !this.requestedBy) {
       throw new InvalidMoveError('There is no pending bet response.');
     }
+  }
+
+  private ensurePendingSpecialDecision(expectedState: HandSpecialState): void {
+    if (this.finished) {
+      throw new InvalidMoveError('Hand is already finished.');
+    }
+
+    if (
+      this.specialState !== expectedState ||
+      !this.specialDecisionPending ||
+      !this.specialDecisionBy
+    ) {
+      throw new InvalidMoveError(`There is no pending ${expectedState} decision.`);
+    }
+  }
+
+  private getOpponent(player: PlayerId): PlayerId {
+    return player === 'P1' ? 'P2' : 'P1';
   }
 
   private getCurrentRound(): Round {
@@ -312,6 +384,7 @@ export class Hand {
     this.betState = 'idle';
     this.pendingValue = null;
     this.requestedBy = null;
+    this.specialDecisionPending = false;
     this.assertStateInvariants();
   }
 
@@ -429,6 +502,38 @@ export class Hand {
 
       if (expectedNextValue !== this.pendingValue) {
         throw new InvalidMoveError('Pending bet value must match the next valid escalation step.');
+      }
+    }
+
+    if (this.specialState === 'normal' || this.specialState === 'mao_de_ferro') {
+      if (this.specialDecisionPending) {
+        throw new InvalidMoveError('Only mao de onze can keep a pending special decision.');
+      }
+
+      if (this.specialDecisionBy !== null) {
+        throw new InvalidMoveError('Only mao de onze can define a special decision owner.');
+      }
+    }
+
+    if (this.specialState === 'mao_de_onze') {
+      if (this.specialDecisionBy === null) {
+        throw new InvalidMoveError('Mao de onze requires a deciding team.');
+      }
+
+      if (this.specialDecisionPending) {
+        if (this.currentValue !== 1) {
+          throw new InvalidMoveError('Pending mao de onze must still be worth 1 point.');
+        }
+
+        if (this.betState !== 'idle') {
+          throw new InvalidMoveError(
+            'Mao de onze pending decision cannot have an active bet state.',
+          );
+        }
+      }
+
+      if (!this.specialDecisionPending && this.currentValue !== 3 && !this.finished) {
+        throw new InvalidMoveError('Accepted mao de onze must be worth 3 points.');
       }
     }
 
