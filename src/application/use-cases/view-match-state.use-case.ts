@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { ViewMatchStateRequestDto } from '@game/application/dtos/requests/view-match-state.request.dto';
 import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
 import { mapMatchToViewMatchState } from '@game/application/mappers/match-to-view-match-state.mapper';
+import type { MatchRepository } from '@game/application/ports/match.repository';
 import { MATCH_REPOSITORY } from '@game/modules/game.tokens';
 
 @Injectable()

@@ -48,6 +48,17 @@ describe('ViewMatchStateUseCase (Application)', () => {
       specialDecisionBy: null,
       winner: null,
       awardedPoints: null,
+      availableActions: {
+        canRequestTruco: false,
+        canRaiseToSix: false,
+        canRaiseToNine: false,
+        canRaiseToTwelve: false,
+        canAcceptBet: false,
+        canDeclineBet: false,
+        canAcceptMaoDeOnze: false,
+        canDeclineMaoDeOnze: false,
+        canAttemptPlayCard: false,
+      },
     });
   });
 
@@ -69,6 +80,8 @@ describe('ViewMatchStateUseCase (Application)', () => {
     expect(state.currentHand).not.toBeNull();
     expect(state.currentHand!.playerOneHand).not.toEqual(['HIDDEN', 'HIDDEN', 'HIDDEN']);
     expect(state.currentHand!.playerTwoHand).toEqual(['HIDDEN', 'HIDDEN', 'HIDDEN']);
+    expect(state.currentHand!.availableActions.canRequestTruco).toBe(true);
+    expect(state.currentHand!.availableActions.canAttemptPlayCard).toBe(true);
   });
 
   it('returns mao de onze fields when a special decision is pending', async () => {
@@ -101,6 +114,17 @@ describe('ViewMatchStateUseCase (Application)', () => {
       specialDecisionBy: 'P1',
       currentValue: 1,
       betState: 'idle',
+      availableActions: {
+        canRequestTruco: false,
+        canRaiseToSix: false,
+        canRaiseToNine: false,
+        canRaiseToTwelve: false,
+        canAcceptBet: false,
+        canDeclineBet: false,
+        canAcceptMaoDeOnze: true,
+        canDeclineMaoDeOnze: true,
+        canAttemptPlayCard: false,
+      },
     });
   });
 
@@ -134,6 +158,69 @@ describe('ViewMatchStateUseCase (Application)', () => {
       specialDecisionBy: null,
       currentValue: 1,
       betState: 'idle',
+      availableActions: {
+        canRequestTruco: false,
+        canRaiseToSix: false,
+        canRaiseToNine: false,
+        canRaiseToTwelve: false,
+        canAcceptBet: false,
+        canDeclineBet: false,
+        canAcceptMaoDeOnze: false,
+        canDeclineMaoDeOnze: false,
+        canAttemptPlayCard: true,
+      },
+    });
+  });
+
+  it('returns available bet response actions for the defending player', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = new Match(12);
+
+    match.start('4');
+    match.requestTruco('P1');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P2',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand!.availableActions).toMatchObject({
+      canAcceptBet: true,
+      canDeclineBet: true,
+      canAttemptPlayCard: false,
+    });
+  });
+
+  it('returns raise-to-six as available after accepted truco', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = new Match(12);
+
+    match.start('4');
+    match.requestTruco('P1');
+    match.acceptBet('P2');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P1',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand!.currentValue).toBe(3);
+    expect(state.currentHand!.availableActions).toMatchObject({
+      canRequestTruco: false,
+      canRaiseToSix: true,
+      canRaiseToNine: false,
+      canRaiseToTwelve: false,
+      canAttemptPlayCard: true,
     });
   });
 

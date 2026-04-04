@@ -24,6 +24,17 @@ export type ViewMatchStateResponseDto = {
     specialDecisionBy: PlayerId | null;
     winner: PlayerId | null;
     awardedPoints: HandValue | null;
+    availableActions: {
+      canRequestTruco: boolean;
+      canRaiseToSix: boolean;
+      canRaiseToNine: boolean;
+      canRaiseToTwelve: boolean;
+      canAcceptBet: boolean;
+      canDeclineBet: boolean;
+      canAcceptMaoDeOnze: boolean;
+      canDeclineMaoDeOnze: boolean;
+      canAttemptPlayCard: boolean;
+    };
     playerOneHand: string[];
     playerTwoHand: string[];
     rounds: Array<{

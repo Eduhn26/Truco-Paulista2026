@@ -1,4 +1,4 @@
-import type { PlayerId } from '../../../domain/value-objects/player-id';
+import type { PlayerId } from '@game/domain/value-objects/player-id';
 
 export type ViewMatchStateRequestDto = {
   matchId: string;
