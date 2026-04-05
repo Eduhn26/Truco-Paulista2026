@@ -1,3 +1,7 @@
+jest.mock('../../../src/application/runtime/env/runtime-config', () => ({
+  readGatewayCorsOrigin: () => 'http://localhost:5173',
+}));
+
 import { GameGateway } from '../../../src/gateway/game.gateway';
 
 type GatewayServerMock = {
@@ -32,6 +36,27 @@ type PlayerProfileResult = {
     rating: number;
   };
 };
+
+type MatchmakingMode = '1v1' | '2v2';
+
+type QueuePlayer = {
+  socketId: string;
+  userId: string;
+  playerToken: string;
+  mode: MatchmakingMode;
+  rating: number;
+  joinedAt: number;
+};
+
+type PendingFallback = {
+  socketId: string;
+  userId: string;
+  playerToken: string;
+  mode: MatchmakingMode;
+  rating: number;
+  timedOutAt: number;
+};
+
 function createSocket(options?: { id?: string; authToken?: string; token?: string }): TestSocket {
   const auth: Record<string, unknown> = {};
 
@@ -63,6 +88,30 @@ describe('GameGateway bot profile flow', () => {
     };
     const startHandUseCase = { execute: jest.fn() };
     const playCardUseCase = { execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }) };
+    const requestTrucoUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const acceptBetUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const declineBetUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const acceptMaoDeOnzeUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const declineMaoDeOnzeUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToSixUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToNineUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
+    const raiseToTwelveUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
     const viewMatchStateUseCase = { execute: jest.fn() };
     const getOrCreatePlayerProfileUseCase = {
       execute: jest.fn<Promise<PlayerProfileResult>, [{ userId: string }]>(),
@@ -101,6 +150,278 @@ describe('GameGateway bot profile flow', () => {
       beginHand: jest.fn(),
       isPlayersTurn: jest.fn(),
     };
+
+    const queueStateByMode: Record<MatchmakingMode, QueuePlayer[]> = {
+      '1v1': [],
+      '2v2': [],
+    };
+
+    const pendingFallbacksByMode: Record<MatchmakingMode, PendingFallback[]> = {
+      '1v1': [],
+      '2v2': [],
+    };
+
+    const QUEUE_TIMEOUT_MS = 2 * 60 * 1000;
+
+    const toQueueSnapshot = (mode: MatchmakingMode) => ({
+      mode,
+      size: queueStateByMode[mode].length,
+      playersWaiting: queueStateByMode[mode].map(
+        ({ socketId, userId, playerToken, rating, joinedAt }) => ({
+          socketId,
+          userId,
+          playerToken,
+          rating,
+          joinedAt,
+        }),
+      ),
+    });
+
+    const removeWaitingBySocketId = (socketId: string): QueuePlayer | null => {
+      for (const mode of ['1v1', '2v2'] as const) {
+        const index = queueStateByMode[mode].findIndex((player) => player.socketId === socketId);
+
+        if (index >= 0) {
+          const [removed] = queueStateByMode[mode].splice(index, 1);
+          return removed ?? null;
+        }
+      }
+
+      return null;
+    };
+
+    const removePendingFallbackBySocketId = (socketId: string): PendingFallback | null => {
+      for (const mode of ['1v1', '2v2'] as const) {
+        const index = pendingFallbacksByMode[mode].findIndex(
+          (player) => player.socketId === socketId,
+        );
+
+        if (index >= 0) {
+          const [removed] = pendingFallbacksByMode[mode].splice(index, 1);
+          return removed ?? null;
+        }
+      }
+
+      return null;
+    };
+
+    const expireQueue = (mode: MatchmakingMode) => {
+      const now = Date.now();
+      const timedOutFallbacks: PendingFallback[] = [];
+
+      const remainingPlayers: QueuePlayer[] = [];
+
+      for (const player of queueStateByMode[mode]) {
+        if (now > player.joinedAt + QUEUE_TIMEOUT_MS) {
+          const fallback: PendingFallback = {
+            socketId: player.socketId,
+            userId: player.userId,
+            playerToken: player.playerToken,
+            mode: player.mode,
+            rating: player.rating,
+            timedOutAt: player.joinedAt + QUEUE_TIMEOUT_MS + 1,
+          };
+
+          pendingFallbacksByMode[mode].push(fallback);
+          timedOutFallbacks.push(fallback);
+          continue;
+        }
+
+        remainingPlayers.push(player);
+      }
+
+      queueStateByMode[mode] = remainingPlayers;
+
+      return {
+        snapshot: toQueueSnapshot(mode),
+        timedOutFallbacks,
+      };
+    };
+
+    const gatewayMatchmakingService = {
+      getObservabilitySnapshot: jest.fn(() => ({
+        generatedAt: Date.now(),
+        queues: {
+          '1v1': {
+            waiting: queueStateByMode['1v1'].length,
+            playersWaiting: queueStateByMode['1v1'].map(
+              ({ socketId, userId, rating, joinedAt }) => ({
+                socketId,
+                userId,
+                rating,
+                joinedAt,
+              }),
+            ),
+          },
+          '2v2': {
+            waiting: queueStateByMode['2v2'].length,
+            playersWaiting: queueStateByMode['2v2'].map(
+              ({ socketId, userId, rating, joinedAt }) => ({
+                socketId,
+                userId,
+                rating,
+                joinedAt,
+              }),
+            ),
+          },
+        },
+        pendingFallbacks: {
+          total: pendingFallbacksByMode['1v1'].length + pendingFallbacksByMode['2v2'].length,
+          byMode: {
+            '1v1': pendingFallbacksByMode['1v1'].length,
+            '2v2': pendingFallbacksByMode['2v2'].length,
+          },
+          players: [...pendingFallbacksByMode['1v1'], ...pendingFallbacksByMode['2v2']].map(
+            ({ socketId, userId, playerToken, mode, rating, timedOutAt }) => ({
+              socketId,
+              userId,
+              playerToken,
+              mode,
+              rating,
+              timedOutAt,
+            }),
+          ),
+        },
+      })),
+
+      getFallbackState: jest.fn((socketId: string) => {
+        return (
+          pendingFallbacksByMode['1v1'].find((player) => player.socketId === socketId) ??
+          pendingFallbacksByMode['2v2'].find((player) => player.socketId === socketId) ??
+          null
+        );
+      }),
+
+      joinQueue: jest.fn(
+        ({
+          socketId,
+          userId,
+          playerToken,
+          mode,
+          rating,
+        }: {
+          socketId: string;
+          userId: string;
+          playerToken: string;
+          mode: MatchmakingMode;
+          rating: number;
+        }) => {
+          removeWaitingBySocketId(socketId);
+          removePendingFallbackBySocketId(socketId);
+
+          queueStateByMode[mode].push({
+            socketId,
+            userId,
+            playerToken,
+            mode,
+            rating,
+            joinedAt: Date.now(),
+          });
+
+          return toQueueSnapshot(mode);
+        },
+      ),
+
+      continueQueue: jest.fn((socketId: string) => {
+        const fallback = removePendingFallbackBySocketId(socketId);
+
+        if (!fallback) {
+          return null;
+        }
+
+        queueStateByMode[fallback.mode].push({
+          socketId: fallback.socketId,
+          userId: fallback.userId,
+          playerToken: fallback.playerToken,
+          mode: fallback.mode,
+          rating: fallback.rating,
+          joinedAt: Date.now(),
+        });
+
+        return {
+          fallback,
+          snapshot: toQueueSnapshot(fallback.mode),
+        };
+      }),
+
+      takeFallback: jest.fn((socketId: string) => {
+        return removePendingFallbackBySocketId(socketId);
+      }),
+
+      leaveQueue: jest.fn((socketId: string) => {
+        const removedWaiting = removeWaitingBySocketId(socketId);
+
+        if (removedWaiting) {
+          const maintenance = expireQueue(removedWaiting.mode);
+
+          return {
+            removed: removedWaiting,
+            snapshot: maintenance.snapshot,
+          };
+        }
+
+        const removedFallback = removePendingFallbackBySocketId(socketId);
+
+        if (removedFallback) {
+          return {
+            removed: {
+              socketId: removedFallback.socketId,
+              userId: removedFallback.userId,
+              playerToken: removedFallback.playerToken,
+              mode: removedFallback.mode,
+              rating: removedFallback.rating,
+              joinedAt: removedFallback.timedOutAt,
+            },
+            snapshot: toQueueSnapshot(removedFallback.mode),
+          };
+        }
+
+        return {
+          removed: null,
+          snapshot: null,
+        };
+      }),
+
+      getQueueState: jest.fn((mode: MatchmakingMode) => {
+        return expireQueue(mode);
+      }),
+
+      tryResolvePair: jest.fn((mode: MatchmakingMode) => {
+        const maintenance = expireQueue(mode);
+        const requiredPlayers = mode === '1v1' ? 2 : 4;
+
+        if (maintenance.snapshot.playersWaiting.length < requiredPlayers) {
+          return {
+            snapshot: maintenance.snapshot,
+            timedOutFallbacks: maintenance.timedOutFallbacks,
+            pair: null,
+          };
+        }
+
+        const players = maintenance.snapshot.playersWaiting.slice(0, requiredPlayers);
+
+        return {
+          snapshot: maintenance.snapshot,
+          timedOutFallbacks: maintenance.timedOutFallbacks,
+          pair: {
+            mode,
+            players,
+          },
+        };
+      }),
+
+      completeMatchedPair: jest.fn(
+        (pair: { mode: MatchmakingMode; players: Array<{ socketId: string }> }) => {
+          for (const player of pair.players) {
+            removeWaitingBySocketId(player.socketId);
+            removePendingFallbackBySocketId(player.socketId);
+          }
+
+          return toQueueSnapshot(pair.mode);
+        },
+      ),
+    };
+
     const botDecisionPort = {
       decide: jest.fn(),
     };
@@ -109,6 +430,14 @@ describe('GameGateway bot profile flow', () => {
       createMatchUseCase as never,
       startHandUseCase as never,
       playCardUseCase as never,
+      requestTrucoUseCase as never,
+      acceptBetUseCase as never,
+      declineBetUseCase as never,
+      acceptMaoDeOnzeUseCase as never,
+      declineMaoDeOnzeUseCase as never,
+      raiseToSixUseCase as never,
+      raiseToNineUseCase as never,
+      raiseToTwelveUseCase as never,
       viewMatchStateUseCase as never,
       getOrCreatePlayerProfileUseCase as never,
       updateRatingUseCase as never,
@@ -118,6 +447,7 @@ describe('GameGateway bot profile flow', () => {
       getOrCreateUserUseCase as never,
       authTokenService as never,
       roomManager as never,
+      gatewayMatchmakingService as never,
       botDecisionPort as never,
     );
 
@@ -141,6 +471,14 @@ describe('GameGateway bot profile flow', () => {
         createMatchUseCase,
         startHandUseCase,
         playCardUseCase,
+        requestTrucoUseCase,
+        acceptBetUseCase,
+        declineBetUseCase,
+        acceptMaoDeOnzeUseCase,
+        declineMaoDeOnzeUseCase,
+        raiseToSixUseCase,
+        raiseToNineUseCase,
+        raiseToTwelveUseCase,
         viewMatchStateUseCase,
         getOrCreatePlayerProfileUseCase,
         updateRatingUseCase,
@@ -150,6 +488,7 @@ describe('GameGateway bot profile flow', () => {
         getOrCreateUserUseCase,
         authTokenService,
         roomManager,
+        gatewayMatchmakingService,
         botDecisionPort,
       },
       server: gatewayServerAccess.server,
@@ -465,6 +804,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'transport_error',
         message: 'Player is already assigned to a room.',
       },
     });
@@ -486,6 +826,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
         message: 'Invalid payload: mode must be either "1v1" or "2v2".',
       },
     });
@@ -967,6 +1308,7 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
         message: 'Invalid payload: userId is required.',
       },
     });
@@ -1053,6 +1395,159 @@ describe('GameGateway bot profile flow', () => {
     expect(response).toEqual({
       event: 'error',
       data: {
+        code: 'validation_error',
+        message: 'Invalid payload: matchId is required.',
+      },
+    });
+  });
+
+  it('accepts mao de onze using the authenticated session player and emits updated state', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-accept',
+      authToken: 'auth-token-mao-de-onze-accept',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-mao-de-onze',
+      state: 'in_progress',
+      score: {
+        playerOne: 11,
+        playerTwo: 8,
+      },
+      currentHand: {
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: null,
+        currentValue: 3,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'mao_de_onze',
+        specialDecisionPending: false,
+        specialDecisionBy: 'P1',
+        winner: null,
+        awardedPoints: null,
+        playerOneHand: ['4O', 'AO', '3P'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    });
+
+    const response = await gateway.handleAcceptMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(deps.acceptMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-mao-de-onze',
+      playerId: 'P1',
+    });
+
+    expect(response).toEqual({
+      event: 'mao-de-onze-accepted',
+      data: {
+        matchId: 'match-1',
+      },
+    });
+  });
+
+  it('declines mao de onze using the authenticated session player and emits updated state', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-decline',
+      authToken: 'auth-token-mao-de-onze-decline',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-mao-de-onze',
+      state: 'waiting',
+      score: {
+        playerOne: 11,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    });
+
+    const response = await gateway.handleDeclineMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(deps.declineMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-mao-de-onze',
+      playerId: 'P1',
+    });
+
+    expect(response).toEqual({
+      event: 'mao-de-onze-declined',
+      data: {
+        matchId: 'match-1',
+      },
+    });
+  });
+
+  it('rejects accept-mao-de-onze when player is not assigned to a room', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-no-session',
+      authToken: 'auth-token-mao-de-onze-no-session',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue(undefined);
+
+    const response = await gateway.handleAcceptMaoDeOnze(socket as never, {
+      matchId: 'match-mao-de-onze',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'transport_error',
+        message: 'Player is not assigned to any room.',
+      },
+    });
+  });
+
+  it('rejects decline-mao-de-onze when matchId is missing', async () => {
+    const { gateway, deps } = createGateway();
+    const socket = createSocket({
+      id: 'socket-mao-de-onze-invalid',
+      authToken: 'auth-token-mao-de-onze-invalid',
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      matchId: 'match-mao-de-onze',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    const response = await gateway.handleDeclineMaoDeOnze(socket as never, {});
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'validation_error',
         message: 'Invalid payload: matchId is required.',
       },
     });

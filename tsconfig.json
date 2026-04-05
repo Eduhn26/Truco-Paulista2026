@@ -6,7 +6,7 @@
     "types": ["node", "jest"],
     "moduleResolution": "Node",
     "outDir": "./dist",
-"rootDir": ".",
+    "rootDir": ".",
 
     "strict": true,
     "noImplicitAny": true,
@@ -27,18 +27,19 @@
     "sourceMap": true,
     "incremental": true,
     "skipLibCheck": true,
+    "ignoreDeprecations": "5.0",
 
     "baseUrl": ".",
-"paths": {
-  "@game/*": ["src/*"],
-  "@game/domain/*": ["src/domain/*"],
-  "@game/application/*": ["src/application/*"],
-  "@game/infrastructure/*": ["src/infrastructure/*"],
-  "@game/gateway/*": ["src/gateway/*"],
-  "@game/modules/*": ["src/modules/*"],
-  "@game/common/*": ["src/common/*"]
-}
-},
-"exclude": ["node_modules", "dist"],
-"include": ["src/**/*.ts", "test/**/*.ts"]
+    "paths": {
+      "@game/*": ["src/*"],
+      "@game/domain/*": ["src/domain/*"],
+      "@game/application/*": ["src/application/*"],
+      "@game/infrastructure/*": ["src/infrastructure/*"],
+      "@game/gateway/*": ["src/gateway/*"],
+      "@game/modules/*": ["src/modules/*"],
+      "@game/common/*": ["src/common/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist"],
+  "include": ["src/**/*.ts", "test/**/*.ts"]
 }

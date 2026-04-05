@@ -15,7 +15,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Jest](https://img.shields.io/badge/135_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
+[![Jest](https://img.shields.io/badge/174_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
 
 <br/>
 
@@ -29,7 +29,7 @@
 
 Estudo prático de engenharia de software construído em fases incrementais. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis.
 
-O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes e transições de estado tornam o exercício de DDD não trivial.
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva e regras especiais tornam o exercício de DDD não trivial.
 
 ---
 
@@ -43,7 +43,7 @@ O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regr
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React · Vite · TypeScript · Tailwind CSS |
 | **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
-| **Testes** | Jest · ts-jest — 23 suites · 135 testes · 0 falhas |
+| **Testes** | Jest · ts-jest — 31 suites · 174 testes · 0 falhas |
 | **Deploy** | Render · Docker multi-stage |
 
 ---
@@ -84,6 +84,37 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 14 | Histórico de partidas + replay | ✅ |
 | 15 | Python AI Service — FastAPI, contrato HTTP, adapter, wiring | ✅ |
 | 16 | Hardening — rate limiting, métricas, correlation ID, env validation | ✅ |
+| 17 | Adequação às regras reais do Truco Paulista + contrato frontend-ready | ✅ |
+
+---
+
+## Fase 17 — O que mudou
+
+A Fase 17 deixou o backend semanticamente fiel ao jogo real e seguro para integração visual.
+
+O `match-state` agora expõe:
+
+- valor atual da mão e estado da aposta
+- estado especial da mão (`mao-de-onze`, `mao-de-ferro`)
+- vencedor e pontuação da mão encerrada
+- `availableActions` — ações válidas para o turno atual
+
+Novos eventos de ação da mão:
+
+| Evento | Descrição |
+|--------|-----------|
+| `request-truco` | Solicitar truco |
+| `accept-bet` | Aceitar aposta |
+| `decline-bet` | Recusar aposta (correr) |
+| `raise-to-six` | Pedir 6 |
+| `raise-to-nine` | Pedir 9 |
+| `raise-to-twelve` | Pedir 12 |
+| `accept-mao-de-onze` | Aceitar mão de 11 |
+| `decline-mao-de-onze` | Recusar mão de 11 |
+
+O frontend agora pode disparar intenções válidas e consumir estado autoritativo — sem inventar regra local.
+
+→ Detalhes completos em [`docs/phases/phase-17.md`](docs/phases/phase-17.md)
 
 ---
 
@@ -127,10 +158,10 @@ curl http://localhost:8000/health/live
 
 | | |
 |-|---|
-| [Arquitetura e decisões](docs/architecture.md) | Domain-first, camadas, ADRs D1–D30 |
-| [API — WebSocket events](docs/api.md) | Todos os eventos Client↔Server |
-| [Python Bot Service](python-bot-service/README.md) | Contrato HTTP, exemplos, health |
-| [Dívida técnica](docs/technical-debt.md) | DTs rastreadas com status |
+| [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
+| [`docs/api.md`](docs/api.md) | Todos os eventos WebSocket Client↔Server |
+| [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
+| [`python-bot-service/README.md`](python-bot-service/README.md) | Contrato HTTP, exemplos, health |
 
 ---
 

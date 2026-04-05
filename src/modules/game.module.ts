@@ -5,13 +5,21 @@ import type { MatchRecordRepository } from '@game/application/ports/match-record
 import type { MatchRepository } from '@game/application/ports/match.repository';
 import type { PlayerProfileRepository } from '@game/application/ports/player-profile.repository';
 import type { UserRepository } from '@game/application/ports/user.repository';
+import { AcceptBetUseCase } from '@game/application/use-cases/accept-bet.use-case';
+import { AcceptMaoDeOnzeUseCase } from '@game/application/use-cases/accept-mao-de-onze.use-case';
 import { CreateMatchUseCase } from '@game/application/use-cases/create-match.use-case';
+import { DeclineBetUseCase } from '@game/application/use-cases/decline-bet.use-case';
+import { DeclineMaoDeOnzeUseCase } from '@game/application/use-cases/decline-mao-de-onze.use-case';
 import { GetMatchHistoryUseCase } from '@game/application/use-cases/get-match-history.use-case';
 import { GetMatchReplayUseCase } from '@game/application/use-cases/get-match-replay.use-case';
 import { GetOrCreatePlayerProfileUseCase } from '@game/application/use-cases/get-or-create-player-profile.use-case';
 import { GetOrCreateUserUseCase } from '@game/application/use-cases/get-or-create-user.use-case';
 import { GetRankingUseCase } from '@game/application/use-cases/get-ranking.use-case';
 import { PlayCardUseCase } from '@game/application/use-cases/play-card.use-case';
+import { RaiseToNineUseCase } from '@game/application/use-cases/raise-to-nine.use-case';
+import { RaiseToSixUseCase } from '@game/application/use-cases/raise-to-six.use-case';
+import { RaiseToTwelveUseCase } from '@game/application/use-cases/raise-to-twelve.use-case';
+import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
@@ -65,7 +73,10 @@ const gameModuleLogger = new Logger('GameModule');
       inject: [PythonBotConfigService],
     },
     { provide: MATCH_REPOSITORY, useClass: PrismaMatchRepository },
-    { provide: PLAYER_PROFILE_REPOSITORY, useClass: PrismaPlayerProfileRepository },
+    {
+      provide: PLAYER_PROFILE_REPOSITORY,
+      useClass: PrismaPlayerProfileRepository,
+    },
     { provide: MATCH_RECORD_REPOSITORY, useClass: PrismaMatchRecordRepository },
     {
       provide: BOT_DECISION_PORT,
@@ -111,6 +122,46 @@ const gameModuleLogger = new Logger('GameModule');
     {
       provide: PlayCardUseCase,
       useFactory: (repo: MatchRepository) => new PlayCardUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RequestTrucoUseCase,
+      useFactory: (repo: MatchRepository) => new RequestTrucoUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: AcceptBetUseCase,
+      useFactory: (repo: MatchRepository) => new AcceptBetUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: DeclineBetUseCase,
+      useFactory: (repo: MatchRepository) => new DeclineBetUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: AcceptMaoDeOnzeUseCase,
+      useFactory: (repo: MatchRepository) => new AcceptMaoDeOnzeUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: DeclineMaoDeOnzeUseCase,
+      useFactory: (repo: MatchRepository) => new DeclineMaoDeOnzeUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToSixUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToSixUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToNineUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToNineUseCase(repo),
+      inject: [MATCH_REPOSITORY],
+    },
+    {
+      provide: RaiseToTwelveUseCase,
+      useFactory: (repo: MatchRepository) => new RaiseToTwelveUseCase(repo),
       inject: [MATCH_REPOSITORY],
     },
     {
