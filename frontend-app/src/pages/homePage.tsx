@@ -1,30 +1,55 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import {
+  getAppEnvironment,
+  getFrontendOrigin,
+  isLocalFrontendOrigin,
+  normalizeBackendUrl,
+} from '../config/appConfig';
+import {
+  savePendingAuthBackendUrl,
+  type FrontendSession,
+} from '../features/auth/authStorage';
 import { useAuth } from '../features/auth/authStore';
+
+function buildNextSession(
+  session: FrontendSession | null,
+  backendUrl: string,
+  authToken: string,
+): FrontendSession {
+  return {
+    backendUrl,
+    authToken,
+    expiresIn: session?.expiresIn ?? null,
+    user: session?.user ?? null,
+  };
+}
 
 export function HomePage() {
   const { session, setSession } = useAuth();
 
-  const [backendUrl, setBackendUrl] = useState(session?.backendUrl ?? 'http://localhost:3000');
+  const [backendUrl, setBackendUrl] = useState(() =>
+    normalizeBackendUrl(session?.backendUrl),
+  );
   const [manualAuthToken, setManualAuthToken] = useState('');
 
   const normalizedBackendUrl = useMemo(
-    () => backendUrl.trim().replace(/\/+$/, '') || 'http://localhost:3000',
+    () => normalizeBackendUrl(backendUrl),
     [backendUrl],
   );
 
-  const frontendUrl = window.location.origin;
+  const frontendUrl = getFrontendOrigin();
   const googleLoginUrl = `${normalizedBackendUrl}/auth/google?frontendUrl=${encodeURIComponent(frontendUrl)}`;
   const githubLoginUrl = `${normalizedBackendUrl}/auth/github?frontendUrl=${encodeURIComponent(frontendUrl)}`;
 
+  const appEnvironment = getAppEnvironment();
+  const isLocalEnvironment = isLocalFrontendOrigin(frontendUrl);
+
   function handleSaveBackendUrl(): void {
-    setSession({
-      backendUrl: normalizedBackendUrl,
-      authToken: session?.authToken ?? '',
-      expiresIn: session?.expiresIn ?? null,
-      user: session?.user ?? null,
-    });
+    setSession(
+      buildNextSession(session, normalizedBackendUrl, session?.authToken ?? ''),
+    );
   }
 
   function handleSaveManualToken(): void {
@@ -34,12 +59,13 @@ export function HomePage() {
       return;
     }
 
-    setSession({
-      backendUrl: normalizedBackendUrl,
-      authToken: normalizedToken,
-      expiresIn: session?.expiresIn ?? null,
-      user: session?.user ?? null,
-    });
+    setSession(buildNextSession(session, normalizedBackendUrl, normalizedToken));
+  }
+
+  function handleOAuthStart(): void {
+    // NOTE: OAuth leaves the SPA entirely. Persisting the chosen backend boundary
+    // before the redirect prevents the callback from guessing the API origin later.
+    savePendingAuthBackendUrl(normalizedBackendUrl);
   }
 
   return (
@@ -70,6 +96,7 @@ export function HomePage() {
 
             <a
               href={googleLoginUrl}
+              onClick={handleOAuthStart}
               className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
             >
               Entrar com Google
@@ -77,6 +104,7 @@ export function HomePage() {
 
             <a
               href={githubLoginUrl}
+              onClick={handleOAuthStart}
               className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
             >
               Entrar com GitHub
@@ -113,6 +141,9 @@ export function HomePage() {
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                     <span className="text-slate-500">Expires in:</span> {session.expiresIn ?? '-'}
                   </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                    <span className="text-slate-500">Backend URL:</span> {session.backendUrl}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -130,16 +161,17 @@ export function HomePage() {
 
             <div className="mt-4 grid gap-3 text-sm text-slate-300">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                Auth callback persists the browser session.
+                OAuth now preserves the backend boundary before leaving the SPA.
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                The callback can restore the intended API origin without guessing from the frontend
+                host.
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                 The lobby already supports authenticated real-time connection.
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                 Match view hydrates from socket state and snapshot recovery.
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                Phase 17 now focuses on presentation, hierarchy and polish.
               </div>
             </div>
           </div>
@@ -157,7 +189,7 @@ export function HomePage() {
             </div>
 
             <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Foundation
+              {appEnvironment}
             </div>
           </div>
 
@@ -166,8 +198,8 @@ export function HomePage() {
               <div>
                 <div className="text-sm font-semibold text-slate-100">Backend URL</div>
                 <div className="mt-1 text-xs text-slate-400">
-                  This remains configurable because the frontend still depends on the backend
-                  boundary for auth and multiplayer orchestration.
+                  Use an explicit backend boundary. Production should come from env, while local
+                  development may still override it here when needed.
                 </div>
               </div>
 
@@ -180,6 +212,10 @@ export function HomePage() {
                   placeholder="http://localhost:3000"
                 />
               </label>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-slate-400">
+                Frontend origin: <span className="text-slate-200">{frontendUrl}</span>
+              </div>
 
               <button
                 type="button"
@@ -216,6 +252,13 @@ export function HomePage() {
               >
                 Save manual token
               </button>
+
+              {!isLocalEnvironment ? (
+                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-xs leading-6 text-amber-100">
+                  Production should not depend on manual token pasting or hidden browser
+                  reconfiguration. This fallback exists only to keep local diagnostics practical.
+                </div>
+              ) : null}
             </div>
           </div>
         </section>

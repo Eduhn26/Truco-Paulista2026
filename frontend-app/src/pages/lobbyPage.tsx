@@ -19,7 +19,7 @@ export function LobbyPage() {
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [matchId, setMatchId] = useState('');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
-  const [matchState, setMatchState] = useState<MatchStatePayload | null>(null);
+  const [publicMatchState, setPublicMatchState] = useState<MatchStatePayload | null>(null);
   const [privateMatchState, setPrivateMatchState] = useState<MatchStatePayload | null>(null);
   const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
@@ -27,7 +27,7 @@ export function LobbyPage() {
   const canConnect = Boolean(session?.backendUrl && session?.authToken);
   const derivedMatchId =
     privateMatchState?.matchId ||
-    matchState?.matchId ||
+    publicMatchState?.matchId ||
     roomState?.matchId ||
     playerAssigned?.matchId ||
     matchId;
@@ -40,11 +40,13 @@ export function LobbyPage() {
 
   function persistSnapshot(next: {
     nextRoomState?: RoomStatePayload | null;
-    nextMatchState?: MatchStatePayload | null;
+    nextPublicMatchState?: MatchStatePayload | null;
+    nextPrivateMatchState?: MatchStatePayload | null;
     nextPlayerAssigned?: PlayerAssignedPayload | null;
   }): void {
     const snapshotMatchId =
-      next.nextMatchState?.matchId ||
+      next.nextPrivateMatchState?.matchId ||
+      next.nextPublicMatchState?.matchId ||
       next.nextRoomState?.matchId ||
       next.nextPlayerAssigned?.matchId ||
       derivedMatchId;
@@ -57,8 +59,8 @@ export function LobbyPage() {
     // can hydrate quickly without depending on this screen staying mounted.
     saveMatchSnapshot(snapshotMatchId, {
       roomState: next.nextRoomState ?? roomState,
-      publicMatchState: next.nextMatchState ?? matchState,
-      privateMatchState: next.nextMatchState ?? privateMatchState ?? matchState,
+      publicMatchState: next.nextPublicMatchState ?? publicMatchState,
+      privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
       playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
     });
   }
@@ -104,13 +106,13 @@ export function LobbyPage() {
           appendLog('Received room-state.');
         },
         onMatchState: (payload) => {
-          setMatchState(payload);
+          setPublicMatchState(payload);
+          persistSnapshot({ nextPublicMatchState: payload });
           appendLog('Received public match-state.');
         },
         onPrivateMatchState: (payload) => {
           setPrivateMatchState(payload);
-          setMatchState(payload);
-          persistSnapshot({ nextMatchState: payload });
+          persistSnapshot({ nextPrivateMatchState: payload });
           appendLog('Received private match-state.');
         },
       },
@@ -159,7 +161,7 @@ export function LobbyPage() {
   }
 
   const roomPlayers = useMemo(() => roomState?.players ?? [], [roomState]);
-  const displayedMatchState = privateMatchState ?? matchState;
+  const displayedMatchState = privateMatchState ?? publicMatchState;
   const currentReady =
     roomState?.players.find((player) => player.seatId === playerAssigned?.seatId)?.ready ?? false;
 
@@ -468,34 +470,39 @@ export function LobbyPage() {
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-3">
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    matchId
-                  </div>
-                  <div className="mt-3 break-all font-mono text-sm text-slate-100">
-                    {displayedMatchState?.matchId || '-'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    state
-                  </div>
-                  <div className="mt-3 font-mono text-sm text-slate-100">
-                    {displayedMatchState?.state || '-'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    score
-                  </div>
-                  <div className="mt-3 font-mono text-sm text-slate-100">
-                    T1 {displayedMatchState?.score.playerOne ?? 0} × T2{' '}
-                    {displayedMatchState?.score.playerTwo ?? 0}
-                  </div>
-                </div>
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <PreviewMetricCard label="matchId" value={displayedMatchState?.matchId || '-'} mono />
+                <PreviewMetricCard label="state" value={displayedMatchState?.state || '-'} mono />
+                <PreviewMetricCard
+                  label="score"
+                  value={`T1 ${displayedMatchState?.score.playerOne ?? 0} × T2 ${displayedMatchState?.score.playerTwo ?? 0}`}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="currentValue"
+                  value={String(displayedMatchState?.currentHand?.currentValue ?? '-')}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="betState"
+                  value={displayedMatchState?.currentHand?.betState ?? '-'}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="pendingValue"
+                  value={String(displayedMatchState?.currentHand?.pendingValue ?? '-')}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="specialState"
+                  value={displayedMatchState?.currentHand?.specialState ?? '-'}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="availableActions"
+                  value={formatAvailableActionsSummary(displayedMatchState)}
+                  mono
+                />
               </div>
 
               {displayedMatchState?.currentHand ? (
@@ -551,4 +558,47 @@ export function LobbyPage() {
       </div>
     </section>
   );
+}
+
+function PreviewMetricCard({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-3 break-all text-sm text-slate-100 ${mono ? 'font-mono' : ''}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function formatAvailableActionsSummary(matchState: MatchStatePayload | null): string {
+  const actions = matchState?.currentHand?.availableActions;
+
+  if (!actions) {
+    return '-';
+  }
+
+  const enabled = [
+    actions.canRequestTruco ? 'truco' : null,
+    actions.canRaiseToSix ? 'raise6' : null,
+    actions.canRaiseToNine ? 'raise9' : null,
+    actions.canRaiseToTwelve ? 'raise12' : null,
+    actions.canAcceptBet ? 'acceptBet' : null,
+    actions.canDeclineBet ? 'declineBet' : null,
+    actions.canAcceptMaoDeOnze ? 'accept11' : null,
+    actions.canDeclineMaoDeOnze ? 'decline11' : null,
+    actions.canAttemptPlayCard ? 'playCard' : null,
+  ].filter((action): action is string => action !== null);
+
+  return enabled.length > 0 ? enabled.join(', ') : 'none';
 }

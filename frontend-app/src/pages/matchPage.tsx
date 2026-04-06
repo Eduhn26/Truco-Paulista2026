@@ -59,6 +59,16 @@ type MatchViewModel = {
   currentTurnSeatId: string | null;
   canStartHand: boolean;
   canPlayCard: boolean;
+  currentValue: number;
+  betState: string;
+  pendingValue: number | null;
+  requestedBy: string | null;
+  specialState: string;
+  specialDecisionPending: boolean;
+  specialDecisionBy: string | null;
+  winner: string | null;
+  awardedPoints: number | null;
+  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   handFinished: boolean;
   matchFinished: boolean;
   tablePhase: TablePhase;
@@ -312,6 +322,8 @@ export function MatchPage() {
     const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
 
     const myCards = getViewerCards(currentPrivateHand);
+    const effectiveHand = currentPrivateHand ?? currentPublicHand;
+    const availableActions = effectiveHand?.availableActions ?? emptyAvailableActions();
 
     const myIsPlayerOne = mySeat === 'T1A' || mySeat === 'T1B';
     const rounds = currentPublicHand?.rounds ?? [];
@@ -338,12 +350,24 @@ export function MatchPage() {
     const canStartHand = Boolean(roomState?.canStart && publicMatchState?.state === 'waiting');
     const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
-      privateMatchState?.state === 'in_progress' &&
-        !handFinished &&
-        isMyTurn &&
-        mySeat &&
-        myCards.length > 0,
+      availableActions.canAttemptPlayCard ||
+        (
+          privateMatchState?.state === 'in_progress' &&
+          !handFinished &&
+          isMyTurn &&
+          mySeat &&
+          myCards.length > 0
+        ),
     );
+    const currentValue = effectiveHand?.currentValue ?? 1;
+    const betState = effectiveHand?.betState ?? 'idle';
+    const pendingValue = effectiveHand?.pendingValue ?? null;
+    const requestedBy = effectiveHand?.requestedBy ?? null;
+    const specialState = effectiveHand?.specialState ?? 'normal';
+    const specialDecisionPending = effectiveHand?.specialDecisionPending ?? false;
+    const specialDecisionBy = effectiveHand?.specialDecisionBy ?? null;
+    const winner = effectiveHand?.winner ?? null;
+    const awardedPoints = effectiveHand?.awardedPoints ?? null;
 
     const tablePhase: TablePhase = !resolvedMatchId
       ? 'missing_context'
@@ -382,6 +406,16 @@ export function MatchPage() {
       currentTurnSeatId: roomState?.currentTurnSeatId ?? null,
       canStartHand,
       canPlayCard,
+      currentValue,
+      betState,
+      pendingValue,
+      requestedBy,
+      specialState,
+      specialDecisionPending,
+      specialDecisionBy,
+      winner,
+      awardedPoints,
+      availableActions,
       handFinished,
       matchFinished,
       tablePhase,
@@ -481,6 +515,41 @@ export function MatchPage() {
     window.setTimeout(() => {
       setLaunchingCardKey((current) => (current === cardKey ? null : current));
     }, 700);
+  }
+
+  function handleMatchAction(action:
+    | 'request-truco'
+    | 'accept-bet'
+    | 'decline-bet'
+    | 'raise-to-six'
+    | 'raise-to-nine'
+    | 'raise-to-twelve'
+    | 'accept-mao-de-onze'
+    | 'decline-mao-de-onze'): void {
+    if (!viewModel.resolvedMatchId) {
+      appendLog(`No matchId available for ${action}.`);
+      return;
+    }
+
+    if (!isActionEnabled(viewModel.availableActions, action)) {
+      appendLog(`Action ${action} is not available in the current backend state.`);
+      return;
+    }
+
+    if (action === 'request-truco') clientRef.current?.emitRequestTruco(viewModel.resolvedMatchId);
+    if (action === 'accept-bet') clientRef.current?.emitAcceptBet(viewModel.resolvedMatchId);
+    if (action === 'decline-bet') clientRef.current?.emitDeclineBet(viewModel.resolvedMatchId);
+    if (action === 'raise-to-six') clientRef.current?.emitRaiseToSix(viewModel.resolvedMatchId);
+    if (action === 'raise-to-nine') clientRef.current?.emitRaiseToNine(viewModel.resolvedMatchId);
+    if (action === 'raise-to-twelve') clientRef.current?.emitRaiseToTwelve(viewModel.resolvedMatchId);
+    if (action === 'accept-mao-de-onze') {
+      clientRef.current?.emitAcceptMaoDeOnze(viewModel.resolvedMatchId);
+    }
+    if (action === 'decline-mao-de-onze') {
+      clientRef.current?.emitDeclineMaoDeOnze(viewModel.resolvedMatchId);
+    }
+
+    appendLog(`Emitted ${action} (${viewModel.resolvedMatchId}).`);
   }
 
   const canRenderLiveState = Boolean(
@@ -593,6 +662,27 @@ export function MatchPage() {
                     </motion.div>
                   </div>
 
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <StatusPanel
+                      title="Bet state"
+                      value={formatBetStatus(viewModel)}
+                      detail={formatBetDetail(viewModel)}
+                      tone={viewModel.betState === 'awaiting_response' ? 'warning' : 'neutral'}
+                    />
+                    <StatusPanel
+                      title="Special hand"
+                      value={formatSpecialState(viewModel.specialState)}
+                      detail={formatSpecialDetail(viewModel)}
+                      tone={
+                        viewModel.specialState !== 'normal' || viewModel.specialDecisionPending
+                          ? 'warning'
+                          : viewModel.winner || viewModel.awardedPoints
+                            ? 'success'
+                            : 'neutral'
+                      }
+                    />
+                  </div>
+
                   <AnimatePresence>
                     {roundIntroKey > 0 && viewModel.tablePhase === 'playing' ? (
                       <motion.div
@@ -689,7 +779,7 @@ export function MatchPage() {
                       ) : null}
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
                       <MetricCard label="Mode" value={roomState?.mode ?? '-'} />
                       <MetricCard label="Turn" value={viewModel.currentTurnSeatId ?? '-'} />
                       <MetricCard
@@ -697,7 +787,17 @@ export function MatchPage() {
                         value={formatRoundResult(viewModel.latestRound?.result ?? null)}
                       />
                       <MetricCard label="Score" value={viewModel.scoreLabel} />
+                      <MetricCard label="Current value" value={String(viewModel.currentValue)} />
+                      <MetricCard
+                        label="Special state"
+                        value={formatSpecialState(viewModel.specialState)}
+                      />
                     </div>
+
+                    <ActionBar
+                      availableActions={viewModel.availableActions}
+                      onAction={handleMatchAction}
+                    />
 
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
                       <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
@@ -902,6 +1002,18 @@ export function MatchPage() {
                   mono
                 />
                 <MetricCard label="Can start" value={String(viewModel.canStartHand)} mono />
+                <MetricCard label="Can play card" value={String(viewModel.canPlayCard)} mono />
+                <MetricCard label="Bet state" value={viewModel.betState} mono />
+                <MetricCard
+                  label="Special state"
+                  value={formatSpecialState(viewModel.specialState)}
+                  mono
+                />
+                <MetricCard
+                  label="Available actions"
+                  value={formatAvailableActionsSummary(viewModel.availableActions)}
+                  mono
+                />
 
                 {!canRenderLiveState ? (
                   <div className="rounded-[28px] border border-amber-400/15 bg-amber-500/5 p-5 text-sm leading-6 text-amber-200">
@@ -1204,6 +1316,255 @@ function RoundLine({
       <span className="font-mono text-slate-100">{value}</span>
     </div>
   );
+}
+
+
+function StatusPanel({
+  title,
+  value,
+  detail,
+  tone,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  tone: 'neutral' | 'warning' | 'success';
+}) {
+  const toneClass =
+    tone === 'success'
+      ? 'border-emerald-400/20 bg-emerald-500/10'
+      : tone === 'warning'
+        ? 'border-amber-400/20 bg-amber-500/10'
+        : 'border-white/10 bg-slate-950/45';
+
+  return (
+    <div className={`rounded-[28px] border p-5 ${toneClass}`}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">{title}</div>
+      <div className="mt-3 text-base font-black text-slate-100">{value}</div>
+      <p className="mt-2 text-sm leading-6 text-slate-300">{detail}</p>
+    </div>
+  );
+}
+
+function ActionBar({
+  availableActions,
+  onAction,
+}: {
+  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
+  onAction: (
+    action:
+      | 'request-truco'
+      | 'accept-bet'
+      | 'decline-bet'
+      | 'raise-to-six'
+      | 'raise-to-nine'
+      | 'raise-to-twelve'
+      | 'accept-mao-de-onze'
+      | 'decline-mao-de-onze',
+  ) => void;
+}) {
+  const buttons: Array<{
+    action:
+      | 'request-truco'
+      | 'accept-bet'
+      | 'decline-bet'
+      | 'raise-to-six'
+      | 'raise-to-nine'
+      | 'raise-to-twelve'
+      | 'accept-mao-de-onze'
+      | 'decline-mao-de-onze';
+    label: string;
+    enabled: boolean;
+    tone: 'emerald' | 'amber' | 'rose';
+  }> = [
+    {
+      action: 'request-truco',
+      label: 'Pedir truco',
+      enabled: availableActions.canRequestTruco,
+      tone: 'emerald',
+    },
+    {
+      action: 'accept-bet',
+      label: 'Aceitar aposta',
+      enabled: availableActions.canAcceptBet,
+      tone: 'emerald',
+    },
+    {
+      action: 'decline-bet',
+      label: 'Correr',
+      enabled: availableActions.canDeclineBet,
+      tone: 'rose',
+    },
+    {
+      action: 'raise-to-six',
+      label: 'Pedir 6',
+      enabled: availableActions.canRaiseToSix,
+      tone: 'amber',
+    },
+    {
+      action: 'raise-to-nine',
+      label: 'Pedir 9',
+      enabled: availableActions.canRaiseToNine,
+      tone: 'amber',
+    },
+    {
+      action: 'raise-to-twelve',
+      label: 'Pedir 12',
+      enabled: availableActions.canRaiseToTwelve,
+      tone: 'amber',
+    },
+    {
+      action: 'accept-mao-de-onze',
+      label: 'Aceitar mão de 11',
+      enabled: availableActions.canAcceptMaoDeOnze,
+      tone: 'emerald',
+    },
+    {
+      action: 'decline-mao-de-onze',
+      label: 'Recusar mão de 11',
+      enabled: availableActions.canDeclineMaoDeOnze,
+      tone: 'rose',
+    },
+  ];
+
+  const visibleButtons = buttons.filter((button) => button.enabled);
+
+  return (
+    <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="text-base font-black tracking-tight text-slate-100">Available actions</div>
+          <p className="mt-1 text-sm leading-6 text-slate-400">
+            A barra responde ao contrato autoritativo da mão. Nenhum botão é liberado por inferência paralela.
+          </p>
+        </div>
+
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+          backend truth
+        </span>
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        {visibleButtons.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-slate-400">
+            Nenhuma ação especial disponível neste momento.
+          </div>
+        ) : (
+          visibleButtons.map((button) => (
+            <button
+              key={button.action}
+              type="button"
+              onClick={() => onAction(button.action)}
+              className={`rounded-2xl border px-4 py-3 text-sm font-black transition ${actionButtonToneClass(button.tone)}`}
+            >
+              {button.label}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function emptyAvailableActions(): NonNullable<MatchStatePayload['currentHand']>['availableActions'] {
+  return {
+    canRequestTruco: false,
+    canRaiseToSix: false,
+    canRaiseToNine: false,
+    canRaiseToTwelve: false,
+    canAcceptBet: false,
+    canDeclineBet: false,
+    canAcceptMaoDeOnze: false,
+    canDeclineMaoDeOnze: false,
+    canAttemptPlayCard: false,
+  };
+}
+
+function isActionEnabled(
+  actions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
+  action:
+    | 'request-truco'
+    | 'accept-bet'
+    | 'decline-bet'
+    | 'raise-to-six'
+    | 'raise-to-nine'
+    | 'raise-to-twelve'
+    | 'accept-mao-de-onze'
+    | 'decline-mao-de-onze',
+): boolean {
+  if (action === 'request-truco') return actions.canRequestTruco;
+  if (action === 'accept-bet') return actions.canAcceptBet;
+  if (action === 'decline-bet') return actions.canDeclineBet;
+  if (action === 'raise-to-six') return actions.canRaiseToSix;
+  if (action === 'raise-to-nine') return actions.canRaiseToNine;
+  if (action === 'raise-to-twelve') return actions.canRaiseToTwelve;
+  if (action === 'accept-mao-de-onze') return actions.canAcceptMaoDeOnze;
+  return actions.canDeclineMaoDeOnze;
+}
+
+function formatBetStatus(viewModel: MatchViewModel): string {
+  if (viewModel.betState === 'awaiting_response') {
+    return `Aguardando resposta para ${viewModel.pendingValue ?? viewModel.currentValue}`;
+  }
+
+  return `Valor atual: ${viewModel.currentValue}`;
+}
+
+function formatBetDetail(viewModel: MatchViewModel): string {
+  if (viewModel.betState === 'awaiting_response') {
+    return `Solicitada por ${viewModel.requestedBy ?? '-'} · valor pendente ${viewModel.pendingValue ?? '-'}.`;
+  }
+
+  return 'Sem aposta pendente no momento.';
+}
+
+function formatSpecialState(state: string): string {
+  if (state === 'mao_de_onze') return 'Mão de 11';
+  if (state === 'mao_de_ferro') return 'Mão de ferro';
+  if (state === 'normal') return 'Normal';
+  return state;
+}
+
+function formatSpecialDetail(viewModel: MatchViewModel): string {
+  if (viewModel.specialDecisionPending) {
+    return `Decisão pendente para ${viewModel.specialDecisionBy ?? '-'}.`;
+  }
+
+  if (viewModel.winner || viewModel.awardedPoints) {
+    return `Resultado parcial · winner ${viewModel.winner ?? '-'} · pontos ${viewModel.awardedPoints ?? '-'}.`;
+  }
+
+  return 'Nenhum estado especial ativo no momento.';
+}
+
+function formatAvailableActionsSummary(
+  actions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
+): string {
+  const enabled = [
+    actions.canRequestTruco ? 'truco' : null,
+    actions.canRaiseToSix ? 'raise6' : null,
+    actions.canRaiseToNine ? 'raise9' : null,
+    actions.canRaiseToTwelve ? 'raise12' : null,
+    actions.canAcceptBet ? 'acceptBet' : null,
+    actions.canDeclineBet ? 'declineBet' : null,
+    actions.canAcceptMaoDeOnze ? 'accept11' : null,
+    actions.canDeclineMaoDeOnze ? 'decline11' : null,
+    actions.canAttemptPlayCard ? 'playCard' : null,
+  ].filter((item): item is string => item !== null);
+
+  return enabled.length > 0 ? enabled.join(', ') : 'none';
+}
+
+function actionButtonToneClass(tone: 'emerald' | 'amber' | 'rose'): string {
+  if (tone === 'emerald') {
+    return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15';
+  }
+
+  if (tone === 'rose') {
+    return 'border-rose-400/20 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15';
+  }
+
+  return 'border-amber-400/20 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15';
 }
 
 function getViewerCards(currentPrivateHand: MatchStatePayload['currentHand'] | null): CardPayload[] {

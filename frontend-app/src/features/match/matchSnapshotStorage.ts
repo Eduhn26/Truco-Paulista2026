@@ -14,6 +14,8 @@ export type MatchSnapshot = {
 type LegacyMatchSnapshot = {
   roomState?: RoomStatePayload | null;
   matchState?: MatchStatePayload | null;
+  publicMatchState?: MatchStatePayload | null;
+  privateMatchState?: MatchStatePayload | null;
   playerAssigned?: PlayerAssignedPayload | null;
 };
 
@@ -41,14 +43,14 @@ export function loadMatchSnapshot(matchId: string): MatchSnapshot | null {
       return null;
     }
 
-    const parsed = JSON.parse(raw) as Partial<MatchSnapshot> & LegacyMatchSnapshot;
-
-    const legacyMatchState = parsed.matchState ?? null;
+    const parsed = JSON.parse(raw) as LegacyMatchSnapshot;
+    const fallbackPublicMatchState = parsed.publicMatchState ?? parsed.matchState ?? null;
+    const fallbackPrivateMatchState = parsed.privateMatchState ?? null;
 
     return {
       roomState: parsed.roomState ?? null,
-      publicMatchState: parsed.publicMatchState ?? legacyMatchState,
-      privateMatchState: parsed.privateMatchState ?? legacyMatchState,
+      publicMatchState: fallbackPublicMatchState,
+      privateMatchState: fallbackPrivateMatchState,
       playerAssigned: parsed.playerAssigned ?? null,
     };
   } catch {
@@ -70,9 +72,7 @@ export function clearMatchSnapshot(matchId: string): void {
 }
 
 export function getLastActiveMatchId(): string | null {
-  const value = window.sessionStorage.getItem(ACTIVE_MATCH_KEY);
-
-  return value && value.trim() ? value : null;
+  return window.sessionStorage.getItem(ACTIVE_MATCH_KEY);
 }
 
 function storageKey(matchId: string): string {

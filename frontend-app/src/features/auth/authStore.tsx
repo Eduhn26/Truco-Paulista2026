@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, useState, type PropsWithChildren } from 'react';
 
+import { getDefaultBackendUrl } from '../../config/appConfig';
 import {
   clearStoredSession,
   loadSession,
@@ -14,8 +15,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const DEFAULT_BACKEND_URL = 'http://localhost:3000';
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSessionState] = useState<FrontendSession | null>(() => loadSession());
@@ -36,7 +35,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         session ??
         {
           authToken: '',
-          backendUrl: DEFAULT_BACKEND_URL,
+          backendUrl: getDefaultBackendUrl(),
           expiresIn: null,
           user: null,
         },
