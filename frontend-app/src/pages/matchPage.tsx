@@ -350,14 +350,7 @@ export function MatchPage() {
     const canStartHand = Boolean(roomState?.canStart && publicMatchState?.state === 'waiting');
     const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
-      availableActions.canAttemptPlayCard ||
-        (
-          privateMatchState?.state === 'in_progress' &&
-          !handFinished &&
-          isMyTurn &&
-          mySeat &&
-          myCards.length > 0
-        ),
+      availableActions.canAttemptPlayCard && mySeat && myCards.length > 0 && !handFinished,
     );
     const currentValue = effectiveHand?.currentValue ?? 1;
     const betState = effectiveHand?.betState ?? 'idle';
@@ -430,14 +423,14 @@ export function MatchPage() {
   }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
 
   const displayedMyPlayedCard =
-    viewModel.myPlayedCard ??
     (pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.card : null) ??
-    closingTableCards.mine;
+    closingTableCards.mine ??
+    viewModel.myPlayedCard;
 
   const displayedOpponentPlayedCard =
-    viewModel.opponentPlayedCard ??
+    closingTableCards.opponent ??
     (pendingPlayedCard?.owner === 'opponent' ? pendingPlayedCard.card : null) ??
-    closingTableCards.opponent;
+    viewModel.opponentPlayedCard;
 
   useEffect(() => {
     if (pendingPlayedCard?.owner === 'mine' && viewModel.myPlayedCard === pendingPlayedCard.card) {
@@ -445,6 +438,13 @@ export function MatchPage() {
       setPendingPlayedCard(null);
     }
   }, [pendingPlayedCard, viewModel.myPlayedCard]);
+
+  useEffect(() => {
+    setClosingTableCards((current) => ({
+      mine: current.mine === viewModel.myPlayedCard ? null : current.mine,
+      opponent: current.opponent === viewModel.opponentPlayedCard ? null : current.opponent,
+    }));
+  }, [viewModel.myPlayedCard, viewModel.opponentPlayedCard]);
 
   useEffect(() => {
     if (
@@ -517,15 +517,17 @@ export function MatchPage() {
     }, 700);
   }
 
-  function handleMatchAction(action:
-    | 'request-truco'
-    | 'accept-bet'
-    | 'decline-bet'
-    | 'raise-to-six'
-    | 'raise-to-nine'
-    | 'raise-to-twelve'
-    | 'accept-mao-de-onze'
-    | 'decline-mao-de-onze'): void {
+  function handleMatchAction(
+    action:
+      | 'request-truco'
+      | 'accept-bet'
+      | 'decline-bet'
+      | 'raise-to-six'
+      | 'raise-to-nine'
+      | 'raise-to-twelve'
+      | 'accept-mao-de-onze'
+      | 'decline-mao-de-onze',
+  ): void {
     if (!viewModel.resolvedMatchId) {
       appendLog(`No matchId available for ${action}.`);
       return;
@@ -541,7 +543,8 @@ export function MatchPage() {
     if (action === 'decline-bet') clientRef.current?.emitDeclineBet(viewModel.resolvedMatchId);
     if (action === 'raise-to-six') clientRef.current?.emitRaiseToSix(viewModel.resolvedMatchId);
     if (action === 'raise-to-nine') clientRef.current?.emitRaiseToNine(viewModel.resolvedMatchId);
-    if (action === 'raise-to-twelve') clientRef.current?.emitRaiseToTwelve(viewModel.resolvedMatchId);
+    if (action === 'raise-to-twelve')
+      clientRef.current?.emitRaiseToTwelve(viewModel.resolvedMatchId);
     if (action === 'accept-mao-de-onze') {
       clientRef.current?.emitAcceptMaoDeOnze(viewModel.resolvedMatchId);
     }
@@ -571,8 +574,8 @@ export function MatchPage() {
               </h1>
 
               <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
-                Reestruturada para ler o payload autoritativo primeiro, reduzir derivação ambígua
-                e tratar melhor a transição entre rodada, fim de mão e próxima mão.
+                Reestruturada para ler o payload autoritativo primeiro, reduzir derivação ambígua e
+                tratar melhor a transição entre rodada, fim de mão e próxima mão.
               </p>
             </div>
 
@@ -731,9 +734,7 @@ export function MatchPage() {
                         <SeatBadge
                           seat={viewModel.opponentSeatView}
                           label={
-                            viewModel.isOneVsOne
-                              ? 'Opponent'
-                              : viewModel.opponentSeatView.seatId
+                            viewModel.isOneVsOne ? 'Opponent' : viewModel.opponentSeatView.seatId
                           }
                         />
                       ) : null}
@@ -759,9 +760,7 @@ export function MatchPage() {
                           value={displayedMyPlayedCard}
                           perspective="bottom"
                           highlight={Boolean(viewModel.mySeatView?.isCurrentTurn)}
-                          revealKey={
-                            pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0
-                          }
+                          revealKey={pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0}
                           isRevealed={Boolean(displayedMyPlayedCard)}
                           isLaunching={
                             pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard
@@ -1117,13 +1116,7 @@ function HandEmptyState({ tablePhase }: { tablePhase: TablePhase }) {
   );
 }
 
-function SeatBadge({
-  seat,
-  label,
-}: {
-  seat: TableSeatView;
-  label: string;
-}) {
+function SeatBadge({ seat, label }: { seat: TableSeatView; label: string }) {
   const animateState = seat.isCurrentTurn ? seatPulseAnimation : {};
 
   return (
@@ -1269,13 +1262,7 @@ function PlayedCardZone({
   );
 }
 
-function TableCardFace({
-  card,
-  isRevealed,
-}: {
-  card: string;
-  isRevealed: boolean;
-}) {
+function TableCardFace({ card, isRevealed }: { card: string; isRevealed: boolean }) {
   const normalized = parseCardLabel(card);
 
   if (!normalized) {
@@ -1303,13 +1290,7 @@ function TableCardFace({
   );
 }
 
-function RoundLine({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function RoundLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-slate-400">{label}</span>
@@ -1317,7 +1298,6 @@ function RoundLine({
     </div>
   );
 }
-
 
 function StatusPanel({
   title,
@@ -1339,7 +1319,9 @@ function StatusPanel({
 
   return (
     <div className={`rounded-[28px] border p-5 ${toneClass}`}>
-      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">{title}</div>
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {title}
+      </div>
       <div className="mt-3 text-base font-black text-slate-100">{value}</div>
       <p className="mt-2 text-sm leading-6 text-slate-300">{detail}</p>
     </div>
@@ -1433,9 +1415,12 @@ function ActionBar({
     <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="text-base font-black tracking-tight text-slate-100">Available actions</div>
+          <div className="text-base font-black tracking-tight text-slate-100">
+            Available actions
+          </div>
           <p className="mt-1 text-sm leading-6 text-slate-400">
-            A barra responde ao contrato autoritativo da mão. Nenhum botão é liberado por inferência paralela.
+            A barra responde ao contrato autoritativo da mão. Nenhum botão é liberado por inferência
+            paralela.
           </p>
         </div>
 
@@ -1466,7 +1451,9 @@ function ActionBar({
   );
 }
 
-function emptyAvailableActions(): NonNullable<MatchStatePayload['currentHand']>['availableActions'] {
+function emptyAvailableActions(): NonNullable<
+  MatchStatePayload['currentHand']
+>['availableActions'] {
   return {
     canRequestTruco: false,
     canRaiseToSix: false,
@@ -1567,7 +1554,9 @@ function actionButtonToneClass(tone: 'emerald' | 'amber' | 'rose'): string {
   return 'border-amber-400/20 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15';
 }
 
-function getViewerCards(currentPrivateHand: MatchStatePayload['currentHand'] | null): CardPayload[] {
+function getViewerCards(
+  currentPrivateHand: MatchStatePayload['currentHand'] | null,
+): CardPayload[] {
   if (!currentPrivateHand || !currentPrivateHand.viewerPlayerId) {
     return [];
   }

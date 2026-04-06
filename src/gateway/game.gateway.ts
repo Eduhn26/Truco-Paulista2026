@@ -64,7 +64,8 @@ import type {
   QueueSnapshot,
 } from './matchmaking/matchmaking-queue-manager';
 import type { MatchmakingPair } from './matchmaking/matchmaking-pairing-policy';
-import { RoomManager } from './multiplayer/room-manager';
+import { RoomManager, type SeatId } from './multiplayer/room-manager';
+
 
 type GatewayErrorCode =
   | 'validation_error'
@@ -828,6 +829,103 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
+  private getLatestRoundResult(state: ViewMatchStateResponseDto): 'P1' | 'P2' | 'TIE' | null {
+    const rounds = state.currentHand?.rounds;
+
+    if (!rounds || rounds.length === 0) {
+      return null;
+    }
+
+    const latestRound = rounds[rounds.length - 1];
+
+    return latestRound?.finished ? latestRound.result : null;
+  }
+
+  private getFinishedRoundResultThatOpenedANewRound(
+    previousState: ViewMatchStateResponseDto,
+    updatedState: ViewMatchStateResponseDto,
+  ): 'P1' | 'P2' | 'TIE' | null {
+    const previousRounds = previousState.currentHand?.rounds ?? [];
+    const updatedRounds = updatedState.currentHand?.rounds ?? [];
+
+    // NOTE: The domain pushes the next Round immediately after a finished round
+    // when the hand is still alive. That makes "round count increased" the most
+    // reliable signal that a new round has just started.
+    if (updatedRounds.length <= previousRounds.length) {
+      return null;
+    }
+
+    const finishedRound = updatedRounds[updatedRounds.length - 2];
+
+    return finishedRound?.finished ? finishedRound.result : null;
+  }
+
+  private getOneVsOneOpponentSeat(matchId: string, seatId: SeatId): SeatId | null {
+    const roomState = this.roomManager.getState(matchId);
+
+    if (roomState.mode !== '1v1') {
+      return null;
+    }
+
+    const opponent = roomState.players.find((player) => player.seatId !== seatId);
+
+    return (opponent?.seatId as SeatId | undefined) ?? null;
+  }
+
+  private resolveOneVsOneRoundOpeningSeat(
+    matchId: string,
+    roundResult: 'P1' | 'P2' | 'TIE' | null,
+    actingSeatId: SeatId,
+  ): SeatId | null {
+    if (roundResult === 'P1') {
+      return 'T1A';
+    }
+
+    if (roundResult === 'P2') {
+      return 'T2A';
+    }
+
+    if (roundResult === 'TIE') {
+      // NOTE: In 1v1, when the second player closes a tied round, the opener of
+      // that round is the opposite seat of the acting player.
+      return this.getOneVsOneOpponentSeat(matchId, actingSeatId);
+    }
+
+    return null;
+  }
+
+  private resolveNextTurnRoomStateAfterCardPlay(
+    matchId: string,
+    previousState: ViewMatchStateResponseDto,
+    updatedState: ViewMatchStateResponseDto,
+    actingSeatId: SeatId,
+  ) {
+    const roomState = this.roomManager.getState(matchId);
+
+    if (updatedState.state !== 'in_progress' || !updatedState.currentHand) {
+      return this.roomManager.clearTurn(matchId);
+    }
+
+    const finishedRoundResult = this.getFinishedRoundResultThatOpenedANewRound(
+      previousState,
+      updatedState,
+    );
+
+    if (roomState.mode === '1v1' && finishedRoundResult) {
+      const openingSeatId = this.resolveOneVsOneRoundOpeningSeat(
+        matchId,
+        finishedRoundResult,
+        actingSeatId,
+      );
+
+      if (openingSeatId) {
+        return this.roomManager.beginRound(matchId, openingSeatId);
+      }
+    }
+
+    return this.roomManager.advanceTurn(matchId);
+  }
+
   private async finalizeMatchIfFinished(
     matchId: string,
     state: ViewMatchStateResponseDto,
@@ -892,6 +990,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
+    const previousState = await this.getAuthoritativeMatchState(matchId);
+
     const dto: PlayCardRequestDto = {
       matchId,
       playerId: botTurnContext.playerId,
@@ -900,7 +1000,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await this.playCardUseCase.execute(dto);
 
-    const nextRoomState = this.roomManager.advanceTurn(matchId);
+    const updatedState = await this.getAuthoritativeMatchState(matchId);
+    const nextRoomState = this.resolveNextTurnRoomStateAfterCardPlay(
+      matchId,
+      previousState,
+      updatedState,
+      botTurnContext.seatId as SeatId,
+    );
+
     this.server.to(matchId).emit('room-state', nextRoomState);
 
     this.server.to(matchId).emit('card-played', {
@@ -913,7 +1020,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       isBot: true,
     });
 
-    const updatedState = await this.emitPublicMatchState(matchId);
+    this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
     await this.emitPrivateMatchState(matchId);
 
     this.logGateway('log', {
@@ -1758,6 +1865,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const card = `${rank}${suit}`;
 
+      const previousState = await this.getAuthoritativeMatchState(matchId);
+
       const dto: PlayCardRequestDto = {
         matchId,
         playerId: session.domainPlayerId,
@@ -1766,7 +1875,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.playCardUseCase.execute(dto);
 
-      const roomState = this.roomManager.advanceTurn(matchId);
+      const state = await this.getAuthoritativeMatchState(matchId);
+      const roomState = this.resolveNextTurnRoomStateAfterCardPlay(
+        matchId,
+        previousState,
+        state,
+        session.seatId,
+      );
+
       this.server.to(matchId).emit('room-state', roomState);
 
       this.server.to(matchId).emit('card-played', {
@@ -1778,7 +1894,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      const state = await this.emitPublicMatchState(matchId);
+      this.server.to(matchId).emit('match-state', this.toPublicMatchState(state));
       await this.emitPrivateMatchState(matchId);
 
       this.logGateway('log', {
