@@ -3,10 +3,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
-import { useMatchTableTransition } from '../features/match/useMatchTableTransition';
-import { MatchLiveStatePanel } from '../features/match/matchLiveStatePanel';
-import { MatchPlayerHandPanel } from '../features/match/matchPlayerHandPanel';
-import { MatchRoundsHistoryPanel } from '../features/match/matchRoundsHistoryPanel';
 import {
   getLastActiveMatchId,
   loadMatchSnapshot,
@@ -37,6 +33,17 @@ type TableSeatView = {
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 
 type HandStatusVariant = 'neutral' | 'success' | 'warning';
+
+type PendingPlayedCard = {
+  owner: 'mine' | 'opponent';
+  card: string;
+  id: number;
+};
+
+type ClosingTableCards = {
+  mine: string | null;
+  opponent: string | null;
+};
 
 type MatchViewModel = {
   resolvedMatchId: string;
@@ -89,6 +96,14 @@ const seatPulseAnimation = {
   ],
 };
 
+const roundResolvedAnimation = {
+  boxShadow: [
+    '0 0 0 rgba(250,204,21,0)',
+    '0 0 26px rgba(250,204,21,0.24)',
+    '0 0 0 rgba(250,204,21,0)',
+  ],
+};
+
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -99,6 +114,8 @@ export function MatchPage() {
 
   const clientRef = useRef<GameSocketClient | null>(null);
   const mySeatRef = useRef<string | null>(initialSnapshot?.playerAssigned?.seatId ?? null);
+  const previousOpponentPlayedCardRef = useRef<string | null>(null);
+  const previousPlayedRoundsCountRef = useRef<number>(0);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(
@@ -115,6 +132,16 @@ export function MatchPage() {
   );
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [eventLog, setEventLog] = useState<string[]>([]);
+  const [launchingCardKey, setLaunchingCardKey] = useState<string | null>(null);
+  const [pendingPlayedCard, setPendingPlayedCard] = useState<PendingPlayedCard | null>(null);
+  const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({
+    mine: null,
+    opponent: null,
+  });
+  const [opponentRevealKey, setOpponentRevealKey] = useState(0);
+  const [roundIntroKey, setRoundIntroKey] = useState(0);
+  const [roundResolvedKey, setRoundResolvedKey] = useState(0);
+  const [isResolvingRound, setIsResolvingRound] = useState(false);
 
   function appendLog(line: string): void {
     setEventLog((current) =>
@@ -151,7 +178,122 @@ export function MatchPage() {
     mySeatRef.current = playerAssigned?.seatId ?? null;
   }, [playerAssigned]);
 
+  useEffect(() => {
+    if (!session?.backendUrl || !session?.authToken || !effectiveMatchId) {
+      return;
+    }
 
+    const client = new GameSocketClient();
+    clientRef.current = client;
+
+    client.connect(
+      {
+        backendUrl: session.backendUrl,
+        authToken: session.authToken,
+      },
+      {
+        onConnect: (socketId) => {
+          setConnectionStatus('online');
+          appendLog(`Socket connected (${socketId}).`);
+          client.emitJoinMatch(effectiveMatchId);
+          appendLog(`Emitted join-match (${effectiveMatchId}).`);
+          client.emitGetState(effectiveMatchId);
+          appendLog(`Emitted get-state (${effectiveMatchId}).`);
+        },
+        onDisconnect: (reason) => {
+          setConnectionStatus('offline');
+          appendLog(`Socket disconnected (${reason}).`);
+        },
+        onError: (payload: ServerErrorPayload) => {
+          appendLog(
+            payload.message ? `Server error: ${payload.message}` : 'Server emitted error event.',
+          );
+        },
+        onPlayerAssigned: (payload) => {
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          setPlayerAssigned(payload);
+          persistLiveSnapshot({ nextPlayerAssigned: payload });
+          appendLog(`Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`);
+        },
+        onRoomState: (payload) => {
+          if (payload.matchId && payload.matchId !== effectiveMatchId) {
+            return;
+          }
+
+          setRoomState(payload);
+          persistLiveSnapshot({ nextRoomState: payload });
+          appendLog('Received room-state.');
+        },
+        onMatchState: (payload) => {
+          if (payload.matchId && payload.matchId !== effectiveMatchId) {
+            return;
+          }
+
+          setPublicMatchState(payload);
+          persistLiveSnapshot({ nextPublicMatchState: payload });
+          appendLog('Received public match-state.');
+        },
+        onPrivateMatchState: (payload) => {
+          if (payload.matchId && payload.matchId !== effectiveMatchId) {
+            return;
+          }
+
+          setPrivateMatchState(payload);
+          persistLiveSnapshot({ nextPrivateMatchState: payload });
+          appendLog('Received private match-state.');
+        },
+        onHandStarted: (payload) => {
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch || !payload.viraRank) {
+            return;
+          }
+
+          setClosingTableCards({
+            mine: null,
+            opponent: null,
+          });
+          setIsResolvingRound(false);
+          setViraRank(payload.viraRank);
+          setRoundIntroKey((current) => current + 1);
+          appendLog(`Received hand-started (${payload.viraRank}).`);
+        },
+        onCardPlayed: (payload) => {
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          const owner = resolvePlayedCardOwner({
+            payloadPlayerId: payload.playerId,
+            mySeat: mySeatRef.current,
+          });
+
+          if (owner && payload.card && !isResolvingRound) {
+            setClosingTableCards((current) => ({
+              ...current,
+              [owner]: payload.card,
+            }));
+          }
+
+          appendLog(
+            payload.card ? `Received card-played (${payload.card}).` : 'Received card-played.',
+          );
+        },
+      },
+    );
+
+    return () => {
+      client.disconnect();
+      clientRef.current = null;
+    };
+  }, [effectiveMatchId, isResolvingRound, session?.authToken, session?.backendUrl]);
 
   const viewModel = useMemo<MatchViewModel>(() => {
     const resolvedMatchId =
@@ -282,130 +424,81 @@ export function MatchPage() {
     };
   }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
 
-  const tableTransition = useMatchTableTransition({
-    tablePhase: viewModel.tablePhase,
-    myPlayedCard: viewModel.myPlayedCard,
-    opponentPlayedCard: viewModel.opponentPlayedCard,
-    playedRoundsCount: viewModel.playedRoundsCount,
-    latestRoundFinished: Boolean(viewModel.latestRound?.finished),
-  });
+  const isLiveTableFrame =
+    viewModel.tablePhase === 'playing' || viewModel.tablePhase === 'hand_finished';
 
-  const isLiveTableFrame = tableTransition.isLiveTableFrame;
+  const displayedMyPlayedCard =
+    (pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.card : null) ??
+    closingTableCards.mine ??
+    (isLiveTableFrame ? viewModel.myPlayedCard : null);
 
-  const displayedMyPlayedCard = tableTransition.displayedMyPlayedCard;
-
-  const displayedOpponentPlayedCard = tableTransition.displayedOpponentPlayedCard;
-
+  const displayedOpponentPlayedCard =
+    closingTableCards.opponent ??
+    (pendingPlayedCard?.owner === 'opponent' ? pendingPlayedCard.card : null) ??
+    (isLiveTableFrame ? viewModel.opponentPlayedCard : null);
 
   useEffect(() => {
-    if (!session?.backendUrl || !session?.authToken || !effectiveMatchId) {
+    if (pendingPlayedCard?.owner === 'mine' && viewModel.myPlayedCard === pendingPlayedCard.card) {
+      setLaunchingCardKey(null);
+      setPendingPlayedCard(null);
+    }
+  }, [pendingPlayedCard, viewModel.myPlayedCard]);
+
+  useEffect(() => {
+    setClosingTableCards((current) => ({
+      mine: current.mine === viewModel.myPlayedCard ? null : current.mine,
+      opponent: current.opponent === viewModel.opponentPlayedCard ? null : current.opponent,
+    }));
+  }, [viewModel.myPlayedCard, viewModel.opponentPlayedCard]);
+
+  useEffect(() => {
+    if (publicMatchState?.state !== 'in_progress' || !publicMatchState.currentHand) {
+      setPendingPlayedCard(null);
+      setClosingTableCards({ mine: null, opponent: null });
+      return;
+    }
+  }, [publicMatchState?.state, publicMatchState?.currentHand?.rounds?.length]);
+
+  useEffect(() => {
+    if (!isResolvingRound) {
       return;
     }
 
-    const client = new GameSocketClient();
-    clientRef.current = client;
+    const timeout = window.setTimeout(() => {
+      setClosingTableCards({ mine: null, opponent: null });
+      setPendingPlayedCard(null);
+      setIsResolvingRound(false);
+    }, 1100);
 
-    client.connect(
-      {
-        backendUrl: session.backendUrl,
-        authToken: session.authToken,
-      },
-      {
-        onConnect: (socketId) => {
-          setConnectionStatus('online');
-          appendLog(`Socket connected (${socketId}).`);
-          client.emitJoinMatch(effectiveMatchId);
-          appendLog(`Emitted join-match (${effectiveMatchId}).`);
-          client.emitGetState(effectiveMatchId);
-          appendLog(`Emitted get-state (${effectiveMatchId}).`);
-        },
-        onDisconnect: (reason) => {
-          setConnectionStatus('offline');
-          appendLog(`Socket disconnected (${reason}).`);
-        },
-        onError: (payload: ServerErrorPayload) => {
-          appendLog(
-            payload.message ? `Server error: ${payload.message}` : 'Server emitted error event.',
-          );
-        },
-        onPlayerAssigned: (payload) => {
-          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+    return () => window.clearTimeout(timeout);
+  }, [isResolvingRound]);
 
-          if (!sameMatch) {
-            return;
-          }
+  useEffect(() => {
+    if (
+      displayedOpponentPlayedCard &&
+      displayedOpponentPlayedCard !== previousOpponentPlayedCardRef.current
+    ) {
+      setOpponentRevealKey((current) => current + 1);
+    }
 
-          setPlayerAssigned(payload);
-          persistLiveSnapshot({ nextPlayerAssigned: payload });
-          appendLog(`Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`);
-        },
-        onRoomState: (payload) => {
-          if (payload.matchId && payload.matchId !== effectiveMatchId) {
-            return;
-          }
+    previousOpponentPlayedCardRef.current = displayedOpponentPlayedCard;
+  }, [displayedOpponentPlayedCard]);
 
-          setRoomState(payload);
-          persistLiveSnapshot({ nextRoomState: payload });
-          appendLog('Received room-state.');
-        },
-        onMatchState: (payload) => {
-          if (payload.matchId && payload.matchId !== effectiveMatchId) {
-            return;
-          }
+  useEffect(() => {
+    const currentPlayedRoundsCount = viewModel.playedRoundsCount;
+    const previousPlayedRoundsCount = previousPlayedRoundsCountRef.current;
 
-          setPublicMatchState(payload);
-          persistLiveSnapshot({ nextPublicMatchState: payload });
-          appendLog('Received public match-state.');
-        },
-        onPrivateMatchState: (payload) => {
-          if (payload.matchId && payload.matchId !== effectiveMatchId) {
-            return;
-          }
+    if (
+      currentPlayedRoundsCount > 0 &&
+      currentPlayedRoundsCount !== previousPlayedRoundsCount &&
+      viewModel.latestRound?.finished
+    ) {
+      setRoundResolvedKey((current) => current + 1);
+      setIsResolvingRound(true);
+    }
 
-          setPrivateMatchState(payload);
-          persistLiveSnapshot({ nextPrivateMatchState: payload });
-          appendLog('Received private match-state.');
-        },
-        onHandStarted: (payload) => {
-          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
-
-          if (!sameMatch || !payload.viraRank) {
-            return;
-          }
-
-          tableTransition.beginHandTransition();
-          setViraRank(payload.viraRank);
-          appendLog(`Received hand-started (${payload.viraRank}).`);
-        },
-        onCardPlayed: (payload) => {
-          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
-
-          if (!sameMatch) {
-            return;
-          }
-
-          const owner = resolvePlayedCardOwner({
-            payloadPlayerId: payload.playerId,
-            mySeat: mySeatRef.current,
-          });
-
-          tableTransition.registerIncomingPlayedCard({
-            owner,
-            card: payload.card ?? null,
-          });
-
-          appendLog(
-            payload.card ? `Received card-played (${payload.card}).` : 'Received card-played.',
-          );
-        },
-      },
-    );
-
-    return () => {
-      client.disconnect();
-      clientRef.current = null;
-    };
-  }, [effectiveMatchId, session?.authToken, session?.backendUrl]);
+    previousPlayedRoundsCountRef.current = currentPlayedRoundsCount;
+  }, [viewModel.latestRound, viewModel.playedRoundsCount]);
 
   function handleRefreshState(): void {
     if (!viewModel.resolvedMatchId) {
@@ -423,7 +516,7 @@ export function MatchPage() {
       return;
     }
 
-    tableTransition.beginHandTransition();
+    setRoundIntroKey((current) => current + 1);
     clientRef.current?.emitStartHand(viewModel.resolvedMatchId, viraRank);
     appendLog(`Emitted start-hand (${viewModel.resolvedMatchId}, ${viraRank}).`);
   }
@@ -437,13 +530,19 @@ export function MatchPage() {
     const cardKey = `${card.rank}|${card.suit}`;
     const serverCard = `${card.rank}${card.suit}`;
 
-    tableTransition.beginOwnCardLaunch({
-      cardKey,
-      serverCard,
+    setLaunchingCardKey(cardKey);
+    setPendingPlayedCard({
+      owner: 'mine',
+      card: serverCard,
+      id: Date.now(),
     });
 
     clientRef.current?.emitPlayCard(viewModel.resolvedMatchId, card);
     appendLog(`Emitted play-card (${card.rank}${suitSymbol(card.suit)}).`);
+
+    window.setTimeout(() => {
+      setLaunchingCardKey((current) => (current === cardKey ? null : current));
+    }, 700);
   }
 
   function handleMatchAction(
@@ -616,9 +715,9 @@ export function MatchPage() {
                   </div>
 
                   <AnimatePresence>
-                    {tableTransition.roundIntroKey > 0 && viewModel.tablePhase === 'playing' ? (
+                    {roundIntroKey > 0 && viewModel.tablePhase === 'playing' ? (
                       <motion.div
-                        key={`hand-intro-${tableTransition.roundIntroKey}`}
+                        key={`hand-intro-${roundIntroKey}`}
                         initial={{ opacity: 0, y: -18, scale: 0.96 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -12, scale: 0.96 }}
@@ -634,9 +733,9 @@ export function MatchPage() {
                   </AnimatePresence>
 
                   <AnimatePresence>
-                    {tableTransition.roundResolvedKey > 0 && viewModel.latestRound?.finished ? (
+                    {roundResolvedKey > 0 && viewModel.latestRound?.finished ? (
                       <motion.div
-                        key={`round-resolved-${tableTransition.roundResolvedKey}`}
+                        key={`round-resolved-${roundResolvedKey}`}
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.96 }}
@@ -678,7 +777,7 @@ export function MatchPage() {
                           value={displayedOpponentPlayedCard}
                           perspective="top"
                           highlight={Boolean(viewModel.opponentSeatView?.isCurrentTurn)}
-                          revealKey={tableTransition.opponentRevealKey}
+                          revealKey={opponentRevealKey}
                           isRevealed
                         />
                       </motion.div>
@@ -689,11 +788,10 @@ export function MatchPage() {
                           value={displayedMyPlayedCard}
                           perspective="bottom"
                           highlight={Boolean(viewModel.mySeatView?.isCurrentTurn)}
-                          revealKey={tableTransition.pendingPlayedCard?.owner === 'mine' ? tableTransition.pendingPlayedCard.id : 0}
+                          revealKey={pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0}
                           isRevealed={Boolean(displayedMyPlayedCard)}
                           isLaunching={
-                            tableTransition.pendingPlayedCard?.owner === 'mine' &&
-                            !viewModel.myPlayedCard
+                            pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard
                           }
                         />
                       </motion.div>
@@ -728,42 +826,229 @@ export function MatchPage() {
                       onAction={handleMatchAction}
                     />
 
-                    <MatchPlayerHandPanel
-                      myCards={viewModel.myCards}
-                      canPlayCard={viewModel.canPlayCard}
-                      tablePhase={viewModel.tablePhase}
-                      launchingCardKey={tableTransition.launchingCardKey}
-                      currentPrivateHand={viewModel.currentPrivateHand}
-                      currentPublicHand={viewModel.currentPublicHand}
-                      onPlayCard={handlePlayCard}
-                    />
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-base font-black tracking-tight text-slate-100">
+                              Minha mão
+                            </div>
+                            <p className="mt-1 text-sm leading-6 text-slate-400">
+                              A mão visível vem exclusivamente do payload privado da partida.
+                            </p>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
+                              viewModel.canPlayCard
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-white/5 text-slate-300'
+                            }`}
+                          >
+                            {viewModel.canPlayCard ? 'Your turn' : 'Waiting'}
+                          </span>
+                        </div>
+
+                        <div className="mt-6 flex min-h-48 flex-wrap items-end gap-4">
+                          {viewModel.myCards.length === 0 ? (
+                            <HandEmptyState tablePhase={viewModel.tablePhase} />
+                          ) : (
+                            viewModel.myCards.map((card, index) => {
+                              const cardKey = `${card.rank}|${card.suit}`;
+                              const isLaunching = launchingCardKey === cardKey;
+                              const hoverAnimation =
+                                viewModel.canPlayCard && !isLaunching
+                                  ? { y: -22, scale: 1.06, rotate: index % 2 === 0 ? -2 : 2 }
+                                  : {};
+                              const tapAnimation =
+                                viewModel.canPlayCard && !isLaunching ? { scale: 0.96 } : {};
+                              const animateState = isLaunching
+                                ? {
+                                    opacity: 0,
+                                    y: -220,
+                                    x: 34,
+                                    rotate: 14,
+                                    scale: 0.72,
+                                    filter: 'blur(2px)',
+                                  }
+                                : {
+                                    opacity: 1,
+                                    y: 0,
+                                    rotate: 0,
+                                    scale: 1,
+                                    filter: 'blur(0px)',
+                                  };
+
+                              return (
+                                <motion.button
+                                  key={cardKey}
+                                  type="button"
+                                  onClick={() => handlePlayCard(card)}
+                                  disabled={!viewModel.canPlayCard || isLaunching}
+                                  initial={{
+                                    opacity: 0,
+                                    y: 34,
+                                    rotate: index % 2 === 0 ? -7 : 7,
+                                  }}
+                                  animate={animateState}
+                                  transition={{
+                                    delay: isLaunching ? 0 : index * 0.08,
+                                    type: 'spring',
+                                    stiffness: 240,
+                                    damping: 17,
+                                  }}
+                                  whileHover={hoverAnimation}
+                                  whileTap={tapAnimation}
+                                  className="flex h-44 w-28 flex-col items-center justify-between rounded-[24px] border border-white/15 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_20px_42px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
+                                  title={`Play ${card.rank}${suitSymbol(card.suit)}`}
+                                >
+                                  <span className="self-start text-lg font-black">{card.rank}</span>
+                                  <span className={`text-4xl ${suitColorClass(card.suit)}`}>
+                                    {suitSymbol(card.suit)}
+                                  </span>
+                                  <span className="self-end text-lg font-black">{card.rank}</span>
+                                </motion.button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4">
+                        <MetricCard
+                          label="Vira"
+                          value={
+                            viewModel.currentPrivateHand?.viraRank ??
+                            viewModel.currentPublicHand?.viraRank ??
+                            '-'
+                          }
+                          mono
+                        />
+                        <MetricCard
+                          label="Viewer"
+                          value={viewModel.currentPrivateHand?.viewerPlayerId ?? '-'}
+                          mono
+                        />
+                        <MetricCard
+                          label="Hand finished"
+                          value={String(viewModel.currentPublicHand?.finished ?? false)}
+                          mono
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </motion.div>
             </section>
 
-            <MatchRoundsHistoryPanel
-              rounds={viewModel.rounds}
-              latestRound={viewModel.latestRound}
-              playedRoundsCount={viewModel.playedRoundsCount}
-            />
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/40 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Rounds played
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Histórico vindo do `currentHand.rounds`, sem depender de narrativa local.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                  {viewModel.playedRoundsCount} / 3
+                </span>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-3">
+                {[0, 1, 2].map((index) => {
+                  const round = viewModel.rounds[index] ?? null;
+                  const played = Boolean(round?.playerOneCard || round?.playerTwoCard);
+                  const isLatestResolved =
+                    viewModel.latestRound != null &&
+                    viewModel.latestRound.finished &&
+                    viewModel.rounds.indexOf(viewModel.latestRound) === index;
+
+                  return (
+                    <motion.div
+                      key={index}
+                      animate={isLatestResolved ? roundResolvedAnimation : {}}
+                      transition={{ duration: 1.2 }}
+                      className={`rounded-[28px] border p-5 ${
+                        played
+                          ? 'border-white/10 bg-white/[0.03]'
+                          : 'border-dashed border-white/10 bg-white/[0.02]'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                        Round {index + 1}
+                      </div>
+
+                      <div className="mt-4 grid gap-3 text-sm">
+                        <RoundLine label="T1" value={round?.playerOneCard ?? '—'} />
+                        <RoundLine label="T2" value={round?.playerTwoCard ?? '—'} />
+                      </div>
+
+                      <div className="mt-4 text-xs text-slate-400">
+                        Result: {formatRoundResult(round?.result ?? null)}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </section>
           </div>
 
           <aside className="grid gap-6 self-start">
-            <MatchLiveStatePanel
-              connectionStatus={connectionStatus}
-              resolvedMatchId={viewModel.resolvedMatchId}
-              publicState={publicMatchState?.state || '-'}
-              privateState={privateMatchState?.state || '-'}
-              mySeat={viewModel.mySeat}
-              currentTurnSeatId={viewModel.currentTurnSeatId}
-              canStartHand={viewModel.canStartHand}
-              canPlayCard={viewModel.canPlayCard}
-              betState={viewModel.betState}
-              specialStateLabel={formatSpecialState(viewModel.specialState)}
-              availableActionsSummary={formatAvailableActionsSummary(viewModel.availableActions)}
-              canRenderLiveState={canRenderLiveState}
-            />
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Match live state
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Painel técnico segue secundário, mas fiel ao payload.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  server-driven
+                </span>
+              </div>
+
+              <div className="mt-6 grid gap-4">
+                <MetricCard
+                  label="Connection"
+                  value={connectionStatus}
+                  tone={connectionStatus === 'online' ? 'success' : 'danger'}
+                />
+                <MetricCard label="Match ID" value={viewModel.resolvedMatchId || '-'} mono />
+                <MetricCard label="Public state" value={publicMatchState?.state || '-'} mono />
+                <MetricCard label="Private state" value={privateMatchState?.state || '-'} mono />
+                <MetricCard label="My seat" value={viewModel.mySeat || '-'} mono />
+                <MetricCard
+                  label="Current turn seat"
+                  value={viewModel.currentTurnSeatId ?? '-'}
+                  mono
+                />
+                <MetricCard label="Can start" value={String(viewModel.canStartHand)} mono />
+                <MetricCard label="Can play card" value={String(viewModel.canPlayCard)} mono />
+                <MetricCard label="Bet state" value={viewModel.betState} mono />
+                <MetricCard
+                  label="Special state"
+                  value={formatSpecialState(viewModel.specialState)}
+                  mono
+                />
+                <MetricCard
+                  label="Available actions"
+                  value={formatAvailableActionsSummary(viewModel.availableActions)}
+                  mono
+                />
+
+                {!canRenderLiveState ? (
+                  <div className="rounded-[28px] border border-amber-400/15 bg-amber-500/5 p-5 text-sm leading-6 text-amber-200">
+                    Missing authenticated session or matchId to hydrate the live table.
+                  </div>
+                ) : null}
+              </div>
+            </section>
 
             <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
