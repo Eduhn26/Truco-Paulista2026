@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
+import { MatchTableShell } from '../features/match/matchTableShell';
 import {
   getLastActiveMatchId,
   loadMatchSnapshot,
@@ -664,281 +665,44 @@ export function MatchPage() {
         <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="grid gap-6">
             <section className="rounded-[34px] border border-white/10 bg-slate-950/35 p-4 sm:p-6">
-              <motion.div
-                layout
-                className="relative overflow-hidden rounded-[32px] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.22),transparent_48%),linear-gradient(180deg,rgba(13,64,40,0.94),rgba(8,25,21,0.98))] px-5 py-6 sm:px-8 sm:py-8"
-              >
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,rgba(255,255,255,0.04),transparent_45%)]" />
-                <div className="pointer-events-none absolute bottom-3 left-1/2 h-12 w-[78%] -translate-x-1/2 rounded-full bg-black/20 blur-xl" />
-
-                <div className="relative grid gap-7">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <div className="text-lg font-black tracking-tight text-slate-100">
-                        Table state
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-emerald-50/75">
-                        Mesa centrada na verdade do payload: oponente em cima, você embaixo, slots
-                        centrais e próxima ação guiada pelo backend.
-                      </p>
-                    </div>
-
-                    <motion.div
-                      key={viewModel.handStatusLabel}
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`rounded-3xl border px-4 py-3 text-sm font-bold ${statusToneClass(viewModel.handStatusTone)}`}
-                    >
-                      {viewModel.handStatusLabel}
-                    </motion.div>
-                  </div>
-
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <StatusPanel
-                      title="Bet state"
-                      value={formatBetStatus(viewModel)}
-                      detail={formatBetDetail(viewModel)}
-                      tone={viewModel.betState === 'awaiting_response' ? 'warning' : 'neutral'}
-                    />
-                    <StatusPanel
-                      title="Special hand"
-                      value={formatSpecialState(viewModel.specialState)}
-                      detail={formatSpecialDetail(viewModel)}
-                      tone={
-                        viewModel.specialState !== 'normal' || viewModel.specialDecisionPending
-                          ? 'warning'
-                          : viewModel.winner || viewModel.awardedPoints
-                            ? 'success'
-                            : 'neutral'
-                      }
-                    />
-                  </div>
-
-                  <AnimatePresence>
-                    {roundIntroKey > 0 && viewModel.tablePhase === 'playing' ? (
-                      <motion.div
-                        key={`hand-intro-${roundIntroKey}`}
-                        initial={{ opacity: 0, y: -18, scale: 0.96 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -12, scale: 0.96 }}
-                        transition={{ duration: 0.45 }}
-                        className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-emerald-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-emerald-300 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
-                      >
-                        Nova mão iniciada · vira{' '}
-                        {viewModel.currentPrivateHand?.viraRank ??
-                          viewModel.currentPublicHand?.viraRank ??
-                          viraRank}
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-
-                  <AnimatePresence>
-                    {roundResolvedKey > 0 && viewModel.latestRound?.finished ? (
-                      <motion.div
-                        key={`round-resolved-${roundResolvedKey}`}
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.96 }}
-                        transition={{ duration: 0.35 }}
-                        className="absolute left-1/2 top-32 z-20 -translate-x-1/2 rounded-full border border-amber-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-amber-200 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
-                      >
-                        Round fechado · {formatRoundResult(viewModel.latestRound.result)}
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-
-                  {(viewModel.tablePhase === 'hand_finished' ||
-                    viewModel.tablePhase === 'match_finished') && (
-                    <HandCompletionBanner
-                      tablePhase={viewModel.tablePhase}
-                      canStartHand={viewModel.canStartHand}
-                      scoreLabel={viewModel.scoreLabel}
-                    />
-                  )}
-
-                  <div className="grid gap-7">
-                    <div className="grid justify-center">
-                      {viewModel.opponentSeatView ? (
-                        <SeatBadge
-                          seat={viewModel.opponentSeatView}
-                          label={
-                            viewModel.isOneVsOne ? 'Opponent' : viewModel.opponentSeatView.seatId
-                          }
-                        />
-                      ) : null}
-                    </div>
-
-                    <div className="relative grid gap-5 md:grid-cols-2">
-                      <div className="pointer-events-none absolute inset-x-0 top-1/2 hidden h-px -translate-y-1/2 bg-white/5 md:block" />
-
-                      <motion.div layout className="grid gap-3">
-                        <PlayedCardZone
-                          title={viewModel.isOneVsOne ? 'Opponent card' : 'Upper side card'}
-                          value={displayedOpponentPlayedCard}
-                          perspective="top"
-                          highlight={Boolean(viewModel.opponentSeatView?.isCurrentTurn)}
-                          revealKey={opponentRevealKey}
-                          isRevealed
-                        />
-                      </motion.div>
-
-                      <motion.div layout className="grid gap-3">
-                        <PlayedCardZone
-                          title={viewModel.isOneVsOne ? 'Your card' : 'Lower side card'}
-                          value={displayedMyPlayedCard}
-                          perspective="bottom"
-                          highlight={Boolean(viewModel.mySeatView?.isCurrentTurn)}
-                          revealKey={pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0}
-                          isRevealed={Boolean(displayedMyPlayedCard)}
-                          isLaunching={
-                            pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard
-                          }
-                        />
-                      </motion.div>
-                    </div>
-
-                    <div className="grid justify-center">
-                      {viewModel.mySeatView ? (
-                        <SeatBadge
-                          seat={viewModel.mySeatView}
-                          label={viewModel.isOneVsOne ? 'You' : viewModel.mySeatView.seatId}
-                        />
-                      ) : null}
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-6">
-                      <MetricCard label="Mode" value={roomState?.mode ?? '-'} />
-                      <MetricCard label="Turn" value={viewModel.currentTurnSeatId ?? '-'} />
-                      <MetricCard
-                        label="Last round"
-                        value={formatRoundResult(viewModel.latestRound?.result ?? null)}
-                      />
-                      <MetricCard label="Score" value={viewModel.scoreLabel} />
-                      <MetricCard label="Current value" value={String(viewModel.currentValue)} />
-                      <MetricCard
-                        label="Special state"
-                        value={formatSpecialState(viewModel.specialState)}
-                      />
-                    </div>
-
-                    <ActionBar
-                      availableActions={viewModel.availableActions}
-                      onAction={handleMatchAction}
-                    />
-
-                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-                      <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-base font-black tracking-tight text-slate-100">
-                              Minha mão
-                            </div>
-                            <p className="mt-1 text-sm leading-6 text-slate-400">
-                              A mão visível vem exclusivamente do payload privado da partida.
-                            </p>
-                          </div>
-
-                          <span
-                            className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
-                              viewModel.canPlayCard
-                                ? 'bg-emerald-500/15 text-emerald-300'
-                                : 'bg-white/5 text-slate-300'
-                            }`}
-                          >
-                            {viewModel.canPlayCard ? 'Your turn' : 'Waiting'}
-                          </span>
-                        </div>
-
-                        <div className="mt-6 flex min-h-48 flex-wrap items-end gap-4">
-                          {viewModel.myCards.length === 0 ? (
-                            <HandEmptyState tablePhase={viewModel.tablePhase} />
-                          ) : (
-                            viewModel.myCards.map((card, index) => {
-                              const cardKey = `${card.rank}|${card.suit}`;
-                              const isLaunching = launchingCardKey === cardKey;
-                              const hoverAnimation =
-                                viewModel.canPlayCard && !isLaunching
-                                  ? { y: -22, scale: 1.06, rotate: index % 2 === 0 ? -2 : 2 }
-                                  : {};
-                              const tapAnimation =
-                                viewModel.canPlayCard && !isLaunching ? { scale: 0.96 } : {};
-                              const animateState = isLaunching
-                                ? {
-                                    opacity: 0,
-                                    y: -220,
-                                    x: 34,
-                                    rotate: 14,
-                                    scale: 0.72,
-                                    filter: 'blur(2px)',
-                                  }
-                                : {
-                                    opacity: 1,
-                                    y: 0,
-                                    rotate: 0,
-                                    scale: 1,
-                                    filter: 'blur(0px)',
-                                  };
-
-                              return (
-                                <motion.button
-                                  key={cardKey}
-                                  type="button"
-                                  onClick={() => handlePlayCard(card)}
-                                  disabled={!viewModel.canPlayCard || isLaunching}
-                                  initial={{
-                                    opacity: 0,
-                                    y: 34,
-                                    rotate: index % 2 === 0 ? -7 : 7,
-                                  }}
-                                  animate={animateState}
-                                  transition={{
-                                    delay: isLaunching ? 0 : index * 0.08,
-                                    type: 'spring',
-                                    stiffness: 240,
-                                    damping: 17,
-                                  }}
-                                  whileHover={hoverAnimation}
-                                  whileTap={tapAnimation}
-                                  className="flex h-44 w-28 flex-col items-center justify-between rounded-[24px] border border-white/15 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_20px_42px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
-                                  title={`Play ${card.rank}${suitSymbol(card.suit)}`}
-                                >
-                                  <span className="self-start text-lg font-black">{card.rank}</span>
-                                  <span className={`text-4xl ${suitColorClass(card.suit)}`}>
-                                    {suitSymbol(card.suit)}
-                                  </span>
-                                  <span className="self-end text-lg font-black">{card.rank}</span>
-                                </motion.button>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-4">
-                        <MetricCard
-                          label="Vira"
-                          value={
-                            viewModel.currentPrivateHand?.viraRank ??
-                            viewModel.currentPublicHand?.viraRank ??
-                            '-'
-                          }
-                          mono
-                        />
-                        <MetricCard
-                          label="Viewer"
-                          value={viewModel.currentPrivateHand?.viewerPlayerId ?? '-'}
-                          mono
-                        />
-                        <MetricCard
-                          label="Hand finished"
-                          value={String(viewModel.currentPublicHand?.finished ?? false)}
-                          mono
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <MatchTableShell
+                handStatusLabel={viewModel.handStatusLabel}
+                handStatusTone={viewModel.handStatusTone}
+                betState={viewModel.betState}
+                currentValue={viewModel.currentValue}
+                pendingValue={viewModel.pendingValue}
+                requestedBy={viewModel.requestedBy}
+                specialState={viewModel.specialState}
+                specialDecisionPending={viewModel.specialDecisionPending}
+                specialDecisionBy={viewModel.specialDecisionBy}
+                winner={viewModel.winner}
+                awardedPoints={viewModel.awardedPoints}
+                latestRound={viewModel.latestRound}
+                tablePhase={viewModel.tablePhase}
+                canStartHand={viewModel.canStartHand}
+                scoreLabel={viewModel.scoreLabel}
+                opponentSeatView={viewModel.opponentSeatView}
+                mySeatView={viewModel.mySeatView}
+                isOneVsOne={viewModel.isOneVsOne}
+                roomMode={roomState?.mode ?? null}
+                currentTurnSeatId={viewModel.currentTurnSeatId}
+                displayedOpponentPlayedCard={displayedOpponentPlayedCard}
+                displayedMyPlayedCard={displayedMyPlayedCard}
+                opponentRevealKey={opponentRevealKey}
+                myRevealKey={pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.id : 0}
+                myCardLaunching={pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard}
+                roundIntroKey={roundIntroKey}
+                roundResolvedKey={roundResolvedKey}
+                currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
+                currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
+                viraRank={viraRank}
+                availableActions={viewModel.availableActions}
+                onAction={handleMatchAction}
+                myCards={viewModel.myCards}
+                canPlayCard={viewModel.canPlayCard}
+                launchingCardKey={launchingCardKey}
+                onPlayCard={handlePlayCard}
+              />
             </section>
 
             <section className="rounded-[30px] border border-white/10 bg-slate-950/40 p-6">
