@@ -141,6 +141,7 @@ export function MatchPage() {
   const [opponentRevealKey, setOpponentRevealKey] = useState(0);
   const [roundIntroKey, setRoundIntroKey] = useState(0);
   const [roundResolvedKey, setRoundResolvedKey] = useState(0);
+  const [isResolvingRound, setIsResolvingRound] = useState(false);
 
   function appendLog(line: string): void {
     setEventLog((current) =>
@@ -257,6 +258,7 @@ export function MatchPage() {
             mine: null,
             opponent: null,
           });
+          setIsResolvingRound(false);
           setViraRank(payload.viraRank);
           setRoundIntroKey((current) => current + 1);
           appendLog(`Received hand-started (${payload.viraRank}).`);
@@ -273,7 +275,7 @@ export function MatchPage() {
             mySeat: mySeatRef.current,
           });
 
-          if (owner && payload.card) {
+          if (owner && payload.card && !isResolvingRound) {
             setClosingTableCards((current) => ({
               ...current,
               [owner]: payload.card,
@@ -291,7 +293,7 @@ export function MatchPage() {
       client.disconnect();
       clientRef.current = null;
     };
-  }, [effectiveMatchId, session?.authToken, session?.backendUrl]);
+  }, [effectiveMatchId, isResolvingRound, session?.authToken, session?.backendUrl]);
 
   const viewModel = useMemo<MatchViewModel>(() => {
     const resolvedMatchId =
@@ -422,15 +424,18 @@ export function MatchPage() {
     };
   }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
 
+  const isLiveTableFrame =
+    viewModel.tablePhase === 'playing' || viewModel.tablePhase === 'hand_finished';
+
   const displayedMyPlayedCard =
     (pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.card : null) ??
     closingTableCards.mine ??
-    viewModel.myPlayedCard;
+    (isLiveTableFrame ? viewModel.myPlayedCard : null);
 
   const displayedOpponentPlayedCard =
     closingTableCards.opponent ??
     (pendingPlayedCard?.owner === 'opponent' ? pendingPlayedCard.card : null) ??
-    viewModel.opponentPlayedCard;
+    (isLiveTableFrame ? viewModel.opponentPlayedCard : null);
 
   useEffect(() => {
     if (pendingPlayedCard?.owner === 'mine' && viewModel.myPlayedCard === pendingPlayedCard.card) {
@@ -445,6 +450,28 @@ export function MatchPage() {
       opponent: current.opponent === viewModel.opponentPlayedCard ? null : current.opponent,
     }));
   }, [viewModel.myPlayedCard, viewModel.opponentPlayedCard]);
+
+  useEffect(() => {
+    if (publicMatchState?.state !== 'in_progress' || !publicMatchState.currentHand) {
+      setPendingPlayedCard(null);
+      setClosingTableCards({ mine: null, opponent: null });
+      return;
+    }
+  }, [publicMatchState?.state, publicMatchState?.currentHand?.rounds?.length]);
+
+  useEffect(() => {
+    if (!isResolvingRound) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setClosingTableCards({ mine: null, opponent: null });
+      setPendingPlayedCard(null);
+      setIsResolvingRound(false);
+    }, 1100);
+
+    return () => window.clearTimeout(timeout);
+  }, [isResolvingRound]);
 
   useEffect(() => {
     if (
@@ -467,6 +494,7 @@ export function MatchPage() {
       viewModel.latestRound?.finished
     ) {
       setRoundResolvedKey((current) => current + 1);
+      setIsResolvingRound(true);
     }
 
     previousPlayedRoundsCountRef.current = currentPlayedRoundsCount;
