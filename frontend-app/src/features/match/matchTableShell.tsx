@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 
 import { MatchActionSurface } from './matchActionSurface';
+import { MatchPlayerHandPanel } from './matchPlayerHandPanel';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
@@ -62,6 +63,8 @@ type MatchTableShellProps = {
   myCards: CardPayload[];
   canPlayCard: boolean;
   launchingCardKey: string | null;
+  currentPrivateHand: MatchStatePayload['currentHand'] | null;
+  currentPublicHand: MatchStatePayload['currentHand'] | null;
   onPlayCard: (card: CardPayload) => void;
 };
 
@@ -110,6 +113,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     myCards,
     canPlayCard,
     launchingCardKey,
+    currentPrivateHand,
+    currentPublicHand,
     onPlayCard,
   } = props;
 
@@ -254,96 +259,15 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
           <MatchActionSurface availableActions={availableActions} onAction={onAction} />
 
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-            <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-base font-black tracking-tight text-slate-100">
-                    Minha mão
-                  </div>
-                  <p className="mt-1 text-sm leading-6 text-slate-400">
-                    A mão visível vem exclusivamente do payload privado da partida.
-                  </p>
-                </div>
-
-                <span
-                  className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
-                    canPlayCard ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-300'
-                  }`}
-                >
-                  {canPlayCard ? 'Your turn' : 'Waiting'}
-                </span>
-              </div>
-
-              <div className="mt-6 flex min-h-48 flex-wrap items-end gap-4">
-                {myCards.length === 0 ? (
-                  <HandEmptyState tablePhase={tablePhase} />
-                ) : (
-                  myCards.map((card, index) => {
-                    const cardKey = `${card.rank}|${card.suit}`;
-                    const isLaunching = launchingCardKey === cardKey;
-                    const hoverAnimation =
-                      canPlayCard && !isLaunching
-                        ? { y: -22, scale: 1.06, rotate: index % 2 === 0 ? -2 : 2 }
-                        : {};
-                    const tapAnimation = canPlayCard && !isLaunching ? { scale: 0.96 } : {};
-                    const animateState = isLaunching
-                      ? {
-                          opacity: 0,
-                          y: -220,
-                          x: 34,
-                          rotate: 14,
-                          scale: 0.72,
-                          filter: 'blur(2px)',
-                        }
-                      : {
-                          opacity: 1,
-                          y: 0,
-                          rotate: 0,
-                          scale: 1,
-                          filter: 'blur(0px)',
-                        };
-
-                    return (
-                      <motion.button
-                        key={cardKey}
-                        type="button"
-                        onClick={() => onPlayCard(card)}
-                        disabled={!canPlayCard || isLaunching}
-                        initial={{
-                          opacity: 0,
-                          y: 34,
-                          rotate: index % 2 === 0 ? -7 : 7,
-                        }}
-                        animate={animateState}
-                        transition={{
-                          delay: isLaunching ? 0 : index * 0.08,
-                          type: 'spring',
-                          stiffness: 240,
-                          damping: 17,
-                        }}
-                        whileHover={hoverAnimation}
-                        whileTap={tapAnimation}
-                        className="flex h-44 w-28 flex-col items-center justify-between rounded-[24px] border border-white/15 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_20px_42px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
-                        title={`Play ${card.rank}${suitSymbol(card.suit)}`}
-                      >
-                        <span className="self-start text-lg font-black">{card.rank}</span>
-                        <span className={`text-4xl ${suitColorClass(card.suit)}`}>
-                          {suitSymbol(card.suit)}
-                        </span>
-                        <span className="self-end text-lg font-black">{card.rank}</span>
-                      </motion.button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-4">
-              <MetricCard label="Vira" value={currentPrivateViraRank ?? currentPublicViraRank ?? '-'} mono />
-              <MetricCard label="Hand finished" value={String(tablePhase === 'hand_finished')} mono />
-            </div>
-          </div>
+          <MatchPlayerHandPanel
+            myCards={myCards}
+            canPlayCard={canPlayCard}
+            tablePhase={tablePhase}
+            launchingCardKey={launchingCardKey}
+            currentPrivateHand={currentPrivateHand}
+            currentPublicHand={currentPublicHand}
+            onPlayCard={onPlayCard}
+          />
         </div>
       </div>
     </motion.div>
@@ -395,18 +319,12 @@ function HandCompletionBanner({
 }
 
 const seatPulseAnimation = {
-  idle: {
-    scale: 1,
-    opacity: 1,
-  },
-  active: {
-    scale: [1, 1.03, 1],
-    opacity: [0.92, 1, 0.92],
-    transition: {
-      duration: 1.6,
-      repeat: Infinity,
-      ease: 'easeInOut',
-    },
+  scale: [1, 1.03, 1],
+  opacity: [0.92, 1, 0.92],
+  transition: {
+    duration: 1.6,
+    repeat: Infinity,
+    ease: [0.42, 0, 0.58, 1] as const,
   },
 };
 

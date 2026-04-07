@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import type { MatchStatePayload } from '../services/socket/socketTypes';
+import type { MatchStatePayload } from '../../services/socket/socketTypes';
 
 type RoundItem = NonNullable<MatchStatePayload['currentHand']>['rounds'][number];
 
