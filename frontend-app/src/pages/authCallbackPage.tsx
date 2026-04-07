@@ -1,11 +1,16 @@
 import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 
+import { getDefaultBackendUrl, normalizeBackendUrl } from '../config/appConfig';
+import {
+  clearPendingAuthBackendUrl,
+  loadPendingAuthBackendUrl,
+} from '../features/auth/authStorage';
 import { useAuth } from '../features/auth/authStore';
 
 export function AuthCallbackPage() {
   const searchParams = new URLSearchParams(window.location.search);
-  const { setSession } = useAuth();
+  const { session, setSession } = useAuth();
 
   const payload = useMemo(() => {
     const authToken = searchParams.get('authToken');
@@ -38,21 +43,25 @@ export function AuthCallbackPage() {
       return;
     }
 
+    const pendingBackendUrl = loadPendingAuthBackendUrl();
+    const resolvedBackendUrl = normalizeBackendUrl(
+      pendingBackendUrl ?? session?.backendUrl ?? getDefaultBackendUrl(),
+    );
+
     setSession({
-      backendUrl:
-        window.location.origin === 'http://localhost:5173'
-          ? 'http://localhost:3000'
-          : window.location.origin,
+      backendUrl: resolvedBackendUrl,
       authToken: payload.authToken,
       expiresIn: payload.expiresIn,
       user: payload.user,
     });
 
+    clearPendingAuthBackendUrl();
+
     // NOTE: OAuth callback comes from a full external redirect.
     // A hard redirect here is more reliable than client-side navigation
     // and avoids stale callback UI remaining mounted until a manual refresh.
     window.location.replace('/lobby');
-  }, [payload, setSession]);
+  }, [payload, session?.backendUrl, setSession]);
 
   if (!payload) {
     return (
@@ -105,8 +114,8 @@ export function AuthCallbackPage() {
           </h1>
 
           <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
-            O frontend recebeu a sessão emitida pelo backend e está preparando o redirecionamento
-            para o lobby.
+            O frontend recebeu a sessão emitida pelo backend e está restaurando a boundary correta
+            da API antes de abrir o lobby.
           </p>
         </div>
 
@@ -136,8 +145,8 @@ export function AuthCallbackPage() {
           <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
             <div className="text-sm font-semibold text-slate-100">Next step</div>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              The browser session is being persisted locally before the application opens the lobby
-              flow.
+              The browser session is being persisted locally with the backend URL that actually
+              started the OAuth flow.
             </p>
           </div>
         </div>

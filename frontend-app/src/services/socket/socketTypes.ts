@@ -3,6 +3,10 @@ export type Suit = 'C' | 'O' | 'P' | 'E' | string;
 export type Rank = '4' | '5' | '6' | '7' | 'Q' | 'J' | 'K' | 'A' | '2' | '3' | string;
 export type MatchState = 'waiting' | 'in_progress' | 'finished' | string;
 export type RoundResult = 'P1' | 'P2' | 'TIE' | string;
+export type PlayerId = 'P1' | 'P2' | string;
+export type HandValue = 1 | 3 | 6 | 9 | 12 | number;
+export type HandBetState = 'idle' | 'awaiting_response' | string;
+export type HandSpecialState = 'normal' | 'mao_de_onze' | 'mao_de_ferro' | string;
 
 export type CardPayload = {
   rank: Rank;
@@ -17,7 +21,7 @@ export type PlayerAssignedPayload = {
   matchId: string;
   seatId: SeatId;
   teamId?: string;
-  playerId?: 'P1' | 'P2' | string;
+  playerId?: PlayerId;
   playerToken?: string;
   profileId?: string;
 };
@@ -35,6 +39,18 @@ export type RoomStatePayload = {
   currentTurnSeatId: SeatId | null;
 };
 
+export type MatchAvailableActionsPayload = {
+  canRequestTruco: boolean;
+  canRaiseToSix: boolean;
+  canRaiseToNine: boolean;
+  canRaiseToTwelve: boolean;
+  canAcceptBet: boolean;
+  canDeclineBet: boolean;
+  canAcceptMaoDeOnze: boolean;
+  canDeclineMaoDeOnze: boolean;
+  canAttemptPlayCard: boolean;
+};
+
 export type MatchStateRoundPayload = {
   playerOneCard: string | null;
   playerTwoCard: string | null;
@@ -46,6 +62,16 @@ export type MatchStateHandPayload = {
   viraRank: Rank;
   finished: boolean;
   viewerPlayerId: 'P1' | 'P2' | null;
+  currentValue: HandValue;
+  betState: HandBetState;
+  pendingValue: HandValue | null;
+  requestedBy: PlayerId | null;
+  specialState: HandSpecialState;
+  specialDecisionPending: boolean;
+  specialDecisionBy: PlayerId | null;
+  winner: PlayerId | null;
+  awardedPoints: HandValue | null;
+  availableActions: MatchAvailableActionsPayload;
   playerOneHand: string[];
   playerTwoHand: string[];
   rounds: MatchStateRoundPayload[];
@@ -78,7 +104,7 @@ export type HandStartedPayload = {
 
 export type CardPlayedPayload = {
   matchId: string;
-  playerId?: 'P1' | 'P2' | string;
+  playerId?: PlayerId;
   seatId?: SeatId;
   teamId?: string;
   card?: string;
@@ -111,8 +137,32 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function asNullableHandValue(value: unknown): HandValue | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 function asCardStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
+}
+
+function normalizeMatchAvailableActionsPayload(value: unknown): MatchAvailableActionsPayload {
+  const input = asObject(value);
+
+  return {
+    canRequestTruco: asBoolean(input.canRequestTruco),
+    canRaiseToSix: asBoolean(input.canRaiseToSix),
+    canRaiseToNine: asBoolean(input.canRaiseToNine),
+    canRaiseToTwelve: asBoolean(input.canRaiseToTwelve),
+    canAcceptBet: asBoolean(input.canAcceptBet),
+    canDeclineBet: asBoolean(input.canDeclineBet),
+    canAcceptMaoDeOnze: asBoolean(input.canAcceptMaoDeOnze),
+    canDeclineMaoDeOnze: asBoolean(input.canDeclineMaoDeOnze),
+    canAttemptPlayCard: asBoolean(input.canAttemptPlayCard),
+  };
 }
 
 function normalizeMatchStateRoundPayload(value: unknown): MatchStateRoundPayload {
@@ -140,6 +190,31 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
       input.viewerPlayerId === 'P1' || input.viewerPlayerId === 'P2'
         ? input.viewerPlayerId
         : null,
+    currentValue: asNumber(input.currentValue, 1),
+    betState: asString(input.betState, 'idle'),
+    pendingValue: asNullableHandValue(input.pendingValue),
+    requestedBy:
+      input.requestedBy === 'P1' || input.requestedBy === 'P2'
+        ? input.requestedBy
+        : typeof input.requestedBy === 'string'
+          ? input.requestedBy
+          : null,
+    specialState: asString(input.specialState, 'normal'),
+    specialDecisionPending: asBoolean(input.specialDecisionPending),
+    specialDecisionBy:
+      input.specialDecisionBy === 'P1' || input.specialDecisionBy === 'P2'
+        ? input.specialDecisionBy
+        : typeof input.specialDecisionBy === 'string'
+          ? input.specialDecisionBy
+          : null,
+    winner:
+      input.winner === 'P1' || input.winner === 'P2'
+        ? input.winner
+        : typeof input.winner === 'string'
+          ? input.winner
+          : null,
+    awardedPoints: asNullableHandValue(input.awardedPoints),
+    availableActions: normalizeMatchAvailableActionsPayload(input.availableActions),
     playerOneHand: asCardStringArray(input.playerOneHand),
     playerTwoHand: asCardStringArray(input.playerTwoHand),
     rounds: Array.isArray(input.rounds)
@@ -201,8 +276,8 @@ export function normalizeMatchStatePayload(payload: unknown): MatchStatePayload 
     matchId: asString(input.matchId),
     state: asString(input.state),
     score: {
-      playerOne: typeof score.playerOne === 'number' ? score.playerOne : 0,
-      playerTwo: typeof score.playerTwo === 'number' ? score.playerTwo : 0,
+      playerOne: asNumber(score.playerOne),
+      playerTwo: asNumber(score.playerTwo),
     },
     currentHand: normalizeMatchStateHandPayload(input.currentHand),
   };
@@ -260,11 +335,8 @@ export function cardStringToPayload(card: string): CardPayload | null {
     return null;
   }
 
-  const suit = normalized.slice(-1);
-  const rank = normalized.slice(0, -1);
-
   return {
-    rank,
-    suit,
+    rank: normalized.slice(0, -1),
+    suit: normalized.slice(-1),
   };
 }

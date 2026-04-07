@@ -85,36 +85,30 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 15 | Python AI Service — FastAPI, contrato HTTP, adapter, wiring | ✅ |
 | 16 | Hardening — rate limiting, métricas, correlation ID, env validation | ✅ |
 | 17 | Adequação às regras reais do Truco Paulista + contrato frontend-ready | ✅ |
+| 18 | Frontend contract hardening + MatchPage structural cleanup | ✅ |
 
 ---
 
-## Fase 17 — O que mudou
+## Fase 18 — O que mudou
 
-A Fase 17 deixou o backend semanticamente fiel ao jogo real e seguro para integração visual.
+A Fase 18 tirou o frontend do estado de integração frágil e deixou a `MatchPage` estruturalmente preparada para consumir o backend autoritativo de forma segura.
 
-O `match-state` agora expõe:
+**Avanços no frontend:**
 
-- valor atual da mão e estado da aposta
-- estado especial da mão (`mao-de-onze`, `mao-de-ferro`)
-- vencedor e pontuação da mão encerrada
-- `availableActions` — ações válidas para o turno atual
+- Boundary mais segura entre ambiente, OAuth e `backendUrl`
+- Consumo mais explícito do `match-state` autoritativo
+- Extração de selectors de apresentação — sem semântica inline frágil
+- Extração do estado transitório da mesa para hook dedicado
+- `MatchPage` decomposta em painéis independentes: header · action surface · live state · rounds history · player hand · central table shell
 
-Novos eventos de ação da mão:
+**Pendências registradas para próximas fases:**
 
-| Evento | Descrição |
-|--------|-----------|
-| `request-truco` | Solicitar truco |
-| `accept-bet` | Aceitar aposta |
-| `decline-bet` | Recusar aposta (correr) |
-| `raise-to-six` | Pedir 6 |
-| `raise-to-nine` | Pedir 9 |
-| `raise-to-twelve` | Pedir 12 |
-| `accept-mao-de-onze` | Aceitar mão de 11 |
-| `decline-mao-de-onze` | Recusar mão de 11 |
+- Legibilidade da transição entre rodadas
+- Ruído excessivo do protocolo de eventos
+- Pacing visual do fluxo do bot
+- Otimização de bundle do frontend
 
-O frontend agora pode disparar intenções válidas e consumir estado autoritativo — sem inventar regra local.
-
-→ Detalhes completos em [`docs/phases/phase-17.md`](docs/phases/phase-17.md)
+→ Detalhes completos em [`docs/phases/phase-18.md`](docs/phases/phase-18.md)
 
 ---
 

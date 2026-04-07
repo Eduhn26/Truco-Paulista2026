@@ -111,4 +111,36 @@ export class GameSocketClient {
   emitPlayCard(matchId: string, card: CardPayload): void {
     this.socket?.emit('play-card', { matchId, card });
   }
+
+  emitRequestTruco(matchId: string): void {
+    this.socket?.emit('request-truco', { matchId });
+  }
+
+  emitAcceptBet(matchId: string): void {
+    this.socket?.emit('accept-bet', { matchId });
+  }
+
+  emitDeclineBet(matchId: string): void {
+    this.socket?.emit('decline-bet', { matchId });
+  }
+
+  emitRaiseToSix(matchId: string): void {
+    this.socket?.emit('raise-to-six', { matchId });
+  }
+
+  emitRaiseToNine(matchId: string): void {
+    this.socket?.emit('raise-to-nine', { matchId });
+  }
+
+  emitRaiseToTwelve(matchId: string): void {
+    this.socket?.emit('raise-to-twelve', { matchId });
+  }
+
+  emitAcceptMaoDeOnze(matchId: string): void {
+    this.socket?.emit('accept-mao-de-onze', { matchId });
+  }
+
+  emitDeclineMaoDeOnze(matchId: string): void {
+    this.socket?.emit('decline-mao-de-onze', { matchId });
+  }
 }

@@ -1,3 +1,5 @@
+import { normalizeBackendUrl } from '../../config/appConfig';
+
 export type FrontendSessionUser = {
   id: string;
   provider: string;
@@ -14,6 +16,7 @@ export type FrontendSession = {
 };
 
 const SESSION_STORAGE_KEY = 'truco-paulista:frontend-session';
+const PENDING_AUTH_BACKEND_URL_KEY = 'truco-paulista:pending-auth-backend-url';
 
 export function loadSession(): FrontendSession | null {
   try {
@@ -31,7 +34,7 @@ export function loadSession(): FrontendSession | null {
 
     return {
       authToken: parsed.authToken,
-      backendUrl: parsed.backendUrl,
+      backendUrl: normalizeBackendUrl(parsed.backendUrl),
       expiresIn: typeof parsed.expiresIn === 'string' ? parsed.expiresIn : null,
       user: normalizeUser(parsed.user),
     };
@@ -41,11 +44,38 @@ export function loadSession(): FrontendSession | null {
 }
 
 export function saveSession(session: FrontendSession): void {
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+  window.localStorage.setItem(
+    SESSION_STORAGE_KEY,
+    JSON.stringify({
+      ...session,
+      backendUrl: normalizeBackendUrl(session.backendUrl),
+    }),
+  );
 }
 
 export function clearStoredSession(): void {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+export function savePendingAuthBackendUrl(backendUrl: string): void {
+  window.sessionStorage.setItem(
+    PENDING_AUTH_BACKEND_URL_KEY,
+    normalizeBackendUrl(backendUrl),
+  );
+}
+
+export function loadPendingAuthBackendUrl(): string | null {
+  const value = window.sessionStorage.getItem(PENDING_AUTH_BACKEND_URL_KEY);
+
+  if (!value) {
+    return null;
+  }
+
+  return normalizeBackendUrl(value);
+}
+
+export function clearPendingAuthBackendUrl(): void {
+  window.sessionStorage.removeItem(PENDING_AUTH_BACKEND_URL_KEY);
 }
 
 function normalizeUser(value: unknown): FrontendSessionUser | null {

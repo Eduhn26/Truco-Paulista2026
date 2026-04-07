@@ -249,6 +249,10 @@ export class RoomManager {
           };
         }
       }
+
+      // NOTE: If the disconnected player held the current turn, we intentionally
+      // keep the seat pointer stable. The transport layer can then decide whether
+      // to reconnect, replace with a bot, or advance explicitly.
     }
 
     return { matchId: session.matchId };
@@ -320,20 +324,48 @@ export class RoomManager {
     });
   }
 
-  beginHand(matchId: string): RoomState {
+  beginHand(matchId: string, startingSeatId?: SeatId): RoomState {
     const room = this.rooms.get(matchId);
 
     if (!room) {
       throw new Error(`Room not found for match ${matchId}`);
     }
 
-    const turnOrder = this.getTurnOrder(room.mode);
-    room.currentTurnSeatId = turnOrder[0] ?? null;
+    const resolvedStartingSeatId = startingSeatId ?? this.getTurnOrder(room.mode)[0] ?? null;
+    room.currentTurnSeatId = this.resolveValidSeatForRoom(room, resolvedStartingSeatId);
 
     return this.getState(matchId);
   }
 
-  advanceTurn(matchId: string): RoomState {
+  beginRound(matchId: string, startingSeatId: SeatId): RoomState {
+    const room = this.rooms.get(matchId);
+
+    if (!room) {
+      throw new Error(`Room not found for match ${matchId}`);
+    }
+
+    room.currentTurnSeatId = this.resolveValidSeatForRoom(room, startingSeatId);
+
+    return this.getState(matchId);
+  }
+
+  setCurrentTurnSeat(matchId: string, seatId: SeatId | null): RoomState {
+    const room = this.rooms.get(matchId);
+
+    if (!room) {
+      throw new Error(`Room not found for match ${matchId}`);
+    }
+
+    room.currentTurnSeatId = this.resolveValidSeatForRoom(room, seatId);
+
+    return this.getState(matchId);
+  }
+
+  clearTurn(matchId: string): RoomState {
+    return this.setCurrentTurnSeat(matchId, null);
+  }
+
+  advanceTurn(matchId: string, fromSeatId?: SeatId): RoomState {
     const room = this.rooms.get(matchId);
 
     if (!room) {
@@ -341,13 +373,14 @@ export class RoomManager {
     }
 
     const turnOrder = this.getTurnOrder(room.mode);
+    const currentSeatId = fromSeatId ?? room.currentTurnSeatId;
 
-    if (!room.currentTurnSeatId) {
+    if (!currentSeatId) {
       room.currentTurnSeatId = turnOrder[0] ?? null;
       return this.getState(matchId);
     }
 
-    const currentIndex = turnOrder.indexOf(room.currentTurnSeatId);
+    const currentIndex = turnOrder.indexOf(currentSeatId);
 
     if (currentIndex < 0) {
       room.currentTurnSeatId = turnOrder[0] ?? null;
@@ -355,7 +388,9 @@ export class RoomManager {
     }
 
     const nextIndex = (currentIndex + 1) % turnOrder.length;
-    room.currentTurnSeatId = turnOrder[nextIndex] ?? null;
+    const nextSeatId = turnOrder[nextIndex] ?? null;
+
+    room.currentTurnSeatId = this.resolveValidSeatForRoom(room, nextSeatId);
 
     return this.getState(matchId);
   }
@@ -500,6 +535,33 @@ export class RoomManager {
 
   private getTurnOrder(mode: MatchMode): SeatId[] {
     return mode === '1v1' ? TURN_ORDER_1V1 : TURN_ORDER_2V2;
+  }
+
+  private resolveValidSeatForRoom(
+    room: InternalRoomState,
+    preferredSeatId: SeatId | null,
+  ): SeatId | null {
+    if (!preferredSeatId) {
+      return null;
+    }
+
+    const allowedSeats = SEATS_BY_MODE[room.mode];
+
+    if (!allowedSeats.includes(preferredSeatId)) {
+      throw new Error(
+        `Seat ${preferredSeatId} is not valid for match ${room.matchId} in mode ${room.mode}`,
+      );
+    }
+
+    const occupiedSeat = room.players.find((player) => player.seatId === preferredSeatId);
+
+    if (!occupiedSeat) {
+      throw new Error(
+        `Seat ${preferredSeatId} is not occupied in match ${room.matchId}, so it cannot receive the turn`,
+      );
+    }
+
+    return preferredSeatId;
   }
 
   private sortPlayers(room: InternalRoomState): void {
