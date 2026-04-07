@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 
 import {
   getAppEnvironment,
+  getDefaultBackendUrl,
   getFrontendOrigin,
   isLocalFrontendOrigin,
   normalizeBackendUrl,
+  shouldAllowManualBackendOverride,
 } from '../config/appConfig';
 import {
   savePendingAuthBackendUrl,
@@ -30,7 +32,7 @@ export function HomePage() {
   const { session, setSession } = useAuth();
 
   const [backendUrl, setBackendUrl] = useState(() =>
-    normalizeBackendUrl(session?.backendUrl),
+    normalizeBackendUrl(session?.backendUrl ?? getDefaultBackendUrl()),
   );
   const [manualAuthToken, setManualAuthToken] = useState('');
 
@@ -45,6 +47,7 @@ export function HomePage() {
 
   const appEnvironment = getAppEnvironment();
   const isLocalEnvironment = isLocalFrontendOrigin(frontendUrl);
+  const allowManualBackendOverride = shouldAllowManualBackendOverride();
 
   function handleSaveBackendUrl(): void {
     setSession(
@@ -68,6 +71,10 @@ export function HomePage() {
     savePendingAuthBackendUrl(normalizedBackendUrl);
   }
 
+  const isAuthenticated = Boolean(session?.authToken);
+  const displayName =
+    session?.user?.displayName ?? session?.user?.email ?? 'Guest player';
+
   return (
     <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
       <div className="overflow-hidden rounded-[28px] border border-white/10 bg-slate-900/75 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
@@ -81,9 +88,9 @@ export function HomePage() {
           </h1>
 
           <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 lg:text-base">
-            O fluxo principal do frontend já parte de OAuth real. Esta home agora funciona como
-            porta de entrada do produto: autenticação, acesso ao lobby e configuração mínima da
-            boundary com o backend.
+            O fluxo principal do frontend já parte de OAuth real. Esta home funciona
+            como porta de entrada do produto: autenticação, acesso ao lobby e
+            boundary explícita com o backend correto.
           </p>
 
           <div className="mt-6 flex flex-wrap gap-3">
@@ -97,7 +104,7 @@ export function HomePage() {
             <a
               href={googleLoginUrl}
               onClick={handleOAuthStart}
-              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
             >
               Entrar com Google
             </a>
@@ -105,163 +112,155 @@ export function HomePage() {
             <a
               href={githubLoginUrl}
               onClick={handleOAuthStart}
-              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
             >
               Entrar com GitHub
             </a>
           </div>
         </div>
 
-        <div className="grid gap-4 px-6 py-6 lg:grid-cols-[1fr_1fr] lg:px-8">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Flow status
+        <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">
+                    Backend boundary
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    Em produção, a API padrão deve vir do env. Em ambiente local,
+                    o override manual continua disponível para desenvolvimento.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
+                  {appEnvironment}
+                </span>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Backend URL
+                  </span>
+
+                  <input
+                    value={backendUrl}
+                    onChange={(event) => setBackendUrl(event.target.value)}
+                    disabled={!allowManualBackendOverride}
+                    className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400/40 focus:bg-slate-950 disabled:cursor-not-allowed disabled:opacity-70"
+                    placeholder="http://localhost:3000"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSaveBackendUrl}
+                    disabled={!allowManualBackendOverride}
+                    className="rounded-2xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    Save backend URL
+                  </button>
+
+                  <div className="text-xs text-slate-500">
+                    Active boundary: {normalizedBackendUrl}
+                  </div>
+                </div>
+
+                {!allowManualBackendOverride ? (
+                  <p className="text-xs leading-6 text-amber-300">
+                    NOTE: Production keeps the API boundary locked to
+                    <span className="mx-1 font-semibold">{getDefaultBackendUrl()}</span>
+                    from env to avoid hidden browser-only configuration.
+                  </p>
+                ) : null}
+              </div>
             </div>
 
-            {session?.user ? (
-              <div className="mt-4">
-                <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-                  Authenticated session
-                </div>
-
-                <div className="mt-4 text-lg font-bold text-slate-100">
-                  {session.user.displayName ?? session.user.email ?? 'Authenticated user'}
-                </div>
-
-                <div className="mt-4 grid gap-3 text-sm text-slate-300">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <span className="text-slate-500">Provider:</span> {session.user.provider}
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <span className="text-slate-500">User ID:</span> {session.user.id}
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <span className="text-slate-500">Email:</span> {session.user.email ?? '-'}
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <span className="text-slate-500">Expires in:</span> {session.expiresIn ?? '-'}
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <span className="text-slate-500">Backend URL:</span> {session.backendUrl}
-                  </div>
-                </div>
+            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
+              <div className="text-sm font-semibold text-slate-100">
+                Manual auth token
               </div>
-            ) : (
-              <div className="mt-4 rounded-3xl border border-amber-400/20 bg-amber-500/10 p-5 text-sm leading-6 text-amber-100">
-                No authenticated user yet. Use Google or GitHub login to create the session before
-                entering real-time play.
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                Dev-only escape hatch for transport validation without repeating the
+                OAuth flow.
+              </p>
+
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={manualAuthToken}
+                  onChange={(event) => setManualAuthToken(event.target.value)}
+                  className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400/40 focus:bg-slate-950"
+                  placeholder="Paste auth token"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleSaveManualToken}
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
+                >
+                  Save token
+                </button>
               </div>
-            )}
+            </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              What is ready
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    isAuthenticated ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                />
+                Session
+              </div>
+
+              <div className="mt-3 text-lg font-semibold text-slate-100">
+                {displayName}
+              </div>
+
+              <div className="mt-1 text-sm text-slate-400">
+                {isAuthenticated
+                  ? `Signed in via ${session?.user?.provider ?? 'session'}`
+                  : 'Authentication required for real-time play'}
+              </div>
+
+              <div className="mt-4 grid gap-3 text-sm text-slate-300">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <span className="text-slate-500">Frontend origin:</span> {frontendUrl}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <span className="text-slate-500">Environment:</span> {appEnvironment}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <span className="text-slate-500">Local frontend:</span>{' '}
+                  {isLocalEnvironment ? 'yes' : 'no'}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                  <span className="text-slate-500">Effective backend:</span>{' '}
+                  {normalizedBackendUrl}
+                </div>
+              </div>
             </div>
 
-            <div className="mt-4 grid gap-3 text-sm text-slate-300">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                OAuth now preserves the backend boundary before leaving the SPA.
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                The callback can restore the intended API origin without guessing from the frontend
-                host.
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                The lobby already supports authenticated real-time connection.
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                Match view hydrates from socket state and snapshot recovery.
-              </div>
+            <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
+              <div className="text-sm font-semibold text-slate-100">Why this matters</div>
+
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                OAuth leaves the SPA and comes back through the callback route. The
+                frontend must persist the backend boundary that actually started the
+                flow, otherwise production can accidentally treat the frontend origin
+                as the API origin.
+              </p>
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="grid gap-6">
-        <section className="rounded-[28px] border border-white/10 bg-slate-900/75 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.28)]">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-black tracking-tight text-white">Session settings</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                Keep the backend boundary explicit while the visual layer evolves.
-              </p>
-            </div>
-
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              {appEnvironment}
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-5">
-            <div className="grid gap-4 rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-              <div>
-                <div className="text-sm font-semibold text-slate-100">Backend URL</div>
-                <div className="mt-1 text-xs text-slate-400">
-                  Use an explicit backend boundary. Production should come from env, while local
-                  development may still override it here when needed.
-                </div>
-              </div>
-
-              <label className="grid gap-2 text-sm">
-                <span className="text-slate-400">Backend URL</span>
-                <input
-                  value={backendUrl}
-                  onChange={(event) => setBackendUrl(event.target.value)}
-                  className="rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400/40"
-                  placeholder="http://localhost:3000"
-                />
-              </label>
-
-              <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-slate-400">
-                Frontend origin: <span className="text-slate-200">{frontendUrl}</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleSaveBackendUrl}
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-100 transition hover:bg-white/10"
-              >
-                Save backend URL
-              </button>
-            </div>
-
-            <div className="grid gap-4 rounded-3xl border border-dashed border-white/10 bg-slate-950/60 p-5">
-              <div>
-                <div className="text-sm font-semibold text-slate-100">Manual token fallback</div>
-                <div className="mt-1 text-xs text-slate-400">
-                  Keep this only for development and diagnostics. OAuth remains the default product
-                  flow.
-                </div>
-              </div>
-
-              <label className="grid gap-2 text-sm">
-                <span className="text-slate-400">Auth token</span>
-                <textarea
-                  value={manualAuthToken}
-                  onChange={(event) => setManualAuthToken(event.target.value)}
-                  className="min-h-28 rounded-2xl border border-white/10 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400/40"
-                  placeholder="Fallback only: paste a token manually if needed."
-                />
-              </label>
-
-              <button
-                type="button"
-                onClick={handleSaveManualToken}
-                className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
-              >
-                Save manual token
-              </button>
-
-              {!isLocalEnvironment ? (
-                <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-xs leading-6 text-amber-100">
-                  Production should not depend on manual token pasting or hidden browser
-                  reconfiguration. This fallback exists only to keep local diagnostics practical.
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
       </div>
     </section>
   );
