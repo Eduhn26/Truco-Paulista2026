@@ -21,106 +21,153 @@ export function MatchPlayerHandPanel({
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   onPlayCard: (card: CardPayload) => void;
 }) {
+  const visibleViraRank = currentPrivateHand?.viraRank ?? currentPublicHand?.viraRank ?? '-';
+  const viewerPlayerId = currentPrivateHand?.viewerPlayerId ?? '-';
+  const handFinished = String(currentPublicHand?.finished ?? false);
+
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-      <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
-        <div className="flex items-center justify-between gap-3">
+    <section className="overflow-hidden rounded-[26px] border border-white/10 bg-slate-950/42">
+      <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(45,106,79,0.12),transparent_36%),linear-gradient(180deg,rgba(15,25,35,0.88),rgba(8,12,16,0.76))] px-4 py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="text-base font-black tracking-tight text-slate-100">Minha mão</div>
-            <p className="mt-1 text-sm leading-6 text-slate-400">
-              A mão visível vem exclusivamente do payload privado da partida.
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300/85">
+              Private hand
+            </div>
+            <div className="mt-1.5 text-base font-black tracking-tight text-slate-100">
+              Sua área de jogo
+            </div>
+            <p className="mt-1.5 max-w-3xl text-sm leading-6 text-slate-400">
+              A mão do jogador fica integrada ao fluxo principal de decisão, não separada como bloco
+              isolado.
             </p>
           </div>
 
           <span
-            className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
-              canPlayCard ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-300'
+            className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${
+              canPlayCard
+                ? 'border border-emerald-400/25 bg-emerald-500/15 text-emerald-300'
+                : 'border border-white/10 bg-white/[0.04] text-slate-300'
             }`}
           >
             {canPlayCard ? 'Your turn' : 'Waiting'}
           </span>
         </div>
+      </div>
 
-        <div className="mt-6 flex min-h-48 flex-wrap items-end gap-4">
-          {myCards.length === 0 ? (
-            <HandEmptyState tablePhase={tablePhase} />
-          ) : (
-            myCards.map((card, index) => {
-              const cardKey = `${card.rank}|${card.suit}`;
-              const isLaunching = launchingCardKey === cardKey;
-              const hoverAnimation =
-                canPlayCard && !isLaunching
-                  ? { y: -22, scale: 1.06, rotate: index % 2 === 0 ? -2 : 2 }
-                  : {};
-              const tapAnimation = canPlayCard && !isLaunching ? { scale: 0.96 } : {};
-              const animateState = isLaunching
-                ? {
-                    opacity: 0,
-                    y: -220,
-                    x: 34,
-                    rotate: 14,
-                    scale: 0.72,
-                    filter: 'blur(2px)',
-                  }
-                : {
-                    opacity: 1,
-                    y: 0,
-                    rotate: 0,
-                    scale: 1,
-                    filter: 'blur(0px)',
-                  };
+      <div className="grid gap-3 px-4 py-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <MiniMetric label="Vira" value={visibleViraRank} highlight={visibleViraRank !== '-'} mono />
+          <MiniMetric label="Viewer" value={viewerPlayerId} mono />
+          <MiniMetric label="Hand finished" value={handFinished} mono />
+        </div>
 
-              return (
-                <motion.button
-                  key={cardKey}
-                  type="button"
-                  onClick={() => onPlayCard(card)}
-                  disabled={!canPlayCard || isLaunching}
-                  initial={{
-                    opacity: 0,
-                    y: 34,
-                    rotate: index % 2 === 0 ? -7 : 7,
-                  }}
-                  animate={animateState}
-                  transition={{
-                    delay: isLaunching ? 0 : index * 0.08,
-                    type: 'spring',
-                    stiffness: 240,
-                    damping: 17,
-                  }}
-                  whileHover={hoverAnimation}
-                  whileTap={tapAnimation}
-                  className="flex h-44 w-28 flex-col items-center justify-between rounded-[24px] border border-white/15 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] px-3 py-4 text-slate-950 shadow-[0_20px_42px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
-                  title={`Play ${card.rank}${suitSymbol(card.suit)}`}
-                >
-                  <span className="self-start text-lg font-black">{card.rank}</span>
-                  <span className={`text-4xl ${suitColorClass(card.suit)}`}>{suitSymbol(card.suit)}</span>
-                  <span className="self-end text-lg font-black">{card.rank}</span>
-                </motion.button>
-              );
-            })
-          )}
+        <div className="rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(8,12,16,0.42),rgba(8,12,16,0.18))] p-4">
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="text-sm font-black tracking-tight text-slate-100">Playable cards</div>
+              <p className="mt-1 text-sm leading-6 text-slate-400">
+                Hover and click feedback is active only when the backend contract says you can play.
+              </p>
+            </div>
+
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+              {myCards.length} card{myCards.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          <div className="mt-4 flex min-h-36 flex-wrap items-end gap-3">
+            {myCards.length === 0 ? (
+              <HandEmptyState tablePhase={tablePhase} />
+            ) : (
+              myCards.map((card, index) => {
+                const cardKey = `${card.rank}|${card.suit}`;
+                const isLaunching = launchingCardKey === cardKey;
+                const hoverAnimation =
+                  canPlayCard && !isLaunching
+                    ? { y: -16, scale: 1.04, rotate: index % 2 === 0 ? -2 : 2 }
+                    : {};
+                const tapAnimation = canPlayCard && !isLaunching ? { scale: 0.97 } : {};
+                const animateState = isLaunching
+                  ? {
+                      opacity: 0,
+                      y: -180,
+                      x: 26,
+                      rotate: 14,
+                      scale: 0.72,
+                      filter: 'blur(2px)',
+                    }
+                  : {
+                      opacity: 1,
+                      y: 0,
+                      rotate: 0,
+                      scale: 1,
+                      filter: 'blur(0px)',
+                    };
+
+                return (
+                  <motion.button
+                    key={cardKey}
+                    type="button"
+                    onClick={() => onPlayCard(card)}
+                    disabled={!canPlayCard || isLaunching}
+                    initial={{
+                      opacity: 0,
+                      y: 28,
+                      rotate: index % 2 === 0 ? -6 : 6,
+                    }}
+                    animate={animateState}
+                    transition={{
+                      delay: isLaunching ? 0 : index * 0.08,
+                      type: 'spring',
+                      stiffness: 240,
+                      damping: 17,
+                    }}
+                    whileHover={hoverAnimation}
+                    whileTap={tapAnimation}
+                    className="flex h-36 w-24 min-w-[96px] flex-col items-center justify-between rounded-[20px] border border-white/15 bg-[linear-gradient(180deg,#fffdf7,#ece7d8)] px-2.5 py-3 text-slate-950 shadow-[0_22px_44px_rgba(2,6,23,0.38)] transition disabled:cursor-not-allowed disabled:opacity-60"
+                    title={`Play ${card.rank}${suitSymbol(card.suit)}`}
+                  >
+                    <span className="self-start text-base font-black">{card.rank}</span>
+                    <span className={`text-3xl ${suitColorClass(card.suit)}`}>
+                      {suitSymbol(card.suit)}
+                    </span>
+                    <span className="self-end text-base font-black">{card.rank}</span>
+                  </motion.button>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
-
-      <div className="grid gap-4">
-        <MiniMetric
-          label="Vira"
-          value={currentPrivateHand?.viraRank ?? currentPublicHand?.viraRank ?? '-'}
-          mono
-        />
-        <MiniMetric label="Viewer" value={currentPrivateHand?.viewerPlayerId ?? '-'} mono />
-        <MiniMetric label="Hand finished" value={String(currentPublicHand?.finished ?? false)} mono />
-      </div>
-    </div>
+    </section>
   );
 }
 
-function MiniMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function MiniMetric({
+  label,
+  value,
+  mono = false,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  highlight?: boolean;
+}) {
   return (
-    <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">{label}</div>
-      <div className={`mt-2 text-sm text-slate-100 ${mono ? 'font-mono' : 'font-semibold'}`}>{value}</div>
+    <div
+      className={`rounded-[18px] border px-4 py-3 ${
+        highlight
+          ? 'border-amber-400/18 bg-amber-500/10'
+          : 'border-white/10 bg-white/[0.03]'
+      }`}
+    >
+      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-1.5 text-sm text-slate-100 ${mono ? 'font-mono' : 'font-semibold'}`}>
+        {value}
+      </div>
     </div>
   );
 }
@@ -141,7 +188,7 @@ function HandEmptyState({ tablePhase }: { tablePhase: TablePhase }) {
   }
 
   return (
-    <div className="flex min-h-40 w-full items-center justify-center rounded-[24px] border border-dashed border-white/10 bg-slate-950/35 px-6 py-10 text-center text-sm leading-7 text-slate-400">
+    <div className="flex min-h-32 w-full items-center justify-center rounded-[20px] border border-dashed border-white/10 bg-slate-950/35 px-6 py-6 text-center text-sm leading-7 text-slate-400">
       {message}
     </div>
   );

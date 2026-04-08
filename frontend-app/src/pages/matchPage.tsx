@@ -1,17 +1,15 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
 import { useMatchActionBridge } from '../features/match/useMatchActionBridge';
 import { MatchPageHeader } from '../features/match/matchPageHeader';
-import { buildMatchContractPresentation } from '../features/match/matchPresentationSelectors';
 import { getLastActiveMatchId } from '../features/match/matchSnapshotStorage';
 import { MatchTableShell } from '../features/match/matchTableShell';
+import { useMatchPageViewModel } from '../features/match/useMatchPageViewModel';
 import { useMatchRealtimeSession } from '../features/match/useMatchRealtimeSession';
 import { useMatchTableTransition } from '../features/match/useMatchTableTransition';
-import { cardStringToPayload } from '../services/socket/socketTypes';
-import type { CardPayload, MatchStatePayload, Rank, Suit } from '../services/socket/socketTypes';
+import type { MatchStatePayload, Rank } from '../services/socket/socketTypes';
 
 const MatchLiveStatePanel = lazy(async () =>
   import('../features/match/matchLiveStatePanel').then((module) => ({
@@ -25,77 +23,7 @@ const MatchRoundsHistoryPanel = lazy(async () =>
   })),
 );
 
-const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
-const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
 const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
-
-type TableSeatView = {
-  seatId: string;
-  ready: boolean;
-  isBot: boolean;
-  isCurrentTurn: boolean;
-  isMine: boolean;
-};
-
-type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
-
-type HandStatusVariant = 'neutral' | 'success' | 'warning';
-
-type MatchViewModel = {
-  resolvedMatchId: string;
-  mySeat: string | null;
-  isOneVsOne: boolean;
-  roomPlayers: TableSeatView[];
-  mySeatView: TableSeatView | null;
-  opponentSeatView: TableSeatView | null;
-  myCards: CardPayload[];
-  myPlayedCard: string | null;
-  opponentPlayedCard: string | null;
-  scoreLabel: string;
-  currentTurnSeatId: string | null;
-  canStartHand: boolean;
-  canPlayCard: boolean;
-  currentValue: number;
-  betState: string;
-  pendingValue: number | null;
-  requestedBy: string | null;
-  specialState: string;
-  specialDecisionPending: boolean;
-  specialDecisionBy: string | null;
-  winner: string | null;
-  awardedPoints: number | null;
-  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
-  handFinished: boolean;
-  matchFinished: boolean;
-  tablePhase: TablePhase;
-  handStatusLabel: string;
-  handStatusTone: HandStatusVariant;
-  latestRound: MatchStatePayload['currentHand'] extends infer H
-    ? H extends { rounds: infer R }
-      ? R extends Array<infer Item>
-        ? Item | null
-        : null
-      : null
-    : null;
-  rounds: NonNullable<MatchStatePayload['currentHand']>['rounds'];
-  playedRoundsCount: number;
-  currentPublicHand: MatchStatePayload['currentHand'] | null;
-  currentPrivateHand: MatchStatePayload['currentHand'] | null;
-};
-
-type SuitDisplay = {
-  symbol: string;
-  colorClass: string;
-};
-
-const seatPulseAnimation = {
-  scale: [1, 1.03, 1],
-  boxShadow: [
-    '0 0 0 rgba(16,185,129,0)',
-    '0 0 28px rgba(16,185,129,0.22)',
-    '0 0 0 rgba(16,185,129,0)',
-  ],
-};
 
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
@@ -107,7 +35,7 @@ export function MatchPage() {
   const mySeatRef = useRef<string | null>(null);
   const [viraRank, setViraRank] = useState<Rank>('4');
 
-  const tableTransition = useMatchTableTransition({
+  const bootstrapTableTransition = useMatchTableTransition({
     tablePhase: 'missing_context',
     myPlayedCard: null,
     opponentPlayedCard: null,
@@ -117,13 +45,13 @@ export function MatchPage() {
 
   const handleRealtimeHandStarted = useCallback(
     (payload: { matchId?: string; viraRank?: Rank | null }) => {
-      tableTransition.beginHandTransition();
+      bootstrapTableTransition.beginHandTransition();
 
       if (payload.viraRank) {
         setViraRank(payload.viraRank);
       }
     },
-    [tableTransition],
+    [bootstrapTableTransition],
   );
 
   const handleRealtimeCardPlayed = useCallback(
@@ -133,12 +61,12 @@ export function MatchPage() {
         mySeat: mySeatRef.current,
       });
 
-      tableTransition.registerIncomingPlayedCard({
+      bootstrapTableTransition.registerIncomingPlayedCard({
         owner,
         card: payload.card ?? null,
       });
     },
-    [tableTransition],
+    [bootstrapTableTransition],
   );
 
   const {
@@ -172,112 +100,13 @@ export function MatchPage() {
     mySeatRef.current = playerAssigned?.seatId ?? initialSnapshot?.playerAssigned?.seatId ?? null;
   }, [initialSnapshot?.playerAssigned?.seatId, playerAssigned]);
 
-  const viewModel = useMemo<MatchViewModel>(() => {
-    const resolvedMatchId =
-      privateMatchState?.matchId ||
-      publicMatchState?.matchId ||
-      roomState?.matchId ||
-      effectiveMatchId;
-
-    const mySeat = playerAssigned?.seatId ?? null;
-    const currentPublicHand = publicMatchState?.currentHand ?? null;
-    const currentPrivateHand = privateMatchState?.currentHand ?? null;
-    const isOneVsOne = roomState?.mode === '1v1';
-    const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
-
-    const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
-      const player = roomState?.players.find((entry) => entry.seatId === seatId);
-
-      return {
-        seatId,
-        ready: player?.ready ?? false,
-        isBot: player?.isBot ?? false,
-        isCurrentTurn: roomState?.currentTurnSeatId === seatId,
-        isMine: mySeat === seatId,
-      };
-    });
-
-    const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
-    const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
-
-    const myCards = getViewerCards(currentPrivateHand);
-    const effectiveHand = currentPrivateHand ?? currentPublicHand;
-    const availableActions = effectiveHand?.availableActions ?? emptyAvailableActions();
-
-    const myIsPlayerOne = mySeat === 'T1A' || mySeat === 'T1B';
-    const rounds = currentPublicHand?.rounds ?? [];
-    const playedRounds = rounds.filter(
-      (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
-    );
-    const latestRound: MatchViewModel['latestRound'] =
-      playedRounds.length > 0 ? (playedRounds[playedRounds.length - 1] ?? null) : null;
-
-    const myPlayedCard = latestRound
-      ? myIsPlayerOne
-        ? latestRound.playerOneCard
-        : latestRound.playerTwoCard
-      : null;
-
-    const opponentPlayedCard = latestRound
-      ? myIsPlayerOne
-        ? latestRound.playerTwoCard
-        : latestRound.playerOneCard
-      : null;
-
-    const handFinished = Boolean(currentPublicHand?.finished);
-    const matchFinished = publicMatchState?.state === 'finished';
-    const canStartHand = Boolean(roomState?.canStart && publicMatchState?.state === 'waiting');
-    const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
-    const canPlayCard = Boolean(
-      availableActions.canAttemptPlayCard && mySeat && myCards.length > 0 && !handFinished,
-    );
-    const contractPresentation = buildMatchContractPresentation({
-      publicMatchState,
-      roomState,
-      canStartHand,
-      canPlayCard,
-      isMyTurn,
-      myCardsCount: myCards.length,
-    });
-
-    return {
-      resolvedMatchId,
-      mySeat,
-      isOneVsOne,
-      roomPlayers,
-      mySeatView,
-      opponentSeatView,
-      myCards,
-      myPlayedCard,
-      opponentPlayedCard,
-      scoreLabel: `T1 ${publicMatchState?.score.playerOne ?? 0} × T2 ${
-        publicMatchState?.score.playerTwo ?? 0
-      }`,
-      currentTurnSeatId: contractPresentation.currentTurnSeatId,
-      canStartHand: contractPresentation.canStartHand,
-      canPlayCard: contractPresentation.canPlayCard,
-      currentValue: contractPresentation.currentValue,
-      betState: contractPresentation.betState,
-      pendingValue: contractPresentation.pendingValue,
-      requestedBy: contractPresentation.requestedBy,
-      specialState: contractPresentation.specialState,
-      specialDecisionPending: contractPresentation.specialDecisionPending,
-      specialDecisionBy: contractPresentation.specialDecisionBy,
-      winner: contractPresentation.winner,
-      awardedPoints: contractPresentation.awardedPoints,
-      availableActions: contractPresentation.availableActions,
-      handFinished: contractPresentation.handFinished,
-      matchFinished: contractPresentation.matchFinished,
-      tablePhase: contractPresentation.tablePhase,
-      handStatusLabel: contractPresentation.handStatusLabel,
-      handStatusTone: contractPresentation.handStatusTone,
-      latestRound: contractPresentation.latestRound,
-      rounds: contractPresentation.rounds,
-      playedRoundsCount: contractPresentation.playedRoundsCount,
-      currentPublicHand,
-      currentPrivateHand,
-    };
-  }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
+  const { viewModel, hasHydratedMatchState } = useMatchPageViewModel({
+    effectiveMatchId,
+    playerAssigned,
+    roomState,
+    publicMatchState,
+    privateMatchState,
+  });
 
   const liveTableTransition = useMatchTableTransition({
     tablePhase: viewModel.tablePhase,
@@ -286,9 +115,6 @@ export function MatchPage() {
     playedRoundsCount: viewModel.playedRoundsCount,
     latestRoundFinished: Boolean(viewModel.latestRound?.finished),
   });
-
-  const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
-  const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
 
   useEffect(() => {
     if (viewModel.currentPrivateHand?.viraRank) {
@@ -325,9 +151,6 @@ export function MatchPage() {
     });
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
-  const hasHydratedMatchState = Boolean(
-    roomState || publicMatchState || privateMatchState || playerAssigned,
-  );
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
@@ -393,47 +216,45 @@ export function MatchPage() {
   }
 
   return (
-    <section className="grid gap-8">
-      <div className="overflow-hidden rounded-[36px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+    <section className="grid gap-5">
+      <div className="overflow-hidden rounded-[34px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
         <MatchPageHeader
           connectionStatus={connectionStatus}
           resolvedMatchId={viewModel.resolvedMatchId}
           mySeat={viewModel.mySeat}
           viraRank={viraRank}
-          viraRankOptions={VIRA_RANK_OPTIONS as Rank[]}
+          viraRankOptions={VIRA_RANK_OPTIONS}
           canStartHand={viewModel.canStartHand}
           onRefreshState={handleRefreshState}
           onChangeViraRank={setViraRank}
           onStartHand={handleStartHand}
         />
 
-        <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="grid gap-6">
+        <div className="grid gap-4 px-5 py-5 lg:px-6 lg:py-6 xl:grid-cols-[minmax(0,1.3fr)_260px]">
+          <div className="grid gap-4">
             {!hasHydratedMatchState ? (
-              <section className="rounded-[34px] border border-white/10 bg-slate-950/45 p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <section className="rounded-[26px] border border-white/10 bg-slate-950/45 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
                       Waiting for hydration
                     </div>
-                    <div className="mt-3 text-2xl font-black tracking-tight text-slate-100">
+                    <div className="mt-2 text-lg font-black tracking-tight text-slate-100">
                       A mesa já tem matchId, mas ainda aguarda estado autoritativo suficiente.
                     </div>
-                    <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">
-                      Este estado é legítimo quando a página abre antes do primeiro room-state ou
-                      match-state. A interface agora comunica isso de forma explícita, sem parecer
-                      erro estrutural.
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                      Estado de entrada válido antes do primeiro room-state ou match-state.
                     </p>
                   </div>
 
-                  <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
                     {connectionStatus}
                   </div>
                 </div>
               </section>
             ) : null}
 
-            <section className="rounded-[34px] border border-white/10 bg-slate-950/35 p-4 sm:p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/35 p-3">
               <MatchTableShell
                 handStatusLabel={viewModel.handStatusLabel}
                 handStatusTone={viewModel.handStatusTone}
@@ -455,8 +276,8 @@ export function MatchPage() {
                 isOneVsOne={viewModel.isOneVsOne}
                 roomMode={roomState?.mode ?? null}
                 currentTurnSeatId={viewModel.currentTurnSeatId}
-                displayedOpponentPlayedCard={displayedOpponentPlayedCard}
-                displayedMyPlayedCard={displayedMyPlayedCard}
+                displayedOpponentPlayedCard={liveTableTransition.displayedOpponentPlayedCard}
+                displayedMyPlayedCard={liveTableTransition.displayedMyPlayedCard}
                 opponentRevealKey={liveTableTransition.opponentRevealKey}
                 myRevealKey={
                   liveTableTransition.pendingPlayedCard?.owner === 'mine'
@@ -482,17 +303,9 @@ export function MatchPage() {
                 onPlayCard={handlePlayCard}
               />
             </section>
-
-            <Suspense fallback={<MatchSecondaryPanelFallback title="Rounds played" />}>
-              <MatchRoundsHistoryPanel
-                rounds={viewModel.rounds}
-                latestRound={viewModel.latestRound}
-                playedRoundsCount={viewModel.playedRoundsCount}
-              />
-            </Suspense>
           </div>
 
-          <aside className="grid gap-6 self-start">
+          <aside className="grid gap-4 self-start">
             <Suspense fallback={<MatchSecondaryPanelFallback title="Match live state" />}>
               <MatchLiveStatePanel
                 connectionStatus={connectionStatus}
@@ -510,22 +323,30 @@ export function MatchPage() {
               />
             </Suspense>
 
-            <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <Suspense fallback={<MatchSecondaryPanelFallback title="Rounds played" />}>
+              <MatchRoundsHistoryPanel
+                rounds={viewModel.rounds}
+                latestRound={viewModel.latestRound}
+                playedRoundsCount={viewModel.playedRoundsCount}
+              />
+            </Suspense>
+
+            <section className="rounded-[26px] border border-white/10 bg-slate-950/50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <div className="text-lg font-black tracking-tight text-slate-100">Event log</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Visibilidade operacional mantida sem dominar a mesa.
+                  <div className="text-base font-black tracking-tight text-slate-100">Event log</div>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Visibilidade operacional com papel claramente secundário.
                   </p>
                 </div>
 
-                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
                   client-side
                 </span>
               </div>
 
-              <div className="mt-6 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
-                <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs leading-7 text-slate-300">
+              <div className="mt-4 rounded-[22px] border border-white/10 bg-slate-950/70 p-4">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[11px] leading-6 text-slate-300">
                   {eventLog.length > 0 ? eventLog.join('\n') : 'No events yet.'}
                 </pre>
               </div>
@@ -539,64 +360,24 @@ export function MatchPage() {
 
 function MatchSecondaryPanelFallback({ title }: { title: string }) {
   return (
-    <section className="rounded-[30px] border border-white/10 bg-slate-950/45 p-6">
-      <div className="text-lg font-black tracking-tight text-slate-100">{title}</div>
-      <div className="mt-2 text-sm leading-6 text-slate-400">
+    <section className="rounded-[24px] border border-white/10 bg-slate-950/45 p-4">
+      <div className="text-base font-black tracking-tight text-slate-100">{title}</div>
+      <div className="mt-1 text-sm leading-6 text-slate-400">
         Carregando painel secundário da mesa.
       </div>
 
-      <div className="mt-6 grid gap-4">
-        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+      <div className="mt-4 grid gap-3">
+        <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
           <div className="h-3 w-24 animate-pulse rounded-full bg-white/10" />
           <div className="mt-3 h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
         </div>
-        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+        <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
           <div className="h-3 w-20 animate-pulse rounded-full bg-white/10" />
           <div className="mt-3 h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
-        </div>
-        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-          <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
-          <div className="mt-3 h-4 w-4/5 animate-pulse rounded-full bg-white/10" />
         </div>
       </div>
     </section>
   );
-}
-
-function getViewerCards(
-  currentPrivateHand: MatchStatePayload['currentHand'] | null,
-): CardPayload[] {
-  if (!currentPrivateHand) {
-    return [];
-  }
-
-  const rawViewerHand =
-    currentPrivateHand.viewerPlayerId === 'P1'
-      ? currentPrivateHand.playerOneHand
-      : currentPrivateHand.viewerPlayerId === 'P2'
-        ? currentPrivateHand.playerTwoHand
-        : [];
-
-  // NOTE: The private contract is viewer-aware through viewerPlayerId plus the
-  // two explicit hand arrays. We derive the visible hand from that contract
-  // instead of assuming a separate viewerHand field that does not exist.
-  return rawViewerHand
-    .map((card) => cardStringToPayload(card))
-    .filter((card): card is CardPayload => card !== null);
-}
-
-function emptyAvailableActions(): NonNullable<MatchStatePayload['currentHand']>['availableActions'] {
-  return {
-    canRequestTruco: false,
-    canRaiseToSix: false,
-    canRaiseToNine: false,
-    canRaiseToTwelve: false,
-    canAcceptBet: false,
-    canDeclineBet: false,
-    canAcceptMaoDeOnze: false,
-    canDeclineMaoDeOnze: false,
-    canAttemptPlayCard: false,
-  };
 }
 
 function resolvePlayedCardOwner({
@@ -641,40 +422,4 @@ function formatSpecialState(value: string): string {
   }
 
   return value;
-}
-
-function getSuitDisplay(suit: Suit): SuitDisplay {
-  if (suit === 'O' || suit === 'D') {
-    return {
-      symbol: '♦',
-      colorClass: 'text-rose-600',
-    };
-  }
-
-  if (suit === 'P' || suit === 'H') {
-    return {
-      symbol: '♥',
-      colorClass: 'text-rose-600',
-    };
-  }
-
-  if (suit === 'E' || suit === 'S') {
-    return {
-      symbol: '♠',
-      colorClass: 'text-slate-900',
-    };
-  }
-
-  return {
-    symbol: '♣',
-    colorClass: 'text-slate-900',
-  };
-}
-
-function suitSymbol(suit: Suit): string {
-  return getSuitDisplay(suit).symbol;
-}
-
-function suitColorClass(suit: Suit): string {
-  return getSuitDisplay(suit).colorClass;
 }
