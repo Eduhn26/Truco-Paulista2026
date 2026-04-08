@@ -69,9 +69,9 @@ export function LobbyPage() {
 
   return (
     <section className="grid gap-8">
-      <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/80 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
-        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_45%)] px-8 py-8 lg:px-10 lg:py-10">
-          <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr] xl:items-end">
+      <div className="overflow-hidden rounded-[36px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+          <div className="grid gap-6 xl:grid-cols-[1.32fr_0.68fr] xl:items-end">
             <div>
               <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
                 Authenticated lobby
@@ -82,57 +82,45 @@ export function LobbyPage() {
               </h1>
 
               <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
-                O lobby agora prioriza entrada, leitura rápida de status e ações principais. A
-                lógica continua intacta, mas a experiência visual fica mais próxima de um produto
-                jogável de verdade.
+                O lobby consolida entrada autenticada, contexto da sala e
+                transição para a mesa dedicada. A lógica continua autoritativa no
+                backend, mas a superfície agora conversa melhor com o restante do
+                produto.
               </p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-1">
-              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
-                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                  Connection
-                </div>
-                <div
-                  className={`mt-3 inline-flex rounded-full px-3 py-1.5 text-sm font-bold ${
-                    connectionStatus === 'online'
-                      ? 'bg-emerald-500/15 text-emerald-300'
-                      : 'bg-rose-500/15 text-rose-300'
-                  }`}
-                >
-                  {connectionStatus}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
-                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                  Assigned seat
-                </div>
-                <div className="mt-3 text-lg font-bold text-slate-100">
-                  {playerAssigned?.seatId ?? '-'}
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
-                <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                  Active match
-                </div>
-                <div className="mt-3 break-all text-sm font-bold text-slate-100">
-                  {derivedMatchId || '-'}
-                </div>
-              </div>
+              <StatusHeroCard
+                label="Connection"
+                value={connectionStatus}
+                tone={connectionStatus === 'online' ? 'success' : 'danger'}
+              />
+              <StatusHeroCard
+                label="Assigned seat"
+                value={playerAssigned?.seatId ?? '-'}
+                tone="default"
+              />
+              <StatusHeroCard
+                label="Active match"
+                value={derivedMatchId || '-'}
+                tone="default"
+                mono
+              />
             </div>
           </div>
         </div>
 
-        <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[420px_1fr]">
+        <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[410px_1fr]">
           <aside className="grid gap-6 self-start">
-            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-lg font-black tracking-tight text-slate-100">Player session</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Contexto da sessão mantido em destaque, mas sem competir com as ações principais.
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Player session
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-400">
+                    Contexto da sessão autenticada em destaque, sem disputar foco
+                    com a sala nem com as ações principais.
                   </p>
                 </div>
 
@@ -148,57 +136,40 @@ export function LobbyPage() {
               </div>
 
               <div className="mt-6 grid gap-4 text-sm">
-                <div className="rounded-3xl border border-emerald-400/15 bg-emerald-500/5 px-5 py-4">
+                <div className="rounded-3xl border border-emerald-400/15 bg-emerald-500/10 px-5 py-4">
                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">
                     User
                   </div>
-                  <div className="mt-3 text-lg font-bold text-slate-100">
+                  <div className="mt-3 text-lg font-black text-slate-100">
                     {session?.user?.displayName ?? session?.user?.email ?? 'Unknown user'}
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    Provider
-                  </div>
-                  <div className="mt-3 text-slate-100">{session?.user?.provider ?? '-'}</div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    User ID
-                  </div>
-                  <div className="mt-3 break-all font-mono text-xs text-slate-100">
-                    {session?.user?.id ?? '-'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    Backend URL
-                  </div>
-                  <div className="mt-3 break-all font-mono text-xs text-slate-100">
-                    {session?.backendUrl || '-'}
-                  </div>
-                </div>
+                <InfoCard label="Provider" value={session?.user?.provider ?? '-'} />
+                <InfoCard label="User ID" value={session?.user?.id ?? '-'} mono />
+                <InfoCard label="Backend URL" value={session?.backendUrl || '-'} mono />
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/60 p-6">
               <div>
-                <div className="text-lg font-black tracking-tight text-slate-100">Lobby actions</div>
-                <p className="mt-2 text-sm leading-6 text-slate-400">
-                  Conecte, crie ou entre em uma sala e siga para a mesa dedicada quando a partida
-                  estiver pronta.
+                <div className="text-lg font-black tracking-tight text-slate-100">
+                  Lobby actions
+                </div>
+                <p className="mt-2 text-sm leading-7 text-slate-400">
+                  Conecte, crie ou entre em uma sala e siga para a mesa dedicada
+                  quando a partida estiver pronta.
                 </p>
               </div>
 
               <label className="mt-6 grid gap-2 text-sm">
-                <span className="font-medium text-slate-300">Match ID</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                  Match ID
+                </span>
                 <input
                   value={matchId}
                   onChange={(event) => setMatchId(event.target.value)}
-                  className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-slate-100 outline-none transition focus:border-emerald-400/40"
+                  className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400/40"
                   placeholder="Paste a matchId to join an existing room"
                 />
               </label>
@@ -279,9 +250,7 @@ export function LobbyPage() {
           </aside>
 
           <div className="grid gap-6">
-            <section
-              className={`rounded-[28px] border p-6 ${getEntryToneClass(entryState.tone)}`}
-            >
+            <section className={`rounded-[30px] border p-6 ${getEntryToneClass(entryState.tone)}`}>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
                   <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
@@ -301,12 +270,15 @@ export function LobbyPage() {
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <div className="text-lg font-black tracking-tight text-slate-100">Room overview</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Estado da sala agrupado para leitura rápida antes da ida para a mesa.
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Room overview
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-400">
+                    Estado da sala agrupado para leitura rápida antes da ida para
+                    a mesa.
                   </p>
                 </div>
 
@@ -316,44 +288,23 @@ export function LobbyPage() {
               </div>
 
               <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    matchId
-                  </div>
-                  <div className="mt-3 break-all font-mono text-sm text-slate-100">
-                    {roomState?.matchId || '-'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    currentTurnSeatId
-                  </div>
-                  <div className="mt-3 font-mono text-sm text-slate-100">
-                    {roomState?.currentTurnSeatId || '-'}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    canStart
-                  </div>
-                  <div className="mt-3 font-mono text-sm text-slate-100">
-                    {String(roomState?.canStart ?? false)}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-                    players
-                  </div>
-                  <div className="mt-3 font-mono text-sm text-slate-100">{roomPlayers.length}</div>
-                </div>
+                <PreviewMetricCard label="matchId" value={roomState?.matchId || '-'} mono />
+                <PreviewMetricCard
+                  label="currentTurnSeatId"
+                  value={roomState?.currentTurnSeatId || '-'}
+                  mono
+                />
+                <PreviewMetricCard
+                  label="canStart"
+                  value={String(roomState?.canStart ?? false)}
+                  mono
+                />
+                <PreviewMetricCard label="players" value={String(roomPlayers.length)} mono />
               </div>
 
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 {roomPlayers.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm text-slate-400">
+                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm leading-7 text-slate-400">
                     No players received yet.
                   </div>
                 ) : (
@@ -375,7 +326,7 @@ export function LobbyPage() {
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-2 text-sm text-slate-400">
+                      <div className="mt-4 grid gap-2 text-sm leading-7 text-slate-400">
                         <div>bot: {String(player.isBot ?? false)}</div>
                         <div>team: {player.teamId ?? '-'}</div>
                       </div>
@@ -385,12 +336,15 @@ export function LobbyPage() {
               </div>
             </section>
 
-            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <div className="text-lg font-black tracking-tight text-slate-100">Match preview</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Resumo compacto da partida antes da transição para a tela jogável.
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Match preview
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-400">
+                    Resumo compacto da partida antes da transição para a tela
+                    jogável.
                   </p>
                 </div>
 
@@ -455,19 +409,21 @@ export function LobbyPage() {
                   </div>
                 </div>
               ) : (
-                <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm text-slate-400">
+                <div className="mt-6 rounded-3xl border border-dashed border-white/10 bg-white/[0.02] p-5 text-sm leading-7 text-slate-400">
                   No match-state payload received yet.
                 </div>
               )}
             </section>
 
-            <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <section className="rounded-[30px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <div className="text-lg font-black tracking-tight text-slate-100">Event log</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-400">
-                    Visibilidade operacional mantida, mas agora com menos peso visual que o fluxo
-                    principal da tela.
+                  <div className="text-lg font-black tracking-tight text-slate-100">
+                    Event log
+                  </div>
+                  <p className="mt-2 text-sm leading-7 text-slate-400">
+                    Visibilidade operacional mantida, mas agora com menos peso
+                    visual que o fluxo principal da tela.
                   </p>
                 </div>
 
@@ -486,6 +442,61 @@ export function LobbyPage() {
         </div>
       </div>
     </section>
+  );
+}
+
+function StatusHeroCard({
+  label,
+  value,
+  tone,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  tone: 'default' | 'success' | 'danger';
+  mono?: boolean;
+}) {
+  const valueClass =
+    tone === 'success'
+      ? 'bg-emerald-500/15 text-emerald-300'
+      : tone === 'danger'
+        ? 'bg-rose-500/15 text-rose-300'
+        : 'bg-white/[0.03] text-slate-100';
+
+  return (
+    <div className="rounded-3xl border border-white/10 bg-slate-950/65 p-5">
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`mt-3 inline-flex rounded-full px-3 py-1.5 text-sm font-bold ${valueClass} ${
+          mono ? 'font-mono' : ''
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
+      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+        {label}
+      </div>
+      <div className={`mt-3 text-slate-100 ${mono ? 'break-all font-mono text-xs' : ''}`}>
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -510,7 +521,9 @@ function PreviewMetricCard({
   );
 }
 
-function formatAvailableActionsSummary(matchState: { currentHand?: MatchStatePayload['currentHand'] } | null): string {
+function formatAvailableActionsSummary(
+  matchState: { currentHand?: MatchStatePayload['currentHand'] } | null,
+): string {
   const actions = matchState?.currentHand?.availableActions;
 
   if (!actions) {

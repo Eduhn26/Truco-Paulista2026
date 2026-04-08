@@ -67,28 +67,43 @@ export function AuthCallbackPage() {
 
   if (!payload) {
     return (
-      <section className="mx-auto max-w-3xl">
-        <div className="rounded-[28px] border border-red-500/20 bg-slate-900/75 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
-          <div className="inline-flex rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-red-300">
-            Callback error
+      <section className="mx-auto max-w-4xl">
+        <div className="overflow-hidden rounded-[32px] border border-red-500/20 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+          <div className="border-b border-red-500/15 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.16),transparent_42%)] px-8 py-8">
+            <div className="inline-flex rounded-full border border-red-500/20 bg-red-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-red-300">
+              Callback error
+            </div>
+
+            <h1 className="mt-5 text-3xl font-black tracking-tight text-white lg:text-4xl">
+              OAuth callback payload is incomplete.
+            </h1>
+
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
+              The frontend expected at least <code>authToken</code>, <code>provider</code>{' '}
+              and <code>userId</code> in the callback query string.
+            </p>
           </div>
 
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-white">
-            OAuth callback payload is incomplete.
-          </h1>
+          <div className="px-8 py-8">
+            <div className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+              <div className="text-lg font-black tracking-tight text-slate-100">
+                Next step
+              </div>
 
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-            The frontend expected at least <code>authToken</code>, <code>provider</code>{' '}
-            and <code>userId</code> in the callback query string.
-          </p>
+              <p className="mt-3 text-sm leading-7 text-slate-400">
+                Volte para a home, reinicie o fluxo de autenticação e confirme se
+                o backend publicou todos os parâmetros esperados para a callback.
+              </p>
 
-          <div className="mt-6">
-            <Link
-              to="/"
-              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
-            >
-              Back to home
-            </Link>
+              <div className="mt-6">
+                <Link
+                  to="/"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
+                >
+                  Back to home
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -96,55 +111,65 @@ export function AuthCallbackPage() {
   }
 
   return (
-    <section className="mx-auto max-w-4xl">
-      <div className="overflow-hidden rounded-[28px] border border-white/10 bg-slate-900/75 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
-        <div className="border-b border-white/10 bg-white/[0.03] px-6 py-5 lg:px-8">
-          <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-emerald-300">
+    <section className="mx-auto max-w-5xl">
+      <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+          <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
             OAuth callback
           </div>
 
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-white lg:text-4xl">
+          <h1 className="mt-5 text-3xl font-black tracking-tight text-white lg:text-4xl">
             Finalizando autenticação com boundary consistente.
           </h1>
 
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-            A sessão está sendo persistida com a URL de backend que realmente iniciou
-            o fluxo OAuth, evitando drift entre frontend origin e API origin.
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+            A sessão está sendo persistida com a URL de backend que realmente
+            iniciou o fluxo OAuth, evitando drift entre frontend origin e API
+            origin antes da ida automática ao lobby.
           </p>
         </div>
 
-        <div className="grid gap-5 px-6 py-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <div className="text-sm font-semibold text-slate-100">Authenticated player</div>
+        <div className="grid gap-6 px-8 py-8 lg:grid-cols-[1.08fr_0.92fr] lg:px-10 lg:py-10">
+          <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <div className="text-lg font-black tracking-tight text-slate-100">
+              Authenticated player
+            </div>
 
-            <div className="mt-3 text-xl font-semibold text-white">
+            <div className="mt-4 text-2xl font-black tracking-tight text-white">
               {payload.user.displayName ?? payload.user.email ?? 'Authenticated player'}
             </div>
 
-            <div className="mt-4 grid gap-3 text-sm text-slate-300">
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
+            <div className="mt-6 grid gap-3 text-sm text-slate-300">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
                 <span className="text-slate-500">Provider:</span> {payload.user.provider}
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
                 <span className="text-slate-500">User ID:</span> {payload.user.id}
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
                 <span className="text-slate-500">Expires in:</span>{' '}
                 {payload.expiresIn ?? '-'}
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <div className="text-sm font-semibold text-slate-100">Next step</div>
+          <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
+            <div className="text-lg font-black tracking-tight text-slate-100">
+              Next step
+            </div>
 
-            <p className="mt-2 text-sm leading-6 text-slate-400">
-              The browser session is being persisted locally with the backend URL that
-              actually started the OAuth flow.
+            <p className="mt-3 text-sm leading-7 text-slate-400">
+              The browser session is being persisted locally with the backend URL
+              that actually started the OAuth flow. From here, the app can move
+              to the lobby without guessing the API origin.
             </p>
-          </div>
+
+            <div className="mt-6 rounded-3xl border border-emerald-400/15 bg-emerald-500/10 px-5 py-4 text-sm leading-7 text-emerald-200">
+              Redirecting to the authenticated lobby flow.
+            </div>
+          </section>
         </div>
       </div>
     </section>

@@ -43,8 +43,8 @@ O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regr
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React · Vite · TypeScript · Tailwind CSS |
 | **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
-| **Testes** | Jest · ts-jest — 31 suites · 174 testes · 0 falhas |
-| **Deploy** | Render · Docker multi-stage |
+| **Testes** | Jest · ts-jest — 35 suites · 174 testes · 0 falhas |
+| **Deploy** | Render · Docker multi-stage · GitHub Actions |
 
 ---
 
@@ -86,29 +86,39 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 16 | Hardening — rate limiting, métricas, correlation ID, env validation | ✅ |
 | 17 | Adequação às regras reais do Truco Paulista + contrato frontend-ready | ✅ |
 | 18 | Frontend contract hardening + MatchPage structural cleanup | ✅ |
+| 19 | Frontend environment / OAuth / runtime hardening + product consistency | ✅ |
 
 ---
 
-## Fase 18 — O que mudou
+## Fase 19 — O que mudou
 
-A Fase 18 tirou o frontend do estado de integração frágil e deixou a `MatchPage` estruturalmente preparada para consumir o backend autoritativo de forma segura.
+A Fase 19 tornou o frontend seguro para uso autenticado real e próximo de publicação confiável. O foco foi ambiente, runtime e consistência — não polish visual final.
 
-**Avanços no frontend:**
+**Hardening de ambiente e OAuth:**
+- Boundary entre local e produção endurecida no handling de `backendUrl`
+- OAuth start flow persiste o backend explicitamente antes do redirect
+- Callback parou de depender de origin guessing frágil
 
-- Boundary mais segura entre ambiente, OAuth e `backendUrl`
-- Consumo mais explícito do `match-state` autoritativo
-- Extração de selectors de apresentação — sem semântica inline frágil
-- Extração do estado transitório da mesa para hook dedicado
-- `MatchPage` decomposta em painéis independentes: header · action surface · live state · rounds history · player hand · central table shell
+**Proteção de rotas e estados de entrada:**
+- Lobby e match ganharam proteção explícita de rota e validação de sessão
+- Estados intermediários (sessão ausente, hidratação, contexto de partida) passaram a ser comunicados honestamente em vez de parecer quebrados
 
-**Pendências registradas para próximas fases:**
+**Extração de orquestração:**
+- Socket lifecycle do lobby extraído para `useLobbyRealtimeSession`
+- Socket lifecycle do match extraído para `useMatchRealtimeSession`
+- Bridge de ações extraído para `useMatchActionBridge`
+- `MatchPage` passou de concentradora de transporte para orquestradora de rendering
 
-- Legibilidade da transição entre rodadas
-- Ruído excessivo do protocolo de eventos
-- Pacing visual do fluxo do bot
-- Otimização de bundle do frontend
+**Correções de contrato:**
+- Renderização da mão privada alinhada ao contrato real tipado do backend (`viewerPlayerId` · `playerOneHand` · `playerTwoHand`)
+- Display de naipes alinhado à semântica real do payload de cartas
 
-→ Detalhes completos em [`docs/phases/phase-18.md`](docs/phases/phase-18.md)
+**Bundle e build:**
+- Code splitting por rota introduzido para todas as páginas
+- Split secundário para `MatchLiveStatePanel` e `MatchRoundsHistoryPanel`
+- Warning de chunk `> 500 kB` eliminado
+
+→ Detalhes completos em [`docs/phases/phase-19.md`](docs/phases/phase-19.md)
 
 ---
 
@@ -153,8 +163,9 @@ curl http://localhost:8000/health/live
 | | |
 |-|---|
 | [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
-| [`docs/api.md`](docs/api.md) | Todos os eventos WebSocket Client↔Server |
+| [`docs/api.md`](docs/api.md) | Eventos WebSocket Client↔Server |
 | [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
+| [`docs/phases/phase-19.md`](docs/phases/phase-19.md) | Frontend environment / runtime hardening |
 | [`python-bot-service/README.md`](python-bot-service/README.md) | Contrato HTTP, exemplos, health |
 
 ---

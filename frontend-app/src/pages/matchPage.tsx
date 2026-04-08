@@ -1,21 +1,29 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
-import { MatchLiveStatePanel } from '../features/match/matchLiveStatePanel';
+import { useMatchActionBridge } from '../features/match/useMatchActionBridge';
 import { MatchPageHeader } from '../features/match/matchPageHeader';
 import { buildMatchContractPresentation } from '../features/match/matchPresentationSelectors';
-import { MatchRoundsHistoryPanel } from '../features/match/matchRoundsHistoryPanel';
 import { getLastActiveMatchId } from '../features/match/matchSnapshotStorage';
 import { MatchTableShell } from '../features/match/matchTableShell';
 import { useMatchRealtimeSession } from '../features/match/useMatchRealtimeSession';
 import { useMatchTableTransition } from '../features/match/useMatchTableTransition';
-import type {
-  CardPayload,
-  MatchStatePayload,
-  Rank,
-} from '../services/socket/socketTypes';
+import { cardStringToPayload } from '../services/socket/socketTypes';
+import type { CardPayload, MatchStatePayload, Rank, Suit } from '../services/socket/socketTypes';
+
+const MatchLiveStatePanel = lazy(async () =>
+  import('../features/match/matchLiveStatePanel').then((module) => ({
+    default: module.MatchLiveStatePanel,
+  })),
+);
+
+const MatchRoundsHistoryPanel = lazy(async () =>
+  import('../features/match/matchRoundsHistoryPanel').then((module) => ({
+    default: module.MatchRoundsHistoryPanel,
+  })),
+);
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
@@ -73,6 +81,11 @@ type MatchViewModel = {
   playedRoundsCount: number;
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
+};
+
+type SuitDisplay = {
+  symbol: string;
+  colorClass: string;
 };
 
 const seatPulseAnimation = {
@@ -288,77 +301,28 @@ export function MatchPage() {
     }
   }, [viewModel.currentPrivateHand?.viraRank, viewModel.currentPublicHand?.viraRank]);
 
-  function handleRefreshState(): void {
-    if (!viewModel.resolvedMatchId) {
-      appendLog('No matchId available for get-state.');
-      return;
-    }
-
-    emitGetState(viewModel.resolvedMatchId);
-    appendLog(`Emitted get-state (${viewModel.resolvedMatchId}).`);
-  }
-
-  function handleStartHand(): void {
-    if (!viewModel.resolvedMatchId) {
-      appendLog('No matchId available for start-hand.');
-      return;
-    }
-
-    liveTableTransition.beginHandTransition();
-    emitStartHand(viewModel.resolvedMatchId, viraRank);
-    appendLog(`Emitted start-hand (${viewModel.resolvedMatchId}, ${viraRank}).`);
-  }
-
-  function handlePlayCard(card: CardPayload): void {
-    if (!viewModel.resolvedMatchId || !viewModel.mySeat || !viewModel.canPlayCard) {
-      appendLog('Cannot play card in the current state.');
-      return;
-    }
-
-    const cardKey = `${card.rank}|${card.suit}`;
-    const serverCard = `${card.rank}${card.suit}`;
-
-    liveTableTransition.beginOwnCardLaunch({
-      cardKey,
-      serverCard,
+  const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
+    useMatchActionBridge({
+      resolvedMatchId: viewModel.resolvedMatchId,
+      mySeat: viewModel.mySeat,
+      canPlayCard: viewModel.canPlayCard,
+      availableActions: viewModel.availableActions,
+      viraRank,
+      appendLog,
+      emitGetState,
+      emitStartHand,
+      emitPlayCard,
+      emitRequestTruco,
+      emitAcceptBet,
+      emitDeclineBet,
+      emitRaiseToSix,
+      emitRaiseToNine,
+      emitRaiseToTwelve,
+      emitAcceptMaoDeOnze,
+      emitDeclineMaoDeOnze,
+      beginHandTransition: liveTableTransition.beginHandTransition,
+      beginOwnCardLaunch: liveTableTransition.beginOwnCardLaunch,
     });
-
-    emitPlayCard(viewModel.resolvedMatchId, card);
-    appendLog(`Emitted play-card (${card.rank}${suitSymbol(card.suit)}).`);
-  }
-
-  function handleMatchAction(
-    action:
-      | 'request-truco'
-      | 'accept-bet'
-      | 'decline-bet'
-      | 'raise-to-six'
-      | 'raise-to-nine'
-      | 'raise-to-twelve'
-      | 'accept-mao-de-onze'
-      | 'decline-mao-de-onze',
-  ): void {
-    if (!viewModel.resolvedMatchId) {
-      appendLog(`No matchId available for ${action}.`);
-      return;
-    }
-
-    if (!isActionEnabled(viewModel.availableActions, action)) {
-      appendLog(`Action ${action} is not available in the current backend state.`);
-      return;
-    }
-
-    if (action === 'request-truco') emitRequestTruco(viewModel.resolvedMatchId);
-    if (action === 'accept-bet') emitAcceptBet(viewModel.resolvedMatchId);
-    if (action === 'decline-bet') emitDeclineBet(viewModel.resolvedMatchId);
-    if (action === 'raise-to-six') emitRaiseToSix(viewModel.resolvedMatchId);
-    if (action === 'raise-to-nine') emitRaiseToNine(viewModel.resolvedMatchId);
-    if (action === 'raise-to-twelve') emitRaiseToTwelve(viewModel.resolvedMatchId);
-    if (action === 'accept-mao-de-onze') emitAcceptMaoDeOnze(viewModel.resolvedMatchId);
-    if (action === 'decline-mao-de-onze') emitDeclineMaoDeOnze(viewModel.resolvedMatchId);
-
-    appendLog(`Emitted ${action} (${viewModel.resolvedMatchId}).`);
-  }
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
   const hasHydratedMatchState = Boolean(
@@ -519,28 +483,32 @@ export function MatchPage() {
               />
             </section>
 
-            <MatchRoundsHistoryPanel
-              rounds={viewModel.rounds}
-              latestRound={viewModel.latestRound}
-              playedRoundsCount={viewModel.playedRoundsCount}
-            />
+            <Suspense fallback={<MatchSecondaryPanelFallback title="Rounds played" />}>
+              <MatchRoundsHistoryPanel
+                rounds={viewModel.rounds}
+                latestRound={viewModel.latestRound}
+                playedRoundsCount={viewModel.playedRoundsCount}
+              />
+            </Suspense>
           </div>
 
           <aside className="grid gap-6 self-start">
-            <MatchLiveStatePanel
-              connectionStatus={connectionStatus}
-              resolvedMatchId={viewModel.resolvedMatchId}
-              publicState={publicMatchState?.state || '-'}
-              privateState={privateMatchState?.state || '-'}
-              mySeat={viewModel.mySeat}
-              currentTurnSeatId={viewModel.currentTurnSeatId}
-              canStartHand={viewModel.canStartHand}
-              canPlayCard={viewModel.canPlayCard}
-              betState={viewModel.betState}
-              specialStateLabel={formatSpecialState(viewModel.specialState)}
-              availableActionsSummary={formatAvailableActionsSummary(viewModel.availableActions)}
-              canRenderLiveState={canRenderLiveState}
-            />
+            <Suspense fallback={<MatchSecondaryPanelFallback title="Match live state" />}>
+              <MatchLiveStatePanel
+                connectionStatus={connectionStatus}
+                resolvedMatchId={viewModel.resolvedMatchId}
+                publicState={publicMatchState?.state || '-'}
+                privateState={privateMatchState?.state || '-'}
+                mySeat={viewModel.mySeat}
+                currentTurnSeatId={viewModel.currentTurnSeatId}
+                canStartHand={viewModel.canStartHand}
+                canPlayCard={viewModel.canPlayCard}
+                betState={viewModel.betState}
+                specialStateLabel={formatSpecialState(viewModel.specialState)}
+                availableActionsSummary={formatAvailableActionsSummary(viewModel.availableActions)}
+                canRenderLiveState={canRenderLiveState}
+              />
+            </Suspense>
 
             <section className="rounded-[30px] border border-white/10 bg-slate-950/50 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -569,6 +537,32 @@ export function MatchPage() {
   );
 }
 
+function MatchSecondaryPanelFallback({ title }: { title: string }) {
+  return (
+    <section className="rounded-[30px] border border-white/10 bg-slate-950/45 p-6">
+      <div className="text-lg font-black tracking-tight text-slate-100">{title}</div>
+      <div className="mt-2 text-sm leading-6 text-slate-400">
+        Carregando painel secundário da mesa.
+      </div>
+
+      <div className="mt-6 grid gap-4">
+        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+          <div className="h-3 w-24 animate-pulse rounded-full bg-white/10" />
+          <div className="mt-3 h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
+        </div>
+        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+          <div className="h-3 w-20 animate-pulse rounded-full bg-white/10" />
+          <div className="mt-3 h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
+        </div>
+        <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+          <div className="h-3 w-28 animate-pulse rounded-full bg-white/10" />
+          <div className="mt-3 h-4 w-4/5 animate-pulse rounded-full bg-white/10" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function getViewerCards(
   currentPrivateHand: MatchStatePayload['currentHand'] | null,
 ): CardPayload[] {
@@ -576,7 +570,19 @@ function getViewerCards(
     return [];
   }
 
-  return [];
+  const rawViewerHand =
+    currentPrivateHand.viewerPlayerId === 'P1'
+      ? currentPrivateHand.playerOneHand
+      : currentPrivateHand.viewerPlayerId === 'P2'
+        ? currentPrivateHand.playerTwoHand
+        : [];
+
+  // NOTE: The private contract is viewer-aware through viewerPlayerId plus the
+  // two explicit hand arrays. We derive the visible hand from that contract
+  // instead of assuming a separate viewerHand field that does not exist.
+  return rawViewerHand
+    .map((card) => cardStringToPayload(card))
+    .filter((card): card is CardPayload => card !== null);
 }
 
 function emptyAvailableActions(): NonNullable<MatchStatePayload['currentHand']>['availableActions'] {
@@ -605,30 +611,6 @@ function resolvePlayedCardOwner({
   }
 
   return payloadPlayerId === mySeat ? 'mine' : 'opponent';
-}
-
-function isActionEnabled(
-  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
-  action:
-    | 'request-truco'
-    | 'accept-bet'
-    | 'decline-bet'
-    | 'raise-to-six'
-    | 'raise-to-nine'
-    | 'raise-to-twelve'
-    | 'accept-mao-de-onze'
-    | 'decline-mao-de-onze',
-): boolean {
-  if (action === 'request-truco') return availableActions.canRequestTruco;
-  if (action === 'accept-bet') return availableActions.canAcceptBet;
-  if (action === 'decline-bet') return availableActions.canDeclineBet;
-  if (action === 'raise-to-six') return availableActions.canRaiseToSix;
-  if (action === 'raise-to-nine') return availableActions.canRaiseToNine;
-  if (action === 'raise-to-twelve') return availableActions.canRaiseToTwelve;
-  if (action === 'accept-mao-de-onze') return availableActions.canAcceptMaoDeOnze;
-  if (action === 'decline-mao-de-onze') return availableActions.canDeclineMaoDeOnze;
-
-  return false;
 }
 
 function formatAvailableActionsSummary(
@@ -661,9 +643,38 @@ function formatSpecialState(value: string): string {
   return value;
 }
 
-function suitSymbol(suit: CardPayload['suit']): string {
-  if (suit === 'H') return '♥';
-  if (suit === 'D') return '♦';
-  if (suit === 'C') return '♣';
-  return '♠';
+function getSuitDisplay(suit: Suit): SuitDisplay {
+  if (suit === 'O' || suit === 'D') {
+    return {
+      symbol: '♦',
+      colorClass: 'text-rose-600',
+    };
+  }
+
+  if (suit === 'P' || suit === 'H') {
+    return {
+      symbol: '♥',
+      colorClass: 'text-rose-600',
+    };
+  }
+
+  if (suit === 'E' || suit === 'S') {
+    return {
+      symbol: '♠',
+      colorClass: 'text-slate-900',
+    };
+  }
+
+  return {
+    symbol: '♣',
+    colorClass: 'text-slate-900',
+  };
+}
+
+function suitSymbol(suit: Suit): string {
+  return getSuitDisplay(suit).symbol;
+}
+
+function suitColorClass(suit: Suit): string {
+  return getSuitDisplay(suit).colorClass;
 }
