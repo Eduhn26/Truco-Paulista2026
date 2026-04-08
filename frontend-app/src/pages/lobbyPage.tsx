@@ -1,177 +1,39 @@
-import { useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
-import { saveMatchSnapshot } from '../features/match/matchSnapshotStorage';
-import { GameSocketClient } from '../services/socket/gameSocketClient';
-import type {
-  MatchStatePayload,
-  PlayerAssignedPayload,
-  RoomStatePayload,
-  ServerErrorPayload,
-} from '../services/socket/socketTypes';
+import { useLobbyRealtimeSession } from '../features/lobby/useLobbyRealtimeSession';
+import type { MatchStatePayload } from '../services/socket/socketTypes';
 
 export function LobbyPage() {
   const { session } = useAuth();
-
-  const clientRef = useRef<GameSocketClient | null>(null);
-
-  const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [matchId, setMatchId] = useState('');
-  const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
-  const [publicMatchState, setPublicMatchState] = useState<MatchStatePayload | null>(null);
-  const [privateMatchState, setPrivateMatchState] = useState<MatchStatePayload | null>(null);
-  const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
-  const [eventLog, setEventLog] = useState<string[]>([]);
+
+  const {
+    connectionStatus,
+    roomState,
+    playerAssigned,
+    eventLog,
+    derivedMatchId,
+    roomPlayers,
+    currentReady,
+    hasLobbySnapshot,
+    isSocketOnline,
+    canConnect,
+    canCreateMatch,
+    canJoinMatch,
+    canToggleReady,
+    canRequestState,
+    displayedMatchState,
+    handleConnect,
+    handleDisconnect,
+    handleCreateMatch,
+    handleJoinMatch,
+    handleReady,
+    handleGetState,
+  } = useLobbyRealtimeSession(session, matchId);
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
-  const canConnect = hasMinimumSession;
-  const derivedMatchId =
-    privateMatchState?.matchId ||
-    publicMatchState?.matchId ||
-    roomState?.matchId ||
-    playerAssigned?.matchId ||
-    matchId;
-
-  function appendLog(line: string): void {
-    setEventLog((current) =>
-      [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30),
-    );
-  }
-
-  function persistSnapshot(next: {
-    nextRoomState?: RoomStatePayload | null;
-    nextPublicMatchState?: MatchStatePayload | null;
-    nextPrivateMatchState?: MatchStatePayload | null;
-    nextPlayerAssigned?: PlayerAssignedPayload | null;
-  }): void {
-    const snapshotMatchId =
-      next.nextPrivateMatchState?.matchId ||
-      next.nextPublicMatchState?.matchId ||
-      next.nextRoomState?.matchId ||
-      next.nextPlayerAssigned?.matchId ||
-      derivedMatchId;
-
-    if (!snapshotMatchId) {
-      return;
-    }
-
-    // NOTE: The lobby stores a lightweight snapshot so the dedicated match page
-    // can hydrate quickly without depending on this screen staying mounted.
-    saveMatchSnapshot(snapshotMatchId, {
-      roomState: next.nextRoomState ?? roomState,
-      publicMatchState: next.nextPublicMatchState ?? publicMatchState,
-      privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
-      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
-    });
-  }
-
-  function handleConnect(): void {
-    if (!session?.backendUrl || !session?.authToken) {
-      appendLog('Missing backendUrl or authToken.');
-      return;
-    }
-
-    const client = new GameSocketClient();
-    clientRef.current = client;
-
-    client.connect(
-      {
-        backendUrl: session.backendUrl,
-        authToken: session.authToken,
-      },
-      {
-        onConnect: (socketId) => {
-          setConnectionStatus('online');
-          appendLog(`Socket connected (${socketId}).`);
-        },
-        onDisconnect: (reason) => {
-          setConnectionStatus('offline');
-          appendLog(`Socket disconnected (${reason}).`);
-        },
-        onError: (payload: ServerErrorPayload) => {
-          const errorText = payload.message
-            ? `Server error: ${payload.message}`
-            : 'Server emitted error event.';
-
-          appendLog(errorText);
-        },
-        onPlayerAssigned: (payload) => {
-          setPlayerAssigned(payload);
-          persistSnapshot({ nextPlayerAssigned: payload });
-          appendLog(`Received player-assigned${payload.seatId ? ` (${payload.seatId})` : ''}.`);
-        },
-        onRoomState: (payload) => {
-          setRoomState(payload);
-          persistSnapshot({ nextRoomState: payload });
-          appendLog('Received room-state.');
-        },
-        onMatchState: (payload) => {
-          setPublicMatchState(payload);
-          persistSnapshot({ nextPublicMatchState: payload });
-          appendLog('Received public match-state.');
-        },
-        onPrivateMatchState: (payload) => {
-          setPrivateMatchState(payload);
-          persistSnapshot({ nextPrivateMatchState: payload });
-          appendLog('Received private match-state.');
-        },
-      },
-    );
-  }
-
-  function handleDisconnect(): void {
-    clientRef.current?.disconnect();
-    setConnectionStatus('offline');
-    appendLog('Socket disconnected manually.');
-  }
-
-  function handleCreateMatch(): void {
-    clientRef.current?.emitCreateMatch('1v1', 12);
-    appendLog('Emitted create-match (1v1, 12).');
-  }
-
-  function handleJoinMatch(): void {
-    const normalizedMatchId = matchId.trim();
-
-    if (!normalizedMatchId) {
-      appendLog('Match ID is required to join.');
-      return;
-    }
-
-    clientRef.current?.emitJoinMatch(normalizedMatchId);
-    appendLog(`Emitted join-match (${normalizedMatchId}).`);
-  }
-
-  function handleReady(): void {
-    const mySeatId = playerAssigned?.seatId;
-    const readyNow = roomState?.players.find((player) => player.seatId === mySeatId)?.ready ?? false;
-
-    clientRef.current?.emitSetReady(!readyNow);
-    appendLog(`Emitted set-ready (${String(!readyNow)}).`);
-  }
-
-  function handleGetState(): void {
-    if (!derivedMatchId) {
-      appendLog('No matchId available for get-state.');
-      return;
-    }
-
-    clientRef.current?.emitGetState(derivedMatchId);
-    appendLog(`Emitted get-state (${derivedMatchId}).`);
-  }
-
-  const roomPlayers = useMemo(() => roomState?.players ?? [], [roomState]);
-  const displayedMatchState = privateMatchState ?? publicMatchState;
-  const currentReady =
-    roomState?.players.find((player) => player.seatId === playerAssigned?.seatId)?.ready ?? false;
-  const normalizedMatchId = matchId.trim();
-  const isSocketOnline = connectionStatus === 'online';
-  const hasLobbySnapshot = Boolean(roomState || publicMatchState || privateMatchState || playerAssigned);
-  const canCreateMatch = hasMinimumSession && isSocketOnline;
-  const canJoinMatch = hasMinimumSession && isSocketOnline && Boolean(normalizedMatchId);
-  const canToggleReady = hasMinimumSession && isSocketOnline && Boolean(playerAssigned?.seatId);
-  const canRequestState = hasMinimumSession && isSocketOnline && Boolean(derivedMatchId);
 
   const entryState = !hasMinimumSession
     ? {
@@ -383,7 +245,7 @@ export function LobbyPage() {
 
                   <button
                     type="button"
-                    onClick={handleJoinMatch}
+                    onClick={() => handleJoinMatch(matchId)}
                     disabled={!canJoinMatch}
                     className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -438,6 +300,7 @@ export function LobbyPage() {
                 </div>
               </div>
             </section>
+
             <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -532,7 +395,7 @@ export function LobbyPage() {
                 </div>
 
                 <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                  {privateMatchState ? 'private view' : 'public view'}
+                  {displayedMatchState ? 'private or public view' : 'no match-state'}
                 </div>
               </div>
 
@@ -647,7 +510,7 @@ function PreviewMetricCard({
   );
 }
 
-function formatAvailableActionsSummary(matchState: MatchStatePayload | null): string {
+function formatAvailableActionsSummary(matchState: { currentHand?: MatchStatePayload['currentHand'] } | null): string {
   const actions = matchState?.currentHand?.availableActions;
 
   if (!actions) {
