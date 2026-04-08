@@ -91,9 +91,9 @@ type SuitDisplay = {
 const seatPulseAnimation = {
   scale: [1, 1.03, 1],
   boxShadow: [
-    '0 0 0 rgba(16,185,129,0)',
-    '0 0 28px rgba(16,185,129,0.22)',
-    '0 0 0 rgba(16,185,129,0)',
+    '0 0 0 rgba(201,168,76,0)',
+    '0 0 28px rgba(201,168,76,0.22)',
+    '0 0 0 rgba(201,168,76,0)',
   ],
 };
 
@@ -349,7 +349,7 @@ export function MatchPage() {
           <div className="mt-6 flex flex-wrap gap-3">
             <Link
               to="/"
-              className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
+              className="rounded-2xl bg-amber-600 px-5 py-3 text-sm font-bold text-slate-900 transition hover:bg-amber-500"
             >
               Voltar para home
             </Link>
@@ -382,7 +382,7 @@ export function MatchPage() {
           <div className="mt-6">
             <Link
               to="/lobby"
-              className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
+              className="rounded-2xl bg-amber-600 px-5 py-3 text-sm font-bold text-slate-900 transition hover:bg-amber-500"
             >
               Voltar para lobby
             </Link>

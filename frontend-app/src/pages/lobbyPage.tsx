@@ -70,10 +70,10 @@ export function LobbyPage() {
   return (
     <section className="grid gap-8">
       <div className="overflow-hidden rounded-[36px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
-        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.16),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(201,168,76,0.12),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
           <div className="grid gap-6 xl:grid-cols-[1.32fr_0.68fr] xl:items-end">
             <div>
-              <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
+              <div className="inline-flex rounded-full border border-amber-400/20 bg-amber-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-amber-300">
                 Authenticated lobby
               </div>
 
@@ -127,7 +127,7 @@ export function LobbyPage() {
                 <div
                   className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
                     session?.authToken
-                      ? 'bg-emerald-500/15 text-emerald-300'
+                      ? 'bg-amber-500/15 text-amber-300'
                       : 'bg-rose-500/15 text-rose-300'
                   }`}
                 >
@@ -136,8 +136,8 @@ export function LobbyPage() {
               </div>
 
               <div className="mt-6 grid gap-4 text-sm">
-                <div className="rounded-3xl border border-emerald-400/15 bg-emerald-500/10 px-5 py-4">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">
+                <div className="rounded-3xl border border-amber-400/15 bg-amber-500/10 px-5 py-4">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300">
                     User
                   </div>
                   <div className="mt-3 text-lg font-black text-slate-100">
@@ -169,7 +169,7 @@ export function LobbyPage() {
                 <input
                   value={matchId}
                   onChange={(event) => setMatchId(event.target.value)}
-                  className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-emerald-400/40"
+                  className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-amber-400/40"
                   placeholder="Paste a matchId to join an existing room"
                 />
               </label>
@@ -179,7 +179,7 @@ export function LobbyPage() {
                   type="button"
                   onClick={handleConnect}
                   disabled={!canConnect || isSocketOnline}
-                  className="rounded-3xl bg-emerald-500 px-5 py-4 text-base font-black text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-3xl bg-amber-600 px-5 py-4 text-base font-black text-slate-950 transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Connect socket
                 </button>
@@ -230,7 +230,7 @@ export function LobbyPage() {
                   disabled={!canToggleReady}
                   className={`rounded-3xl border px-5 py-4 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     currentReady
-                      ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15'
+                      ? 'border-amber-400/20 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15'
                       : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
                   }`}
                 >
@@ -240,7 +240,7 @@ export function LobbyPage() {
                 {derivedMatchId ? (
                   <Link
                     to={`/match/${derivedMatchId}`}
-                    className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 px-5 py-4 text-center text-sm font-black text-emerald-300 transition hover:bg-emerald-500/15"
+                    className="rounded-3xl border border-amber-400/20 bg-amber-500/10 px-5 py-4 text-center text-sm font-black text-amber-300 transition hover:bg-amber-500/15"
                   >
                     Open match screen
                   </Link>
@@ -318,7 +318,7 @@ export function LobbyPage() {
                         <div
                           className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] ${
                             player.ready
-                              ? 'bg-emerald-500/15 text-emerald-300'
+                              ? 'bg-amber-500/15 text-amber-300'
                               : 'bg-white/5 text-slate-400'
                           }`}
                         >
@@ -458,7 +458,7 @@ function StatusHeroCard({
 }) {
   const valueClass =
     tone === 'success'
-      ? 'bg-emerald-500/15 text-emerald-300'
+      ? 'bg-amber-500/15 text-amber-300'
       : tone === 'danger'
         ? 'bg-rose-500/15 text-rose-300'
         : 'bg-white/[0.03] text-slate-100';
@@ -547,7 +547,7 @@ function formatAvailableActionsSummary(
 
 function getEntryToneClass(tone: 'neutral' | 'warning' | 'success'): string {
   if (tone === 'success') {
-    return 'border-emerald-400/20 bg-emerald-500/10';
+    return 'border-amber-400/20 bg-amber-500/10';
   }
 
   if (tone === 'warning') {

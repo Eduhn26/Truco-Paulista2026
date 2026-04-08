@@ -15,7 +15,7 @@ function MetricCard({
 }) {
   const toneClass =
     tone === 'success'
-      ? 'text-emerald-300'
+      ? 'text-amber-300'
       : tone === 'danger'
         ? 'text-rose-300'
         : 'text-slate-100';
@@ -54,10 +54,10 @@ export function MatchPageHeader({
   onStartHand: () => void;
 }) {
   return (
-    <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+    <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(201,168,76,0.12),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr] xl:items-end">
         <div>
-          <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
+          <div className="inline-flex rounded-full border border-amber-400/20 bg-amber-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-amber-300">
             Live match
           </div>
 
@@ -85,7 +85,7 @@ export function MatchPageHeader({
       <div className="mt-8 flex flex-wrap gap-3">
         <Link
           to="/lobby"
-          className="rounded-3xl bg-emerald-500 px-5 py-4 text-sm font-black text-slate-950 transition hover:bg-emerald-400"
+          className="rounded-3xl bg-amber-600 px-5 py-4 text-sm font-black text-slate-900 transition hover:bg-amber-500"
         >
           Voltar para lobby
         </Link>
@@ -101,7 +101,7 @@ export function MatchPageHeader({
         <select
           value={viraRank}
           onChange={(event) => onChangeViraRank(event.target.value as Rank)}
-          className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-sm font-bold text-slate-100 outline-none transition focus:border-emerald-400/40"
+          className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-sm font-bold text-slate-100 outline-none transition focus:border-amber-400/40"
         >
           {viraRankOptions.map((option) => (
             <option key={option} value={option}>
@@ -116,7 +116,7 @@ export function MatchPageHeader({
           disabled={!canStartHand}
           className={`rounded-3xl border px-5 py-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
             canStartHand
-              ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20'
+              ? 'border-amber-400/30 bg-amber-500/15 text-amber-300 hover:bg-amber-500/20'
               : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
           }`}
         >

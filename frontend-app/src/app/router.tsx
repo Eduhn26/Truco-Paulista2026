@@ -32,8 +32,8 @@ function RouteLoadingFallback() {
   return (
     <section className="grid gap-6">
       <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/80 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
-        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.14),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
-          <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(201,168,76,0.10),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
+          <div className="inline-flex rounded-full border border-amber-400/20 bg-amber-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-amber-300">
             Loading route
           </div>
 

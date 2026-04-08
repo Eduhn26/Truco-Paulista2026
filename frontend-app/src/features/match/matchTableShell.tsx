@@ -121,7 +121,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
   return (
     <motion.div
       layout
-      className="relative overflow-hidden rounded-[32px] border border-emerald-500/15 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.22),transparent_48%),linear-gradient(180deg,rgba(13,64,40,0.94),rgba(8,25,21,0.98))] px-5 py-6 sm:px-8 sm:py-8"
+      className="relative overflow-hidden rounded-[32px] border border-amber-500/15 bg-[radial-gradient(circle_at_center,rgba(201,168,76,0.12),transparent_48%),linear-gradient(180deg,rgba(5,20,30,0.96),rgba(2,8,20,0.99))] px-5 py-6 sm:px-8 sm:py-8"
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom,rgba(255,255,255,0.04),transparent_45%)]" />
       <div className="pointer-events-none absolute bottom-3 left-1/2 h-12 w-[78%] -translate-x-1/2 rounded-full bg-black/20 blur-xl" />
@@ -130,7 +130,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-lg font-black tracking-tight text-slate-100">Table state</div>
-            <p className="mt-2 text-sm leading-6 text-emerald-50/75">
+            <p className="mt-2 text-sm leading-6 text-amber-50/75">
               Mesa centrada na verdade do payload: oponente em cima, você embaixo, slots centrais e
               próxima ação guiada pelo backend.
             </p>
@@ -175,7 +175,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -12, scale: 0.96 }}
               transition={{ duration: 0.45 }}
-              className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-emerald-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-emerald-300 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
+              className="absolute left-1/2 top-16 z-20 -translate-x-1/2 rounded-full border border-amber-400/20 bg-slate-950/85 px-5 py-2 text-sm font-bold text-amber-300 shadow-[0_12px_30px_rgba(2,6,23,0.35)]"
             >
               Nova mão iniciada · vira {currentPrivateViraRank ?? currentPublicViraRank ?? viraRank}
             </motion.div>
@@ -291,13 +291,13 @@ function HandCompletionBanner({
       animate={{ opacity: 1, scale: 1 }}
       className={`rounded-[28px] border p-6 ${
         isMatchFinished
-          ? 'border-emerald-400/25 bg-emerald-500/10'
+          ? 'border-amber-400/25 bg-amber-500/10'
           : 'border-amber-400/20 bg-amber-500/10'
       }`}
     >
       <div
         className={`text-[11px] font-bold uppercase tracking-[0.22em] ${
-          isMatchFinished ? 'text-emerald-300' : 'text-amber-200'
+          isMatchFinished ? 'text-amber-300' : 'text-amber-200'
         }`}
       >
         {isMatchFinished ? 'Match summary' : 'Hand summary'}
@@ -335,7 +335,7 @@ function SeatBadge({ seat, label }: { seat: TableSeatView; label: string }) {
       transition={{ repeat: seat.isCurrentTurn ? Number.POSITIVE_INFINITY : 0, duration: 1.5 }}
       className={`w-full max-w-xs rounded-[30px] border px-5 py-4 shadow-[0_18px_40px_rgba(2,6,23,0.22)] ${
         seat.isMine
-          ? 'border-emerald-400/30 bg-emerald-500/10'
+          ? 'border-amber-400/30 bg-amber-500/10'
           : seat.isBot
             ? 'border-amber-400/20 bg-amber-500/10'
             : 'border-white/10 bg-white/[0.03]'
@@ -351,7 +351,7 @@ function SeatBadge({ seat, label }: { seat: TableSeatView; label: string }) {
 
         <div className="flex flex-wrap gap-2">
           {seat.isMine ? (
-            <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-300">
+            <span className="rounded-full bg-amber-500/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-amber-300">
               You
             </span>
           ) : null}
@@ -365,7 +365,7 @@ function SeatBadge({ seat, label }: { seat: TableSeatView; label: string }) {
           <span
             className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] ${
               seat.isCurrentTurn
-                ? 'bg-emerald-500/15 text-emerald-300'
+                ? 'bg-amber-500/15 text-amber-300'
                 : 'bg-white/5 text-slate-300'
             }`}
           >
@@ -445,7 +445,7 @@ function PlayedCardZone({
   isLaunching?: boolean;
 }) {
   const borderClass = highlight
-    ? 'border-emerald-400/25 bg-emerald-500/8'
+    ? 'border-amber-400/25 bg-amber-500/8'
     : 'border-white/10 bg-slate-950/35';
 
   return (
@@ -525,7 +525,7 @@ function HandEmptyState({ tablePhase }: { tablePhase: TablePhase }) {
 
 function statusToneClass(tone: HandStatusVariant): string {
   if (tone === 'success') {
-    return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200';
+    return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
   }
 
   if (tone === 'warning') {
