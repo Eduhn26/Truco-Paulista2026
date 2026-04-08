@@ -24,7 +24,8 @@ export function LobbyPage() {
   const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
   const [eventLog, setEventLog] = useState<string[]>([]);
 
-  const canConnect = Boolean(session?.backendUrl && session?.authToken);
+  const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
+  const canConnect = hasMinimumSession;
   const derivedMatchId =
     privateMatchState?.matchId ||
     publicMatchState?.matchId ||
@@ -164,6 +165,45 @@ export function LobbyPage() {
   const displayedMatchState = privateMatchState ?? publicMatchState;
   const currentReady =
     roomState?.players.find((player) => player.seatId === playerAssigned?.seatId)?.ready ?? false;
+  const normalizedMatchId = matchId.trim();
+  const isSocketOnline = connectionStatus === 'online';
+  const hasLobbySnapshot = Boolean(roomState || publicMatchState || privateMatchState || playerAssigned);
+  const canCreateMatch = hasMinimumSession && isSocketOnline;
+  const canJoinMatch = hasMinimumSession && isSocketOnline && Boolean(normalizedMatchId);
+  const canToggleReady = hasMinimumSession && isSocketOnline && Boolean(playerAssigned?.seatId);
+  const canRequestState = hasMinimumSession && isSocketOnline && Boolean(derivedMatchId);
+
+  const entryState = !hasMinimumSession
+    ? {
+        eyebrow: 'Session required',
+        title: 'Sua sessão autenticada ainda não está pronta para o lobby.',
+        detail:
+          'O frontend precisa de authToken e backendUrl válidos antes de abrir o fluxo em tempo real. Volte para a home e refaça o login se necessário.',
+        tone: 'warning' as const,
+      }
+    : !hasLobbySnapshot && !isSocketOnline
+      ? {
+          eyebrow: 'Socket offline',
+          title: 'Conecte o socket para começar a hidratar a sala.',
+          detail:
+            'Sem conexão e sem snapshot salvo, o lobby ainda não recebeu room-state nem match-state. Esta é uma espera válida de entrada, não uma falha da regra do jogo.',
+          tone: 'neutral' as const,
+        }
+      : !derivedMatchId
+        ? {
+            eyebrow: 'Waiting for match context',
+            title: 'Crie uma partida ou informe um matchId para seguir para a mesa.',
+            detail:
+              'A tela já pode mostrar sessão e conectividade, mas ainda falta contexto suficiente para abrir a MatchPage com segurança semântica.',
+            tone: 'neutral' as const,
+          }
+        : {
+            eyebrow: 'Match context ready',
+            title: 'O lobby já tem contexto suficiente para a próxima etapa.',
+            detail:
+              'Quando quiser, siga para a tela dedicada da partida com o matchId derivado do estado autoritativo recebido.',
+            tone: 'success' as const,
+          };
 
   return (
     <section className="grid gap-8">
@@ -305,7 +345,7 @@ export function LobbyPage() {
                 <button
                   type="button"
                   onClick={handleConnect}
-                  disabled={!canConnect}
+                  disabled={!canConnect || isSocketOnline}
                   className="rounded-3xl bg-emerald-500 px-5 py-4 text-base font-black text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Connect socket
@@ -315,7 +355,8 @@ export function LobbyPage() {
                   <button
                     type="button"
                     onClick={handleDisconnect}
-                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                    disabled={!isSocketOnline}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Disconnect
                   </button>
@@ -323,7 +364,8 @@ export function LobbyPage() {
                   <button
                     type="button"
                     onClick={handleGetState}
-                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                    disabled={!canRequestState}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Get state
                   </button>
@@ -333,7 +375,8 @@ export function LobbyPage() {
                   <button
                     type="button"
                     onClick={handleCreateMatch}
-                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                    disabled={!canCreateMatch}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Create match
                   </button>
@@ -341,7 +384,8 @@ export function LobbyPage() {
                   <button
                     type="button"
                     onClick={handleJoinMatch}
-                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+                    disabled={!canJoinMatch}
+                    className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Join match
                   </button>
@@ -350,7 +394,8 @@ export function LobbyPage() {
                 <button
                   type="button"
                   onClick={handleReady}
-                  className={`rounded-3xl border px-5 py-4 text-sm font-bold transition ${
+                  disabled={!canToggleReady}
+                  className={`rounded-3xl border px-5 py-4 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     currentReady
                       ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15'
                       : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
@@ -372,6 +417,27 @@ export function LobbyPage() {
           </aside>
 
           <div className="grid gap-6">
+            <section
+              className={`rounded-[28px] border p-6 ${getEntryToneClass(entryState.tone)}`}
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                    {entryState.eyebrow}
+                  </div>
+                  <div className="mt-3 text-2xl font-black tracking-tight text-slate-100">
+                    {entryState.title}
+                  </div>
+                  <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">
+                    {entryState.detail}
+                  </p>
+                </div>
+
+                <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                  entry-state
+                </div>
+              </div>
+            </section>
             <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
@@ -601,4 +667,16 @@ function formatAvailableActionsSummary(matchState: MatchStatePayload | null): st
   ].filter((action): action is string => action !== null);
 
   return enabled.length > 0 ? enabled.join(', ') : 'none';
+}
+
+function getEntryToneClass(tone: 'neutral' | 'warning' | 'success'): string {
+  if (tone === 'success') {
+    return 'border-emerald-400/20 bg-emerald-500/10';
+  }
+
+  if (tone === 'warning') {
+    return 'border-amber-400/20 bg-amber-500/10';
+  }
+
+  return 'border-white/10 bg-slate-950/60';
 }

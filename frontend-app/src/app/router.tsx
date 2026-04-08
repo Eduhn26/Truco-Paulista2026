@@ -1,10 +1,11 @@
 import { createBrowserRouter } from 'react-router-dom';
 
 import { AppShell } from './app';
+import { ProtectedLobbyRoute, ProtectedMatchRoute } from './authRouteBoundary';
+import { AuthCallbackPage } from '../pages/authCallbackPage';
 import { HomePage } from '../pages/homePage';
 import { LobbyPage } from '../pages/lobbyPage';
 import { MatchPage } from '../pages/matchPage';
-import { AuthCallbackPage } from '../pages/authCallbackPage';
 
 export const router = createBrowserRouter([
   {
@@ -20,12 +21,22 @@ export const router = createBrowserRouter([
         element: <AuthCallbackPage />,
       },
       {
-        path: 'lobby',
-        element: <LobbyPage />,
+        element: <ProtectedLobbyRoute />,
+        children: [
+          {
+            path: 'lobby',
+            element: <LobbyPage />,
+          },
+        ],
       },
       {
-        path: 'match/:matchId',
-        element: <MatchPage />,
+        element: <ProtectedMatchRoute />,
+        children: [
+          {
+            path: 'match/:matchId',
+            element: <MatchPage />,
+          },
+        ],
       },
     ],
   },

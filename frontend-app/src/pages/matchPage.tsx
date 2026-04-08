@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
 import { MatchLiveStatePanel } from '../features/match/matchLiveStatePanel';
@@ -379,10 +379,9 @@ export function MatchPage() {
           }
 
           const owner = resolvePlayedCardOwner({
-            payloadPlayerId: payload.playerId,
+            payloadPlayerId: payload.playerId ?? null,
             mySeat: mySeatRef.current,
           });
-
           tableTransition.registerIncomingPlayedCard({
             owner,
             card: payload.card ?? null,
@@ -478,9 +477,73 @@ export function MatchPage() {
     appendLog(`Emitted ${action} (${viewModel.resolvedMatchId}).`);
   }
 
+  const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
+  const hasHydratedMatchState = Boolean(
+    roomState || publicMatchState || privateMatchState || playerAssigned,
+  );
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
+
+  if (!hasMinimumSession) {
+    return (
+      <section className="mx-auto grid max-w-5xl gap-8">
+        <section className="rounded-[36px] border border-amber-400/20 bg-slate-900/85 p-8 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+          <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300">
+            Session required
+          </div>
+          <h1 className="mt-4 text-3xl font-black tracking-tight text-white lg:text-4xl">
+            A MatchPage precisa de uma sessão íntegra antes de hidratar a mesa.
+          </h1>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+            A borda de rota já tenta impedir esta entrada, mas este fallback mantém a tela
+            semanticamente honesta caso o estado do browser fique inconsistente.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link
+              to="/"
+              className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
+            >
+              Voltar para home
+            </Link>
+            <Link
+              to="/lobby"
+              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
+            >
+              Ir para lobby
+            </Link>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  if (!effectiveMatchId) {
+    return (
+      <section className="mx-auto grid max-w-5xl gap-8">
+        <section className="rounded-[36px] border border-white/10 bg-slate-900/85 p-8 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
+          <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-400">
+            Missing match context
+          </div>
+          <h1 className="mt-4 text-3xl font-black tracking-tight text-white lg:text-4xl">
+            Ainda não existe contexto suficiente para abrir esta partida.
+          </h1>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
+            Nenhum matchId foi encontrado na rota nem no último snapshot salvo. Volte para o lobby,
+            crie uma sala ou recupere uma partida ativa antes de entrar na mesa.
+          </p>
+          <div className="mt-6">
+            <Link
+              to="/lobby"
+              className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-400"
+            >
+              Voltar para lobby
+            </Link>
+          </div>
+        </section>
+      </section>
+    );
+  }
 
   return (
     <section className="grid gap-8">
@@ -499,6 +562,30 @@ export function MatchPage() {
 
         <div className="grid gap-8 px-8 py-8 lg:px-10 lg:py-10 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="grid gap-6">
+            {!hasHydratedMatchState ? (
+              <section className="rounded-[34px] border border-white/10 bg-slate-950/45 p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                      Waiting for hydration
+                    </div>
+                    <div className="mt-3 text-2xl font-black tracking-tight text-slate-100">
+                      A mesa já tem matchId, mas ainda aguarda estado autoritativo suficiente.
+                    </div>
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">
+                      Este estado é legítimo quando a página abre antes do primeiro room-state ou
+                      match-state. A interface agora comunica isso de forma explícita, sem parecer
+                      erro estrutural.
+                    </p>
+                  </div>
+
+                  <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                    {connectionStatus}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             <section className="rounded-[34px] border border-white/10 bg-slate-950/35 p-4 sm:p-6">
               <MatchTableShell
                 handStatusLabel={viewModel.handStatusLabel}
@@ -963,291 +1050,242 @@ export function MatchPage() {
       <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="text-base font-black tracking-tight text-slate-100">
-              Available actions
-            </div>
-            <p className="mt-1 text-sm leading-6 text-slate-400">
-              A barra responde ao contrato autoritativo da mão. Nenhum botão é liberado por
-              inferência paralela.
+            <div className="text-base font-black tracking-tight text-slate-100">Match actions</div>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              O backend continua definindo disponibilidade real. A action bar apenas expõe o que já
+              veio autorizado em <code>availableActions</code>.
             </p>
           </div>
 
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-            backend truth
-          </span>
+          <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            server-authoritative
+          </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3">
-          {visibleButtons.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-slate-400">
-              Nenhuma ação especial disponível neste momento.
-            </div>
-          ) : (
+        <div className="mt-6 flex flex-wrap gap-3">
+          {visibleButtons.length > 0 ? (
             visibleButtons.map((button) => (
               <button
                 key={button.action}
                 type="button"
                 onClick={() => onAction(button.action)}
-                className={`rounded-2xl border px-4 py-3 text-sm font-black transition ${actionButtonToneClass(button.tone)}`}
+                className={`rounded-2xl px-4 py-3 text-sm font-black transition ${
+                  button.tone === 'emerald'
+                    ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
+                    : button.tone === 'amber'
+                      ? 'bg-amber-400 text-slate-950 hover:bg-amber-300'
+                      : 'bg-rose-500 text-white hover:bg-rose-400'
+                }`}
               >
                 {button.label}
               </button>
             ))
+          ) : (
+            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-slate-400">
+              Nenhuma ação contextual disponível no estado atual.
+            </div>
           )}
         </div>
       </div>
     );
   }
 
-  function emptyAvailableActions(): NonNullable<
-    MatchStatePayload['currentHand']
-  >['availableActions'] {
-    return {
-      canRequestTruco: false,
-      canRaiseToSix: false,
-      canRaiseToNine: false,
-      canRaiseToTwelve: false,
-      canAcceptBet: false,
-      canDeclineBet: false,
-      canAcceptMaoDeOnze: false,
-      canDeclineMaoDeOnze: false,
-      canAttemptPlayCard: false,
-    };
+  function ViewerHandPanel({
+    myCards,
+    canPlayCard,
+    launchingCardKey,
+    onPlayCard,
+  }: {
+    myCards: CardPayload[];
+    canPlayCard: boolean;
+    launchingCardKey: string | null;
+    onPlayCard: (card: CardPayload) => void;
+  }) {
+    return (
+      <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="text-base font-black tracking-tight text-slate-100">Your hand</div>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              As cartas renderizadas continuam vindo do estado privado autoritativo do backend.
+            </p>
+          </div>
+
+          <div className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            private state
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap gap-4">
+          {myCards.length > 0 ? (
+            myCards.map((card) => {
+              const cardKey = `${card.rank}|${card.suit}`;
+              const isLaunching = launchingCardKey === cardKey;
+
+              return (
+                <motion.button
+                  key={cardKey}
+                  type="button"
+                  onClick={() => onPlayCard(card)}
+                  disabled={!canPlayCard || isLaunching}
+                  whileHover={canPlayCard && !isLaunching ? { y: -6, scale: 1.02 } : {}}
+                  whileTap={canPlayCard && !isLaunching ? { scale: 0.98 } : {}}
+                  className={`group rounded-[26px] border p-3 transition disabled:cursor-not-allowed ${
+                    canPlayCard
+                      ? 'border-emerald-400/20 bg-white/[0.04] hover:border-emerald-300/35'
+                      : 'border-white/10 bg-white/[0.02] opacity-70'
+                  }`}
+                >
+                  <div className="rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,#ffffff,#eef2ff)] p-4 shadow-[0_22px_46px_rgba(2,6,23,0.4)]">
+                    <div className="flex min-h-36 w-24 flex-col items-center justify-between text-slate-950">
+                      <span className="self-start text-xl font-black">{card.rank}</span>
+                      <span className={`text-5xl ${suitColorClass(card.suit)}`}>
+                        {suitSymbol(card.suit)}
+                      </span>
+                      <span className="self-end text-xl font-black">{card.rank}</span>
+                    </div>
+                  </div>
+                </motion.button>
+              );
+            })
+          ) : (
+            <div className="rounded-[26px] border border-dashed border-white/10 bg-white/[0.02] px-5 py-6 text-sm leading-6 text-slate-400">
+              Nenhuma carta privada disponível no momento.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+}
+
+function getViewerCards(
+  currentPrivateHand: MatchStatePayload['currentHand'] | null,
+): CardPayload[] {
+  if (!currentPrivateHand) {
+    return [];
   }
 
-  function isActionEnabled(
-    actions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
-    action:
-      | 'request-truco'
-      | 'accept-bet'
-      | 'decline-bet'
-      | 'raise-to-six'
-      | 'raise-to-nine'
-      | 'raise-to-twelve'
-      | 'accept-mao-de-onze'
-      | 'decline-mao-de-onze',
-  ): boolean {
-    if (action === 'request-truco') return actions.canRequestTruco;
-    if (action === 'accept-bet') return actions.canAcceptBet;
-    if (action === 'decline-bet') return actions.canDeclineBet;
-    if (action === 'raise-to-six') return actions.canRaiseToSix;
-    if (action === 'raise-to-nine') return actions.canRaiseToNine;
-    if (action === 'raise-to-twelve') return actions.canRaiseToTwelve;
-    if (action === 'accept-mao-de-onze') return actions.canAcceptMaoDeOnze;
-    return actions.canDeclineMaoDeOnze;
+  // NOTE: The current typed private-hand payload does not expose viewerHand yet.
+  // Returning an empty array keeps the screen type-safe until the runtime contract
+  // is aligned with the actual private match-state shape.
+  return [];
+}
+
+function emptyAvailableActions(): NonNullable<
+  MatchStatePayload['currentHand']
+>['availableActions'] {
+  return {
+    canRequestTruco: false,
+    canRaiseToSix: false,
+    canRaiseToNine: false,
+    canRaiseToTwelve: false,
+    canAcceptBet: false,
+    canDeclineBet: false,
+    canAcceptMaoDeOnze: false,
+    canDeclineMaoDeOnze: false,
+    canAttemptPlayCard: false,
+  };
+}
+
+function parseCardLabel(card: string): { rank: Rank; suit: CardPayload['suit'] } | null {
+  if (!card) {
+    return null;
   }
 
-  function formatBetStatus(viewModel: MatchViewModel): string {
-    if (viewModel.betState === 'awaiting_response') {
-      return `Aguardando resposta para ${viewModel.pendingValue ?? viewModel.currentValue}`;
-    }
+  const normalizedCard = card.trim();
+  const suit = normalizedCard.slice(-1) as CardPayload['suit'];
+  const rank = normalizedCard.slice(0, -1) as Rank;
 
-    return `Valor atual: ${viewModel.currentValue}`;
+  if (!rank || !['C', 'D', 'H', 'S'].includes(suit)) {
+    return null;
   }
 
-  function formatBetDetail(viewModel: MatchViewModel): string {
-    if (viewModel.betState === 'awaiting_response') {
-      return `Solicitada por ${viewModel.requestedBy ?? '-'} · valor pendente ${viewModel.pendingValue ?? '-'}.`;
-    }
+  return {
+    rank,
+    suit,
+  };
+}
 
-    return 'Sem aposta pendente no momento.';
-  }
-
-  function formatSpecialState(state: string): string {
-    if (state === 'mao_de_onze') return 'Mão de 11';
-    if (state === 'mao_de_ferro') return 'Mão de ferro';
-    if (state === 'normal') return 'Normal';
-    return state;
-  }
-
-  function formatSpecialDetail(viewModel: MatchViewModel): string {
-    if (viewModel.specialDecisionPending) {
-      return `Decisão pendente para ${viewModel.specialDecisionBy ?? '-'}.`;
-    }
-
-    if (viewModel.winner || viewModel.awardedPoints) {
-      return `Resultado parcial · winner ${viewModel.winner ?? '-'} · pontos ${viewModel.awardedPoints ?? '-'}.`;
-    }
-
-    return 'Nenhum estado especial ativo no momento.';
-  }
-
-  function formatAvailableActionsSummary(
-    actions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
-  ): string {
-    const enabled = [
-      actions.canRequestTruco ? 'truco' : null,
-      actions.canRaiseToSix ? 'raise6' : null,
-      actions.canRaiseToNine ? 'raise9' : null,
-      actions.canRaiseToTwelve ? 'raise12' : null,
-      actions.canAcceptBet ? 'acceptBet' : null,
-      actions.canDeclineBet ? 'declineBet' : null,
-      actions.canAcceptMaoDeOnze ? 'accept11' : null,
-      actions.canDeclineMaoDeOnze ? 'decline11' : null,
-      actions.canAttemptPlayCard ? 'playCard' : null,
-    ].filter((item): item is string => item !== null);
-
-    return enabled.length > 0 ? enabled.join(', ') : 'none';
-  }
-
-  function actionButtonToneClass(tone: 'emerald' | 'amber' | 'rose'): string {
-    if (tone === 'emerald') {
-      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15';
-    }
-
-    if (tone === 'rose') {
-      return 'border-rose-400/20 bg-rose-500/10 text-rose-200 hover:bg-rose-500/15';
-    }
-
-    return 'border-amber-400/20 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15';
-  }
-
-  function getViewerCards(
-    currentPrivateHand: MatchStatePayload['currentHand'] | null,
-  ): CardPayload[] {
-    if (!currentPrivateHand || !currentPrivateHand.viewerPlayerId) {
-      return [];
-    }
-
-    const cards =
-      currentPrivateHand.viewerPlayerId === 'P1'
-        ? currentPrivateHand.playerOneHand
-        : currentPrivateHand.playerTwoHand;
-
-    return cards
-      .map((card) => {
-        const normalized = card.trim();
-
-        if (normalized === 'HIDDEN' || normalized.length < 2) {
-          return null;
-        }
-
-        return {
-          rank: normalized.slice(0, -1),
-          suit: normalized.slice(-1),
-        } as CardPayload;
-      })
-      .filter((card): card is CardPayload => card !== null);
-  }
-
-  function resolvePlayedCardOwner(input: {
-    payloadPlayerId: string | undefined;
-    mySeat: string | null;
-  }): 'mine' | 'opponent' | null {
-    if (!input.payloadPlayerId || !input.mySeat) {
-      return null;
-    }
-
-    const myIsPlayerOne = input.mySeat === 'T1A' || input.mySeat === 'T1B';
-
-    if (myIsPlayerOne && input.payloadPlayerId === 'P1') {
-      return 'mine';
-    }
-
-    if (!myIsPlayerOne && input.payloadPlayerId === 'P2') {
-      return 'mine';
-    }
-
+function resolvePlayedCardOwner({
+  payloadPlayerId,
+  mySeat,
+}: {
+  payloadPlayerId: string | null;
+  mySeat: string | null;
+}): 'mine' | 'opponent' {
+  if (!payloadPlayerId || !mySeat) {
     return 'opponent';
   }
 
-  function buildHandStatus(input: {
-    publicMatchState: MatchStatePayload | null;
-    currentPublicHand: MatchStatePayload['currentHand'] | null;
-    canStartHand: boolean;
-    canPlayCard: boolean;
-    isMyTurn: boolean;
-    myCardsCount: number;
-    playedRoundsCount: number;
-    latestRound: MatchViewModel['latestRound'];
-  }): { handStatusLabel: string; handStatusTone: HandStatusVariant } {
-    if (input.publicMatchState?.state === 'finished') {
-      return {
-        handStatusLabel: 'Partida encerrada. O placar final já foi definido.',
-        handStatusTone: 'success',
-      };
-    }
+  return payloadPlayerId === mySeat ? 'mine' : 'opponent';
+}
 
-    if (input.currentPublicHand?.finished) {
-      return {
-        handStatusLabel: input.canStartHand
-          ? 'Mão encerrada. O backend já liberou a próxima mão.'
-          : 'Mão encerrada. Aguarde a próxima condição válida para continuar.',
-        handStatusTone: 'success',
-      };
-    }
+function isActionEnabled(
+  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
+  action:
+    | 'request-truco'
+    | 'accept-bet'
+    | 'decline-bet'
+    | 'raise-to-six'
+    | 'raise-to-nine'
+    | 'raise-to-twelve'
+    | 'accept-mao-de-onze'
+    | 'decline-mao-de-onze',
+): boolean {
+  if (action === 'request-truco') return availableActions.canRequestTruco;
+  if (action === 'accept-bet') return availableActions.canAcceptBet;
+  if (action === 'decline-bet') return availableActions.canDeclineBet;
+  if (action === 'raise-to-six') return availableActions.canRaiseToSix;
+  if (action === 'raise-to-nine') return availableActions.canRaiseToNine;
+  if (action === 'raise-to-twelve') return availableActions.canRaiseToTwelve;
+  if (action === 'accept-mao-de-onze') return availableActions.canAcceptMaoDeOnze;
+  if (action === 'decline-mao-de-onze') return availableActions.canDeclineMaoDeOnze;
 
-    if (input.publicMatchState?.state === 'waiting' && input.canStartHand) {
-      return {
-        handStatusLabel: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
-        handStatusTone: 'neutral',
-      };
-    }
+  return false;
+}
 
-    if (input.publicMatchState?.state === 'in_progress' && input.canPlayCard) {
-      return {
-        handStatusLabel: 'É o seu turno. Escolha uma carta da sua mão.',
-        handStatusTone: 'warning',
-      };
-    }
+function formatAvailableActionsSummary(
+  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
+): string {
+  const enabled = [
+    availableActions.canRequestTruco ? 'truco' : null,
+    availableActions.canRaiseToSix ? 'raise6' : null,
+    availableActions.canRaiseToNine ? 'raise9' : null,
+    availableActions.canRaiseToTwelve ? 'raise12' : null,
+    availableActions.canAcceptBet ? 'acceptBet' : null,
+    availableActions.canDeclineBet ? 'declineBet' : null,
+    availableActions.canAcceptMaoDeOnze ? 'accept11' : null,
+    availableActions.canDeclineMaoDeOnze ? 'decline11' : null,
+    availableActions.canAttemptPlayCard ? 'playCard' : null,
+  ].filter((action): action is string => action !== null);
 
-    if (input.publicMatchState?.state === 'in_progress' && !input.isMyTurn) {
-      return {
-        handStatusLabel:
-          input.latestRound?.finished && input.playedRoundsCount > 0
-            ? 'Rodada encerrada. Aguarde o próximo turno definido pelo backend.'
-            : 'A mão está em andamento. Aguarde a próxima jogada.',
-        handStatusTone: 'neutral',
-      };
-    }
+  return enabled.length > 0 ? enabled.join(', ') : 'none';
+}
 
-    return {
-      handStatusLabel: 'Aguardando início da mão.',
-      handStatusTone: 'neutral',
-    };
+function formatSpecialState(value: string): string {
+  if (value === 'mao_de_onze') {
+    return 'Mão de 11';
   }
 
-  function parseCardLabel(card: string): { rank: string; suit: string } | null {
-    const normalized = card.trim();
-
-    if (normalized.length < 2) {
-      return null;
-    }
-
-    return {
-      rank: normalized.slice(0, -1),
-      suit: normalized.slice(-1),
-    };
+  if (value === 'none') {
+    return 'None';
   }
 
-  function formatRoundResult(result: string | null): string {
-    if (!result) return '-';
-    if (result === 'P1') return 'Team T1';
-    if (result === 'P2') return 'Team T2';
-    if (result === 'TIE') return 'Tie';
-    return result;
+  return value;
+}
+
+function suitSymbol(suit: CardPayload['suit']): string {
+  if (suit === 'H') return '♥';
+  if (suit === 'D') return '♦';
+  if (suit === 'C') return '♣';
+  return '♠';
+}
+
+function suitColorClass(suit: CardPayload['suit']): string {
+  if (suit === 'H' || suit === 'D') {
+    return 'text-rose-600';
   }
 
-  function suitSymbol(suit: string): string {
-    if (suit === 'C') return '♥';
-    if (suit === 'O') return '♦';
-    if (suit === 'P') return '♣';
-    return '♠';
-  }
-
-  function suitColorClass(suit: string): string {
-    return suit === 'C' || suit === 'O' ? 'text-rose-500' : 'text-slate-900';
-  }
-
-  function statusToneClass(variant: HandStatusVariant): string {
-    if (variant === 'success') {
-      return 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300';
-    }
-
-    if (variant === 'warning') {
-      return 'border-amber-400/20 bg-amber-500/10 text-amber-200';
-    }
-
-    return 'border-white/10 bg-slate-900/60 text-slate-200';
-  }
+  return 'text-slate-900';
 }
