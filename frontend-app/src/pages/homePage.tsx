@@ -43,25 +43,26 @@ export function HomePage() {
 
   const frontendUrl = getFrontendOrigin();
 
-  // Ensure only http/https backend URLs are used for OAuth links to prevent
-  // protocol injection (e.g. javascript: URLs).
-  const safeBackendUrl = useMemo(() => {
+  // Derive a safe origin-only URL for OAuth links, preventing protocol injection.
+  // We use only the parsed `origin` (scheme + host + port) — never the user's raw string —
+  // so path manipulation and non-http(s) protocols are rejected at construction time.
+  const safeBackendOrigin = useMemo(() => {
     try {
       const parsed = new URL(normalizedBackendUrl);
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        return normalizedBackendUrl;
+        return parsed.origin; // guaranteed scheme://host:port with no user-supplied path
       }
     } catch {
-      // Not a valid URL
+      // Not a valid URL — return empty string to disable the links
     }
     return '';
   }, [normalizedBackendUrl]);
 
-  const googleLoginUrl = safeBackendUrl
-    ? `${safeBackendUrl}/auth/google?frontendUrl=${encodeURIComponent(frontendUrl)}`
+  const googleLoginUrl = safeBackendOrigin
+    ? `${safeBackendOrigin}/auth/google?frontendUrl=${encodeURIComponent(frontendUrl)}`
     : '';
-  const githubLoginUrl = safeBackendUrl
-    ? `${safeBackendUrl}/auth/github?frontendUrl=${encodeURIComponent(frontendUrl)}`
+  const githubLoginUrl = safeBackendOrigin
+    ? `${safeBackendOrigin}/auth/github?frontendUrl=${encodeURIComponent(frontendUrl)}`
     : '';
 
   const appEnvironment = getAppEnvironment();
@@ -111,8 +112,9 @@ export function HomePage() {
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <a
               href={googleLoginUrl || undefined}
-              onClick={googleLoginUrl ? handleOAuthStart : undefined}
+              onClick={googleLoginUrl ? handleOAuthStart : (e) => e.preventDefault()}
               aria-disabled={!googleLoginUrl}
+              tabIndex={googleLoginUrl ? 0 : -1}
               className={`flex w-full items-center justify-center gap-2.5 rounded-xl border border-amber-400/40 bg-amber-500/15 px-6 py-3.5 text-sm font-bold text-amber-200 shadow-[0_0_18px_rgba(201,168,76,0.12)] transition hover:border-amber-400/60 hover:bg-amber-500/25 hover:text-amber-100 sm:w-auto ${!googleLoginUrl ? 'cursor-not-allowed opacity-60' : ''}`}
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
@@ -138,8 +140,9 @@ export function HomePage() {
 
             <a
               href={githubLoginUrl || undefined}
-              onClick={githubLoginUrl ? handleOAuthStart : undefined}
+              onClick={githubLoginUrl ? handleOAuthStart : (e) => e.preventDefault()}
               aria-disabled={!githubLoginUrl}
+              tabIndex={githubLoginUrl ? 0 : -1}
               className={`flex w-full items-center justify-center gap-2.5 rounded-xl border border-amber-400/40 bg-amber-500/15 px-6 py-3.5 text-sm font-bold text-amber-200 shadow-[0_0_18px_rgba(201,168,76,0.12)] transition hover:border-amber-400/60 hover:bg-amber-500/25 hover:text-amber-100 sm:w-auto ${!githubLoginUrl ? 'cursor-not-allowed opacity-60' : ''}`}
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
