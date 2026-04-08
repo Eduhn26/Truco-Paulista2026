@@ -29,82 +29,66 @@ export function MatchActionSurface({
       | 'decline-mao-de-onze';
     label: string;
     enabled: boolean;
-    tone: 'emerald' | 'amber' | 'rose';
+    tone: 'truco' | 'accept' | 'decline' | 'raise';
   }> = [
     {
       action: 'request-truco',
-      label: 'Pedir truco',
+      label: 'TRUCO!',
       enabled: availableActions.canRequestTruco,
-      tone: 'emerald',
+      tone: 'truco',
     },
     {
       action: 'accept-bet',
-      label: 'Aceitar aposta',
+      label: 'ACEITAR',
       enabled: availableActions.canAcceptBet,
-      tone: 'emerald',
+      tone: 'accept',
     },
     {
       action: 'decline-bet',
-      label: 'Correr',
+      label: 'CORRER',
       enabled: availableActions.canDeclineBet,
-      tone: 'rose',
+      tone: 'decline',
     },
     {
       action: 'raise-to-six',
-      label: 'Pedir 6',
+      label: 'PEDIR 6',
       enabled: availableActions.canRaiseToSix,
-      tone: 'amber',
+      tone: 'raise',
     },
     {
       action: 'raise-to-nine',
-      label: 'Pedir 9',
+      label: 'PEDIR 9',
       enabled: availableActions.canRaiseToNine,
-      tone: 'amber',
+      tone: 'raise',
     },
     {
       action: 'raise-to-twelve',
-      label: 'Pedir 12',
+      label: 'PEDIR 12',
       enabled: availableActions.canRaiseToTwelve,
-      tone: 'amber',
+      tone: 'raise',
     },
     {
       action: 'accept-mao-de-onze',
-      label: 'Aceitar mão de 11',
+      label: 'ACEITAR 11',
       enabled: availableActions.canAcceptMaoDeOnze,
-      tone: 'emerald',
+      tone: 'accept',
     },
     {
       action: 'decline-mao-de-onze',
-      label: 'Recusar mão de 11',
+      label: 'RECUSAR 11',
       enabled: availableActions.canDeclineMaoDeOnze,
-      tone: 'rose',
+      tone: 'decline',
     },
   ];
 
   const visibleButtons = buttons.filter((button) => button.enabled);
 
   return (
-    <div className="rounded-[30px] border border-white/10 bg-slate-950/38 p-5">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="text-base font-black tracking-tight text-slate-100">
-            Available actions
-          </div>
-          <p className="mt-1 text-sm leading-6 text-slate-400">
-            A barra responde ao contrato autoritativo da mão. Nenhum botão é liberado por inferência
-            paralela.
-          </p>
-        </div>
-
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
-          backend truth
-        </span>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-3">
+    <div className="rounded-2xl border border-amber-400/15 bg-slate-950/60 p-4">
+      <div className="flex flex-wrap justify-center gap-3">
         {visibleButtons.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-slate-400">
-            Nenhuma ação especial disponível neste momento.
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-5 py-3 text-sm text-slate-500">
+            Nenhuma ação disponível neste momento.
           </div>
         ) : (
           visibleButtons.map((button) => (
@@ -112,12 +96,14 @@ export function MatchActionSurface({
               key={button.action}
               type="button"
               onClick={() => onAction(button.action)}
-              className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
-                button.tone === 'emerald'
-                  ? 'border-emerald-400/25 bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/18'
-                  : button.tone === 'rose'
-                    ? 'border-rose-400/25 bg-rose-500/12 text-rose-200 hover:bg-rose-500/18'
-                    : 'border-amber-400/25 bg-amber-500/12 text-amber-200 hover:bg-amber-500/18'
+              className={`rounded-xl px-6 py-3 text-sm font-black tracking-wide transition ${
+                button.tone === 'truco'
+                  ? 'bg-red-700 text-white shadow-[0_0_18px_rgba(185,28,28,0.4)] hover:bg-red-600'
+                  : button.tone === 'accept'
+                    ? 'border border-amber-400/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25'
+                    : button.tone === 'decline'
+                      ? 'border border-slate-500/40 bg-slate-700/50 text-slate-300 hover:bg-slate-700'
+                      : 'border border-amber-400/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
               }`}
             >
               {button.label}
