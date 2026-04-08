@@ -28,7 +28,7 @@ export function loadSession(): FrontendSession | null {
 
     const parsed = JSON.parse(raw) as Partial<FrontendSession>;
 
-    if (!parsed.authToken || !parsed.backendUrl) {
+    if (typeof parsed.authToken !== 'string' || typeof parsed.backendUrl !== 'string') {
       return null;
     }
 

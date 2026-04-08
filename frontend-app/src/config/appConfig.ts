@@ -38,6 +38,24 @@ export function isLocalFrontendOrigin(origin = getFrontendOrigin()): boolean {
   );
 }
 
+export function shouldAllowManualBackendOverride(): boolean {
+  return getAppEnvironment() !== 'production' || isLocalFrontendOrigin();
+}
+
 export function normalizeBackendUrl(value: string | null | undefined): string {
   return normalizeUrl(value) || getDefaultBackendUrl();
+}
+
+export function resolveBackendUrl(
+  ...candidates: Array<string | null | undefined>
+): string {
+  for (const candidate of candidates) {
+    const normalized = normalizeUrl(candidate);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return getDefaultBackendUrl();
 }
