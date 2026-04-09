@@ -1,8 +1,23 @@
 import { motion } from 'framer-motion';
-
 import type { CardPayload, MatchStatePayload } from '../../services/socket/socketTypes';
 
-type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+type MatchPlayerHandPanelProps = {
+  myCards: CardPayload[];
+  canPlayCard: boolean;
+  tablePhase: string;
+  launchingCardKey: string | null;
+  currentPrivateHand: MatchStatePayload['currentHand'] | null;
+  currentPublicHand: MatchStatePayload['currentHand'] | null;
+  onPlayCard: (card: CardPayload) => void;
+};
+
+// ── Mapeamento de Naipes e Cores ──
+const SUIT_MAP: Record<string, { symbol: string; colorClass: string }> = {
+  C: { symbol: '♣', colorClass: 'text-slate-900' }, // Paus
+  O: { symbol: '♦', colorClass: 'text-red-700' }, // Ouros
+  P: { symbol: '♥', colorClass: 'text-red-700' }, // Copas
+  E: { symbol: '♠', colorClass: 'text-slate-900' }, // Espadas
+};
 
 export function MatchPlayerHandPanel({
   myCards,
@@ -12,173 +27,116 @@ export function MatchPlayerHandPanel({
   currentPrivateHand,
   currentPublicHand,
   onPlayCard,
-}: {
-  myCards: CardPayload[];
-  canPlayCard: boolean;
-  tablePhase: TablePhase;
-  launchingCardKey: string | null;
-  currentPrivateHand: MatchStatePayload['currentHand'] | null;
-  currentPublicHand: MatchStatePayload['currentHand'] | null;
-  onPlayCard: (card: CardPayload) => void;
-}) {
+}: MatchPlayerHandPanelProps) {
   const cardCount = myCards.length;
-  // Fan angles for cards: spread them like a real hand of cards
-  const fanAngles: number[] =
-    cardCount === 1
-      ? [0]
-      : cardCount === 2
-        ? [-6, 6]
-        : [-10, 0, 10];
+
+  // ── Lógica do Efeito Leque (Fan) ──
+  // Calcula o ângulo de rotação para cada carta baseado no índice
+  const getFanStyle = (index: number) => {
+    const total = cardCount;
+    const spread = total === 1 ? 0 : 28; // Abertura total em graus
+    const startAngle = -spread / 2;
+    const angle = startAngle + (index * spread) / (total > 1 ? total - 1 : 1);
+    return { rotate: angle };
+  };
+
+  // Estado de espera (loading)
+  if (myCards.length === 0 && tablePhase === 'waiting') {
+    return (
+      <div className="flex h-32 items-center justify-center opacity-40">
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-amber-400/60 animate-bounce" />
+          <div className="h-2 w-2 rounded-full bg-amber-400/60 animate-bounce delay-100" />
+          <div className="h-2 w-2 rounded-full bg-amber-400/60 animate-bounce delay-200" />
+        </div>
+      </div>
+    );
+  }
+
+  if (myCards.length === 0) {
+    return <div className="h-32" />;
+  }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-      <div className="rounded-2xl border border-amber-400/15 bg-slate-950/50 p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-bold text-slate-200">Minha mão</div>
-          <span
-            className={`rounded-full px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.2em] ${
-              canPlayCard
-                ? 'bg-amber-500/20 text-amber-300 shadow-[0_0_14px_rgba(201,168,76,0.2)]'
-                : 'bg-white/5 text-slate-400'
-            }`}
+    <div className="relative flex h-44 items-end justify-center px-4 pb-4 perspective-1000">
+      {myCards.map((card, index) => {
+        const cardKey = `${card.rank}-${card.suit}`;
+        const isLaunching = launchingCardKey === cardKey;
+        const suitData = SUIT_MAP[card.suit] || { symbol: '?', colorClass: 'text-black' };
+
+        // Determina se a carta é vermelha ou preta
+        const isRed = card.suit === 'P' || card.suit === 'O';
+        const textColor = isRed ? 'text-red-700' : 'text-slate-900';
+
+        return (
+          <motion.button
+            key={cardKey}
+            // 🚀 CRÍTICO: layoutId permite que a carta "deslize" para a mesa sem sumir
+            layoutId={cardKey}
+            type="button"
+            onClick={() => onPlayCard(card)}
+            disabled={!canPlayCard || isLaunching}
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{
+              // Quando está lançando, ela sobe e some (ou vai para o centro)
+              opacity: isLaunching ? 0 : 1,
+              y: isLaunching ? -350 : 0,
+              x: isLaunching ? 150 : 0,
+              scale: isLaunching ? 0.6 : 1,
+              // Se não está lançando, aplica o efeito leque
+              ...(!isLaunching && getFanStyle(index)),
+            }}
+            transition={{
+              type: 'spring',
+              stiffness: 350,
+              damping: 25,
+              delay: isLaunching ? 0.1 : index * 0.05, // Efeito cascata na distribuição
+            }}
+            whileHover={
+              canPlayCard && !isLaunching
+                ? { y: -40, scale: 1.15, zIndex: 50, rotate: 0 }
+                : {}
+            }
+            whileTap={canPlayCard && !isLaunching ? { scale: 0.95 } : {}}
+            style={{
+              position: 'relative',
+              marginLeft: index > 0 ? '-45px' : '0', // Sobreposição das cartas
+              zIndex: index,
+              transformOrigin: 'bottom center',
+            }}
+            className={`
+              relative flex h-36 w-24 flex-col items-center justify-between rounded-xl py-3 shadow-2xl transition-shadow duration-200
+              ${canPlayCard && !isLaunching
+                ? 'hover:shadow-[0_0_20px_rgba(201,168,76,0.5)] cursor-pointer ring-1 ring-white/20 hover:ring-amber-400/50'
+                : 'cursor-not-allowed opacity-90'
+              }
+              ${isLaunching ? 'z-[100]' : ''}
+            `}
           >
-            {canPlayCard ? 'Seu turno' : 'Aguardando'}
-          </span>
-        </div>
+            {/* Fundo da Carta (Textura de papel) */}
+            <div className="absolute inset-0 rounded-xl bg-[#fdfbf7] border border-slate-200" />
+            
+            {/* Conteúdo da Carta */}
+            {/* Canto Superior */}
+            <span className={`relative z-10 ml-2 mt-1 text-lg font-black leading-none ${textColor}`}>
+              {card.rank}
+            </span>
 
-        {/* Card fan area */}
-        <div className="relative mt-6 flex min-h-48 items-end justify-center gap-0">
-          {myCards.length === 0 ? (
-            <HandEmptyState tablePhase={tablePhase} />
-          ) : (
-            myCards.map((card, index) => {
-              const cardKey = `${card.rank}|${card.suit}`;
-              const isLaunching = launchingCardKey === cardKey;
-              const baseAngle = fanAngles[index] ?? 0;
-              const hoverAnimation =
-                canPlayCard && !isLaunching
-                  ? { y: -28, scale: 1.08, rotate: 0, zIndex: 10 }
-                  : {};
-              const tapAnimation = canPlayCard && !isLaunching ? { scale: 0.95 } : {};
-              const animateState = isLaunching
-                ? {
-                    opacity: 0,
-                    y: -240,
-                    x: 30,
-                    rotate: baseAngle + 18,
-                    scale: 0.7,
-                    filter: 'blur(3px)',
-                  }
-                : {
-                    opacity: 1,
-                    y: 0,
-                    rotate: baseAngle,
-                    scale: 1,
-                    filter: 'blur(0px)',
-                  };
+            {/* Centro (Símbolo Grande) */}
+            <span className={`relative z-10 text-5xl leading-none drop-shadow-sm ${textColor}`}>
+              {suitData.symbol}
+            </span>
 
-              return (
-                <motion.button
-                  key={cardKey}
-                  type="button"
-                  onClick={() => onPlayCard(card)}
-                  disabled={!canPlayCard || isLaunching}
-                  initial={{
-                    opacity: 0,
-                    y: 40,
-                    rotate: baseAngle * 2,
-                  }}
-                  animate={animateState}
-                  transition={{
-                    delay: isLaunching ? 0 : index * 0.09,
-                    type: 'spring',
-                    stiffness: 220,
-                    damping: 18,
-                  }}
-                  whileHover={hoverAnimation}
-                  whileTap={tapAnimation}
-                  style={{ marginLeft: index > 0 ? '-18px' : 0 }}
-                  className={`relative flex h-44 w-28 flex-col items-center justify-between rounded-2xl border px-3 py-4 shadow-[0_16px_40px_rgba(2,6,23,0.5)] transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    canPlayCard && !isLaunching
-                      ? 'border-amber-400/40 bg-[linear-gradient(160deg,#fffdf5,#f5e6c8)] text-slate-900 shadow-[0_0_18px_rgba(201,168,76,0.2)]'
-                      : 'border-white/20 bg-[linear-gradient(160deg,#ffffff,#eef2ff)] text-slate-900'
-                  }`}
-                  title={`Jogar ${card.rank}${suitSymbol(card.suit)}`}
-                >
-                  <span className="self-start text-lg font-black">{card.rank}</span>
-                  <span className={`text-4xl ${suitColorClass(card.suit)}`}>{suitSymbol(card.suit)}</span>
-                  <span className="self-end rotate-180 text-lg font-black">{card.rank}</span>
-                </motion.button>
-              );
-            })
-          )}
-        </div>
-      </div>
+            {/* Canto Inferior (Invertido) */}
+            <span className={`relative z-10 mr-2 mb-1 rotate-180 text-lg font-black leading-none ${textColor}`}>
+              {card.rank}
+            </span>
 
-      <div className="grid gap-3">
-        <MiniMetric
-          label="Vira"
-          value={currentPrivateHand?.viraRank ?? currentPublicHand?.viraRank ?? '-'}
-          mono
-        />
-        <MiniMetric label="Viewer" value={currentPrivateHand?.viewerPlayerId ?? '-'} mono />
-        <MiniMetric
-          label="Mão terminada"
-          value={String(currentPublicHand?.finished ?? false)}
-          mono
-        />
-      </div>
+            {/* Efeito de brilho ao passar o mouse (opcional, via CSS) */}
+            <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-transparent via-white/40 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+          </motion.button>
+        );
+      })}
     </div>
   );
-}
-
-function MiniMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">{label}</div>
-      <div className={`mt-2 text-sm text-slate-100 ${mono ? 'font-mono' : 'font-semibold'}`}>{value}</div>
-    </div>
-  );
-}
-
-function HandEmptyState({ tablePhase }: { tablePhase: TablePhase }) {
-  let message = 'Aguardando início da mão.';
-
-  if (tablePhase === 'playing') {
-    message = 'Aguardando estado privado da mão.';
-  }
-
-  if (tablePhase === 'hand_finished') {
-    message = 'A mão já foi resolvida.';
-  }
-
-  if (tablePhase === 'match_finished') {
-    message = 'A partida já encerrou.';
-  }
-
-  return (
-    <div className="flex min-h-40 w-full items-center justify-center rounded-xl border border-dashed border-amber-400/15 bg-slate-950/40 px-6 py-10 text-center text-sm leading-7 text-slate-500">
-      {message}
-    </div>
-  );
-}
-
-function suitSymbol(suit: CardPayload['suit']): string {
-  if (suit === 'C') {
-    return '♥';
-  }
-
-  if (suit === 'O') {
-    return '♦';
-  }
-
-  if (suit === 'P') {
-    return '♣';
-  }
-
-  return '♠';
-}
-
-function suitColorClass(suit: CardPayload['suit']): string {
-  return suit === 'C' || suit === 'O' ? 'text-red-600' : 'text-slate-900';
 }

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+type PlayedCardOwner = 'mine' | 'opponent';
 
 type PendingPlayedCard = {
-  owner: 'mine' | 'opponent';
+  owner: PlayedCardOwner;
   card: string;
   id: number;
 };
@@ -32,181 +34,120 @@ type UseMatchTableTransitionResult = {
   displayedOpponentPlayedCard: string | null;
   beginHandTransition: () => void;
   beginOwnCardLaunch: (params: { cardKey: string; serverCard: string }) => void;
-  registerIncomingPlayedCard: (params: {
-    owner: 'mine' | 'opponent' | null;
-    card: string | null;
-  }) => void;
+  registerIncomingPlayedCard: (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void;
   stopRoundResolution: () => void;
 };
 
-const ROUND_RESOLUTION_DURATION_MS = 1100;
-const CARD_LAUNCH_DURATION_MS = 700;
+// ⚡ AJUSTE: 3500ms para garantir que o overlay de resultado seja lido
+const ROUND_RESOLUTION_DURATION_MS = 3500;
+const CARD_LAUNCH_DURATION_MS = 600;
+const CARD_REVEAL_DELAY_MS = 450;
+// ⚡ AJUSTE: 3200ms antes de limpar a mesa
+const ROUND_CLEAR_DELAY_MS = 3200;
 
 export function useMatchTableTransition(
   params: UseMatchTableTransitionParams,
 ): UseMatchTableTransitionResult {
-  const { tablePhase, myPlayedCard, opponentPlayedCard, playedRoundsCount, latestRoundFinished } =
-    params;
-
+  const { tablePhase, myPlayedCard, opponentPlayedCard, playedRoundsCount, latestRoundFinished } = params;
   const previousOpponentPlayedCardRef = useRef<string | null>(null);
   const previousPlayedRoundsCountRef = useRef<number>(0);
 
   const [launchingCardKey, setLaunchingCardKey] = useState<string | null>(null);
   const [pendingPlayedCard, setPendingPlayedCard] = useState<PendingPlayedCard | null>(null);
-  const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({
-    mine: null,
-    opponent: null,
-  });
+  const [displayedMyPlayedCard, setDisplayedMyPlayedCard] = useState<string | null>(myPlayedCard);
+  const [displayedOpponentPlayedCard, setDisplayedOpponentPlayedCard] = useState<string | null>(opponentPlayedCard);
   const [opponentRevealKey, setOpponentRevealKey] = useState(0);
   const [roundIntroKey, setRoundIntroKey] = useState(0);
   const [roundResolvedKey, setRoundResolvedKey] = useState(0);
   const [isResolvingRound, setIsResolvingRound] = useState(false);
+  const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({ mine: null, opponent: null });
 
-  const isLiveTableFrame = tablePhase === 'playing' || tablePhase === 'hand_finished';
-
-  const displayedMyPlayedCard =
-    (pendingPlayedCard?.owner === 'mine' ? pendingPlayedCard.card : null) ??
-    closingTableCards.mine ??
-    (isLiveTableFrame ? myPlayedCard : null);
-
-  const displayedOpponentPlayedCard =
-    closingTableCards.opponent ??
-    (pendingPlayedCard?.owner === 'opponent' ? pendingPlayedCard.card : null) ??
-    (isLiveTableFrame ? opponentPlayedCard : null);
-
-  function beginHandTransition(): void {
+  const beginHandTransition = useMemo(() => () => {
+    setRoundIntroKey((k) => k + 1);
+    setDisplayedMyPlayedCard(null);
+    setDisplayedOpponentPlayedCard(null);
+    setPendingPlayedCard(null);
+    setLaunchingCardKey(null);
     setClosingTableCards({ mine: null, opponent: null });
     setIsResolvingRound(false);
-    setRoundIntroKey((current) => current + 1);
-  }
+  }, []);
 
-  function beginOwnCardLaunch(params: { cardKey: string; serverCard: string }): void {
-    const { cardKey, serverCard } = params;
-
-    setLaunchingCardKey(cardKey);
+  const beginOwnCardLaunch = useMemo(() => (params: { cardKey: string; serverCard: string }) => {
+    setLaunchingCardKey(params.cardKey);
     setPendingPlayedCard({
-      owner: 'mine',
-      card: serverCard,
       id: Date.now(),
+      owner: 'mine',
+      card: params.serverCard,
     });
+  }, []);
 
-    window.setTimeout(() => {
-      setLaunchingCardKey((current) => (current === cardKey ? null : current));
-    }, CARD_LAUNCH_DURATION_MS);
-  }
-
-  function registerIncomingPlayedCard(params: {
-    owner: 'mine' | 'opponent' | null;
-    card: string | null;
-  }): void {
-    const { owner, card } = params;
-
-    if (!owner || !card || isResolvingRound) {
-      return;
+  const registerIncomingPlayedCard = useMemo(() => ({ owner, card }: { owner: 'mine' | 'opponent' | null; card: string | null }) => {
+    if (owner === 'opponent' && card) {
+      // ⚡ AJUSTE: Delay para simular "pensamento" do bot antes de revelar a carta
+      setTimeout(() => {
+        setDisplayedOpponentPlayedCard(card);
+        setOpponentRevealKey((k) => k + 1);
+        previousOpponentPlayedCardRef.current = card;
+      }, CARD_REVEAL_DELAY_MS);
     }
-
-    setClosingTableCards((current) => ({
-      ...current,
-      [owner]: card,
-    }));
-  }
-
-  function stopRoundResolution(): void {
-    setClosingTableCards({ mine: null, opponent: null });
+    if (owner === 'mine' && card) {
+      setDisplayedMyPlayedCard(card);
+    }
     setPendingPlayedCard(null);
+    setLaunchingCardKey(null);
+  }, []);
+
+  const stopRoundResolution = useMemo(() => () => {
     setIsResolvingRound(false);
-  }
+  }, []);
 
+  // ⚡ AJUSTE: Efeito para manter as cartas na mesa por mais tempo após o resultado
   useEffect(() => {
-    if (pendingPlayedCard?.owner === 'mine' && myPlayedCard === pendingPlayedCard.card) {
-      setLaunchingCardKey(null);
-      setPendingPlayedCard(null);
-    }
-  }, [myPlayedCard, pendingPlayedCard]);
-
-  useEffect(() => {
-    setClosingTableCards((current) => ({
-      mine: current.mine === myPlayedCard ? null : current.mine,
-      opponent: current.opponent === opponentPlayedCard ? null : current.opponent,
-    }));
-  }, [myPlayedCard, opponentPlayedCard]);
-
-  useEffect(() => {
-    if (tablePhase === 'playing' || tablePhase === 'hand_finished') {
-      return;
-    }
-
-    setPendingPlayedCard(null);
-    setClosingTableCards({ mine: null, opponent: null });
-    setIsResolvingRound(false);
-  }, [tablePhase]);
-
-  useEffect(() => {
-    if (!isResolvingRound) {
-      return;
-    }
-
-    const timeout = window.setTimeout(() => {
-      stopRoundResolution();
-    }, ROUND_RESOLUTION_DURATION_MS);
-
-    return () => window.clearTimeout(timeout);
-  }, [isResolvingRound]);
-
-  useEffect(() => {
-    if (
-      displayedOpponentPlayedCard &&
-      displayedOpponentPlayedCard !== previousOpponentPlayedCardRef.current
-    ) {
-      setOpponentRevealKey((current) => current + 1);
-    }
-
-    previousOpponentPlayedCardRef.current = displayedOpponentPlayedCard;
-  }, [displayedOpponentPlayedCard]);
-
-  useEffect(() => {
-    const previousPlayedRoundsCount = previousPlayedRoundsCountRef.current;
-
-    if (
-      playedRoundsCount > 0 &&
-      playedRoundsCount !== previousPlayedRoundsCount &&
-      latestRoundFinished
-    ) {
-      setRoundResolvedKey((current) => current + 1);
+    if (latestRoundFinished) {
       setIsResolvingRound(true);
+      const timeout = setTimeout(() => {
+        if (playedRoundsCount < 3) {
+          setDisplayedMyPlayedCard(null);
+          setDisplayedOpponentPlayedCard(null);
+          setRoundResolvedKey((k) => k + 1);
+          setClosingTableCards({ mine: null, opponent: null });
+        }
+        setIsResolvingRound(false);
+      }, ROUND_CLEAR_DELAY_MS);
+      return () => clearTimeout(timeout);
     }
-
-    previousPlayedRoundsCountRef.current = playedRoundsCount;
   }, [latestRoundFinished, playedRoundsCount]);
 
-  return useMemo(
-    () => ({
-      launchingCardKey,
-      pendingPlayedCard,
-      closingTableCards,
-      opponentRevealKey,
-      roundIntroKey,
-      roundResolvedKey,
-      isResolvingRound,
-      isLiveTableFrame,
-      displayedMyPlayedCard,
-      displayedOpponentPlayedCard,
-      beginHandTransition,
-      beginOwnCardLaunch,
-      registerIncomingPlayedCard,
-      stopRoundResolution,
-    }),
-    [
-      launchingCardKey,
-      pendingPlayedCard,
-      closingTableCards,
-      opponentRevealKey,
-      roundIntroKey,
-      roundResolvedKey,
-      isResolvingRound,
-      isLiveTableFrame,
-      displayedMyPlayedCard,
-      displayedOpponentPlayedCard,
-    ],
-  );
+  // Reset ao mudar fase
+  useEffect(() => {
+    if (tablePhase === 'waiting' || tablePhase === 'missing_context') {
+      setDisplayedMyPlayedCard(null);
+      setDisplayedOpponentPlayedCard(null);
+      setPendingPlayedCard(null);
+      setLaunchingCardKey(null);
+      setClosingTableCards({ mine: null, opponent: null });
+      setIsResolvingRound(false);
+    }
+  }, [tablePhase]);
+
+  return useMemo(() => ({
+    launchingCardKey,
+    pendingPlayedCard,
+    closingTableCards,
+    opponentRevealKey,
+    roundIntroKey,
+    roundResolvedKey,
+    isResolvingRound,
+    isLiveTableFrame: tablePhase === 'playing' || tablePhase === 'hand_finished',
+    displayedMyPlayedCard,
+    displayedOpponentPlayedCard,
+    beginHandTransition,
+    beginOwnCardLaunch,
+    registerIncomingPlayedCard,
+    stopRoundResolution,
+  }), [
+    launchingCardKey, pendingPlayedCard, closingTableCards, opponentRevealKey, roundIntroKey, roundResolvedKey,
+    isResolvingRound, tablePhase, displayedMyPlayedCard, displayedOpponentPlayedCard,
+    beginHandTransition, beginOwnCardLaunch, registerIncomingPlayedCard, stopRoundResolution,
+  ]);
 }

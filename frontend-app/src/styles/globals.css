@@ -2,46 +2,95 @@
 @tailwind components;
 @tailwind utilities;
 
+/* NOTE: Root design token — gold-first palette for premium card game identity. */
 :root {
   color-scheme: dark;
-}
 
-html,
-body,
-#root {
-  min-height: 100%;
+  /* Gold system */
+  --gold: #c9a84c;
+  --gold-light: #e8c76a;
+  --gold-dim: #8a6a28;
+  --gold-glow: rgba(201, 168, 76, 0.18);
+
+  /* Felt / table surfaces */
+  --felt: #0a1209;
+  --felt-mid: #0d1a0f;
+
+  /* Background system */
+  --bg-base: #080c10;
+  --bg-surface: #0f1923;
+  --bg-surface2: #141f2a;
+
+  /* Accent */
+  --accent-red: #c0392b;
+  --accent-red-light: #e74c3c;
+  --accent-green: #2d6a4f;
+
+  /* Text */
+  --text-primary: #f0e6d3;
+  --text-secondary: #a89b8c;
+  --text-muted: #5a6a75;
+
+  /* Borders */
+  --border-gold: rgba(201, 168, 76, 0.2);
+  --border-subtle: rgba(255, 255, 255, 0.08);
 }
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(16, 185, 129, 0.08), transparent 35%),
-    linear-gradient(180deg, #020617 0%, #020617 100%);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-* {
-  box-sizing: border-box;
+/* Custom Scrollbar for Premium Feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-button,
-input,
-textarea {
-  font: inherit;
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+  border-radius: 4px;
 }
 
-code {
-  font-family:
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace;
+::-webkit-scrollbar-thumb {
+  background: var(--gold-dim);
+  border-radius: 4px;
+  border: 2px solid var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gold);
+}
+
+/* Utility: Text Gradients */
+.text-gradient-gold {
+  background: linear-gradient(135deg, var(--gold-light), var(--gold), var(--gold-dim));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Utility: Glow Effects */
+.glow-gold {
+  box-shadow: 0 0 20px var(--gold-glow);
+}
+
+.glow-red {
+  box-shadow: 0 0 20px rgba(192, 57, 43, 0.4);
+}
+
+/* Card Back Pattern (Optional CSS pattern for card backs) */
+.card-back-pattern {
+  background-color: #1e293b;
+  background-image: repeating-linear-gradient(
+    45deg,
+    #1e293b 0,
+    #1e293b 10px,
+    #334155 10px,
+    #334155 20px
+  );
 }

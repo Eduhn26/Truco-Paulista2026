@@ -25,17 +25,7 @@ export function AuthCallbackPage() {
       return null;
     }
 
-    return {
-      authToken,
-      expiresIn,
-      user: {
-        id: userId,
-        provider,
-        email,
-        displayName,
-        avatarUrl,
-      },
-    };
+    return { authToken, expiresIn, user: { id: userId, provider, email, displayName, avatarUrl } };
   }, [searchParams]);
 
   useEffect(() => {
@@ -59,119 +49,112 @@ export function AuthCallbackPage() {
 
     clearPendingAuthBackendUrl();
 
-    // NOTE: OAuth callback comes from a full external redirect.
-    // A hard redirect here is more reliable than client-side navigation
-    // and avoids stale callback UI remaining mounted until a manual refresh.
+    // NOTE: Hard redirect after OAuth is more reliable than client-side navigation
+    // since it avoids any stale SPA state from before the external round-trip.
     window.location.replace('/lobby');
   }, [payload, session?.backendUrl, setSession]);
 
   if (!payload) {
     return (
-      <section className="mx-auto max-w-4xl">
-        <div className="overflow-hidden rounded-[32px] border border-red-500/20 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
-          <div className="border-b border-red-500/15 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.16),transparent_42%)] px-8 py-8">
-            <div className="inline-flex rounded-full border border-red-500/20 bg-red-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-red-300">
-              Callback error
-            </div>
-
-            <h1 className="mt-5 text-3xl font-black tracking-tight text-white lg:text-4xl">
-              OAuth callback payload is incomplete.
-            </h1>
-
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-              The frontend expected at least <code>authToken</code>, <code>provider</code>{' '}
-              and <code>userId</code> in the callback query string.
-            </p>
+      <section className="mx-auto flex max-w-md flex-col items-center py-20 text-center">
+        <div
+          className="rounded-2xl p-8 w-full"
+          style={{
+            background: 'rgba(15,25,35,0.8)',
+            border: '1px solid rgba(192,57,43,0.25)',
+          }}
+        >
+          <div className="text-[10px] font-bold uppercase tracking-[2px]" style={{ color: '#e74c3c' }}>
+            Erro no callback
           </div>
-
-          <div className="px-8 py-8">
-            <div className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
-              <div className="text-lg font-black tracking-tight text-slate-100">
-                Next step
-              </div>
-
-              <p className="mt-3 text-sm leading-7 text-slate-400">
-                Volte para a home, reinicie o fluxo de autenticação e confirme se
-                o backend publicou todos os parâmetros esperados para a callback.
-              </p>
-
-              <div className="mt-6">
-                <Link
-                  to="/"
-                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/20 hover:bg-white/10"
-                >
-                  Back to home
-                </Link>
-              </div>
-            </div>
+          <h1 className="mt-3 text-xl font-black text-white">
+            Payload de autenticação incompleto.
+          </h1>
+          <p className="mt-3 text-sm leading-6" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            O frontend esperava <code>authToken</code>, <code>provider</code> e <code>userId</code> na query string.
+          </p>
+          <div className="mt-6">
+            <Link
+              to="/"
+              className="rounded-xl px-5 py-2.5 text-sm font-bold text-slate-900 transition"
+              style={{ background: '#c9a84c' }}
+            >
+              Voltar para home
+            </Link>
           </div>
         </div>
       </section>
     );
   }
 
+  // NOTE: This view is shown briefly before window.location.replace('/lobby') fires.
+  // Design goal: communicate progress clearly without blocking or looking like an error.
   return (
-    <section className="mx-auto max-w-5xl">
-      <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/85 shadow-[0_28px_90px_rgba(15,23,42,0.45)]">
-        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(201,168,76,0.11),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
-          <div className="inline-flex rounded-full border border-amber-400/20 bg-amber-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-amber-300">
-            OAuth callback
-          </div>
-
-          <h1 className="mt-5 text-3xl font-black tracking-tight text-white lg:text-4xl">
-            Finalizando autenticação com boundary consistente.
-          </h1>
-
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">
-            A sessão está sendo persistida com a URL de backend que realmente
-            iniciou o fluxo OAuth, evitando drift entre frontend origin e API
-            origin antes da ida automática ao lobby.
-          </p>
-        </div>
-
-        <div className="grid gap-6 px-8 py-8 lg:grid-cols-[1.08fr_0.92fr] lg:px-10 lg:py-10">
-          <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
-            <div className="text-lg font-black tracking-tight text-slate-100">
-              Authenticated player
-            </div>
-
-            <div className="mt-4 text-2xl font-black tracking-tight text-white">
-              {payload.user.displayName ?? payload.user.email ?? 'Authenticated player'}
-            </div>
-
-            <div className="mt-6 grid gap-3 text-sm text-slate-300">
-              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                <span className="text-slate-500">Provider:</span> {payload.user.provider}
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                <span className="text-slate-500">User ID:</span> {payload.user.id}
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-5 py-4">
-                <span className="text-slate-500">Expires in:</span>{' '}
-                {payload.expiresIn ?? '-'}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-white/10 bg-slate-950/60 p-6">
-            <div className="text-lg font-black tracking-tight text-slate-100">
-              Next step
-            </div>
-
-            <p className="mt-3 text-sm leading-7 text-slate-400">
-              The browser session is being persisted locally with the backend URL
-              that actually started the OAuth flow. From here, the app can move
-              to the lobby without guessing the API origin.
-            </p>
-
-            <div className="mt-6 rounded-3xl border border-amber-400/15 bg-amber-500/10 px-5 py-4 text-sm leading-7 text-amber-200">
-              Redirecting to the authenticated lobby flow.
-            </div>
-          </section>
+    <section className="mx-auto flex max-w-sm flex-col items-center py-20 text-center gap-6">
+      {/* Spinner with TP mark */}
+      <div className="relative">
+        <div
+          className="h-16 w-16 rounded-full border-[3px] border-t-transparent animate-spin"
+          style={{ borderColor: 'rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
+        />
+        <div
+          className="absolute inset-0 flex items-center justify-center text-sm font-black"
+          style={{ color: '#c9a84c', fontFamily: 'Georgia, serif' }}
+        >
+          TP
         </div>
       </div>
+
+      <div>
+        <div className="text-lg font-black text-white">Autenticando…</div>
+        <div className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          {payload.user.displayName ?? payload.user.email ?? 'Jogador'}
+        </div>
+      </div>
+
+      {/* Step indicators */}
+      <div
+        className="w-full rounded-2xl p-4 text-left"
+        style={{
+          background: 'rgba(15,25,35,0.7)',
+          border: '1px solid rgba(201,168,76,0.12)',
+        }}
+      >
+        <Step done label="Token OAuth verificado" />
+        <Step done label={`Provedor: ${payload.user.provider}`} />
+        <Step active label="Persistindo sessão…" />
+        <Step label="Redirecionando ao lobby" />
+      </div>
     </section>
+  );
+}
+
+function Step({ label, done = false, active = false }: { label: string; done?: boolean; active?: boolean }) {
+  return (
+    <div className="flex items-center gap-3 py-1.5">
+      <div
+        className="h-2 w-2 flex-shrink-0 rounded-full transition-all"
+        style={{
+          background: done
+            ? '#3d8a6a'
+            : active
+              ? '#c9a84c'
+              : 'rgba(255,255,255,0.1)',
+          boxShadow: active ? '0 0 8px rgba(201,168,76,0.4)' : 'none',
+        }}
+      />
+      <span
+        className="text-[12px]"
+        style={{
+          color: done
+            ? 'rgba(255,255,255,0.5)'
+            : active
+              ? 'rgba(255,255,255,0.85)'
+              : 'rgba(255,255,255,0.2)',
+        }}
+      >
+        {label}
+      </span>
+    </div>
   );
 }
