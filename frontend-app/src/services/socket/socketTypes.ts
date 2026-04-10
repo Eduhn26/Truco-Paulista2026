@@ -7,6 +7,14 @@ export type PlayerId = 'P1' | 'P2' | string;
 export type HandValue = 1 | 3 | 6 | 9 | 12 | number;
 export type HandBetState = 'idle' | 'awaiting_response' | string;
 export type HandSpecialState = 'normal' | 'mao_de_onze' | 'mao_de_ferro' | string;
+export type NextDecisionType =
+  | 'idle'
+  | 'play-card'
+  | 'respond-bet'
+  | 'resolve-mao-de-onze'
+  | 'start-next-hand'
+  | 'match-finished'
+  | string;
 
 export type CardPayload = {
   rank: Rank;
@@ -71,6 +79,11 @@ export type MatchStateHandPayload = {
   specialDecisionBy: PlayerId | null;
   winner: PlayerId | null;
   awardedPoints: HandValue | null;
+  currentRoundIndex: number;
+  lastRoundResult: RoundResult | null;
+  nextDecisionType: NextDecisionType;
+  viewerCanActNow: boolean;
+  pendingBotAction: boolean;
   availableActions: MatchAvailableActionsPayload;
   playerOneHand: string[];
   playerTwoHand: string[];
@@ -182,10 +195,6 @@ function asNullableHandValue(value: unknown): HandValue | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function asCardStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
-}
-
 function normalizeMatchAvailableActionsPayload(value: unknown): MatchAvailableActionsPayload {
   const input = asObject(value);
 
@@ -251,6 +260,11 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
           ? input.winner
           : null,
     awardedPoints: asNullableHandValue(input.awardedPoints),
+    currentRoundIndex: asNumber(input.currentRoundIndex, 0),
+    lastRoundResult: typeof input.lastRoundResult === 'string' ? input.lastRoundResult : null,
+    nextDecisionType: asString(input.nextDecisionType, 'idle'),
+    viewerCanActNow: asBoolean(input.viewerCanActNow),
+    pendingBotAction: asBoolean(input.pendingBotAction),
     availableActions: normalizeMatchAvailableActionsPayload(input.availableActions),
     playerOneHand: asCardStringArray(input.playerOneHand),
     playerTwoHand: asCardStringArray(input.playerTwoHand),
@@ -258,6 +272,10 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
       ? input.rounds.map(normalizeMatchStateRoundPayload)
       : [],
   };
+}
+
+function asCardStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
 }
 
 export function normalizeServerErrorPayload(payload: unknown): ServerErrorPayload {

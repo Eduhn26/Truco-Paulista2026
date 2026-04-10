@@ -45,6 +45,10 @@ type InternalRoomState = {
   mode: MatchMode;
   players: RoomStatePlayer[];
   currentTurnSeatId: SeatId | null;
+  // NOTE: Tracks whether the first hand has ever started for this room.
+  // Once true, the ready gate for start-hand is replaced by canStartNextHand(),
+  // which only requires all human players to be connected (socketId present).
+  handEverStarted: boolean;
 };
 
 export type RoomState = {
@@ -98,6 +102,7 @@ export class RoomManager {
       mode,
       players: [],
       currentTurnSeatId: null,
+      handEverStarted: false,
     };
 
     this.rooms.set(matchId, room);
@@ -123,9 +128,15 @@ export class RoomManager {
     const existingSession = this.findExistingSession(matchId, identity.playerToken);
 
     if (existingSession) {
+      // NOTE: On reconnect after the first hand has started, we restore the
+      // player's ready flag to true so canStartNextHand() does not block the
+      // next hand start due to a transient disconnect mid-match.
+      const restoredReady = room.handEverStarted ? true : existingSession.ready;
+
       const reconnectedSession: PlayerSession = {
         ...existingSession,
         socketId,
+        ready: restoredReady,
       };
 
       this.sessionsBySocketId.delete(existingSession.socketId);
@@ -151,7 +162,7 @@ export class RoomManager {
         room.players[playerIndex] = {
           ...existingPlayer,
           socketId,
-          ready: reconnectedSession.ready,
+          ready: restoredReady,
           playerToken: reconnectedSession.playerToken,
           userId: reconnectedSession.userId,
           isBot: false,
@@ -308,6 +319,8 @@ export class RoomManager {
     return this.getState(session.matchId);
   }
 
+  // NOTE: Checks that every seat (human or bot) has ready = true.
+  // Used as the gate for the FIRST hand start (lobby → match transition).
   canStart(matchId: string): boolean {
     const room = this.rooms.get(matchId);
 
@@ -324,12 +337,47 @@ export class RoomManager {
     });
   }
 
+  // NOTE: Checks that every human seat has an active socket connection.
+  // Used as the gate for the SUBSEQUENT hand starts (between hands).
+  // We do not re-check ready because the player already expressed intent
+  // to play when they first set ready before the first hand. A transient
+  // disconnect must not permanently block the match from continuing.
+  canStartNextHand(matchId: string): boolean {
+    const room = this.rooms.get(matchId);
+
+    if (!room) {
+      return false;
+    }
+
+    const seats = SEATS_BY_MODE[room.mode];
+
+    return seats.every((seatId) => {
+      const player = room.players.find((entry) => entry.seatId === seatId);
+
+      if (!player) {
+        return false;
+      }
+
+      // Bots are always considered available.
+      if (player.isBot) {
+        return true;
+      }
+
+      // Human players must have an active socket connection.
+      return player.socketId !== null;
+    });
+  }
+
   beginHand(matchId: string, startingSeatId?: SeatId): RoomState {
     const room = this.rooms.get(matchId);
 
     if (!room) {
       throw new Error(`Room not found for match ${matchId}`);
     }
+
+    // NOTE: Mark that at least one hand has started for this room.
+    // From this point forward, canStartNextHand() is used instead of canStart().
+    room.handEverStarted = true;
 
     const resolvedStartingSeatId = startingSeatId ?? this.getTurnOrder(room.mode)[0] ?? null;
     room.currentTurnSeatId = this.resolveValidSeatForRoom(room, resolvedStartingSeatId);

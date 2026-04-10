@@ -89,6 +89,25 @@ function persistLiveSnapshot(params: PersistSnapshotParams): void {
   });
 }
 
+function describeMatchStatePayload(scope: 'public' | 'private', payload: MatchStatePayload): string {
+  return [
+    `Received ${scope} match-state`,
+    `state=${payload.state}`,
+    `hand=${payload.currentHand ? 'yes' : 'no'}`,
+    `next=${payload.currentHand?.nextDecisionType ?? 'null'}`,
+    `finished=${String(payload.currentHand?.finished ?? null)}`,
+    `winner=${payload.currentHand?.winner ?? 'null'}`,
+  ].join(' | ');
+}
+
+function describeRoomStatePayload(payload: RoomStatePayload): string {
+  return [
+    'Received room-state',
+    `canStart=${String(payload.canStart)}`,
+    `turn=${payload.currentTurnSeatId ?? 'null'}`,
+  ].join(' | ');
+}
+
 export function useMatchRealtimeSession(
   params: UseMatchRealtimeSessionParams,
 ): UseMatchRealtimeSessionResult {
@@ -259,9 +278,6 @@ export function useMatchRealtimeSession(
               : 'Received player-assigned.',
           );
 
-          // NOTE: The match page no longer exposes a dedicated ready toggle.
-          // We auto-ready the authenticated human once the backend confirms seat
-          // assignment so the 1v1 loop remains frictionless.
           if (payload.seatId && !hasAutoReadiedRef.current) {
             client.emitSetReady(true);
             hasAutoReadiedRef.current = true;
@@ -302,7 +318,7 @@ export function useMatchRealtimeSession(
             nextRoomState: payload,
           });
 
-          appendLog('Received room-state.');
+          appendLog(describeRoomStatePayload(payload));
         },
         onMatchState: (payload) => {
           if (connectionKeyRef.current !== connectionKey) {
@@ -327,7 +343,7 @@ export function useMatchRealtimeSession(
             nextPublicMatchState: payload,
           });
 
-          appendLog('Received public match-state.');
+          appendLog(describeMatchStatePayload('public', payload));
         },
         onPrivateMatchState: (payload) => {
           if (connectionKeyRef.current !== connectionKey) {
@@ -352,7 +368,7 @@ export function useMatchRealtimeSession(
             nextPrivateMatchState: payload,
           });
 
-          appendLog('Received private match-state.');
+          appendLog(describeMatchStatePayload('private', payload));
         },
         onHandStarted: (payload) => {
           if (connectionKeyRef.current !== connectionKey) {
@@ -404,7 +420,12 @@ export function useMatchRealtimeSession(
       assignedSeatRef.current = null;
       hasAutoReadiedRef.current = false;
     };
-  }, [effectiveMatchId, initialSnapshot?.playerAssigned?.seatId, session?.authToken, session?.backendUrl]);
+  }, [
+    effectiveMatchId,
+    initialSnapshot?.playerAssigned?.seatId,
+    session?.authToken,
+    session?.backendUrl,
+  ]);
 
   return {
     initialSnapshot,

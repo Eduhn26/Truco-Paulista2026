@@ -144,6 +144,15 @@ export function MatchPage() {
     const mySeat = playerAssigned?.seatId ?? null;
     const currentPublicHand = publicMatchState?.currentHand ?? null;
     const currentPrivateHand = privateMatchState?.currentHand ?? null;
+    const effectiveHand = currentPrivateHand ?? currentPublicHand;
+    const nextDecisionType = effectiveHand?.nextDecisionType ?? 'idle';
+    const viewerCanActNow = effectiveHand?.viewerCanActNow ?? false;
+    const pendingBotAction = effectiveHand?.pendingBotAction ?? false;
+    const handFinished =
+      nextDecisionType === 'start-next-hand' || Boolean(currentPublicHand?.finished);
+    const matchFinished =
+      nextDecisionType === 'match-finished' || publicMatchState?.state === 'finished';
+
     const isOneVsOne = roomState?.mode === '1v1';
     const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
     const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
@@ -159,7 +168,6 @@ export function MatchPage() {
     const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
     const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
     const myCards = getViewerCards(currentPrivateHand);
-    const effectiveHand = currentPrivateHand ?? currentPublicHand;
     const availableActions = effectiveHand?.availableActions ?? emptyAvailableActions();
     const rounds = currentPublicHand?.rounds ?? [];
     const playedRounds = rounds.filter(
@@ -178,13 +186,44 @@ export function MatchPage() {
         ? latestRound.playerTwoCard
         : latestRound.playerOneCard
       : null;
-    const handFinished = Boolean(currentPublicHand?.finished);
-    const canStartHand =
-      Boolean(roomState?.canStart) || (handFinished && publicMatchState?.state !== 'finished');
+
+    const isFirstHandReady =
+      publicMatchState?.state === 'waiting' &&
+      !currentPublicHand &&
+      Boolean(roomState?.canStart);
+
+    const isNextHandReady = !matchFinished && nextDecisionType === 'start-next-hand';
+
+    const canStartHand = isFirstHandReady || isNextHandReady;
+
     const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
-      availableActions.canAttemptPlayCard && mySeat && myCards.length > 0 && !handFinished,
+      !matchFinished &&
+        !handFinished &&
+        nextDecisionType === 'play-card' &&
+        viewerCanActNow &&
+        isMyTurn &&
+        availableActions.canAttemptPlayCard &&
+        myCards.length > 0 &&
+        !pendingBotAction,
     );
+
+    console.log({
+      publicState: publicMatchState?.state,
+      privateState: privateMatchState?.state,
+      publicHand: Boolean(publicMatchState?.currentHand),
+      privateHand: Boolean(privateMatchState?.currentHand),
+      publicNext: publicMatchState?.currentHand?.nextDecisionType ?? null,
+      privateNext: privateMatchState?.currentHand?.nextDecisionType ?? null,
+      publicFinished: publicMatchState?.currentHand?.finished ?? null,
+      privateFinished: privateMatchState?.currentHand?.finished ?? null,
+      roomCanStart: roomState?.canStart ?? null,
+      isFirstHandReady,
+      isNextHandReady,
+      localCanStartHand: canStartHand,
+      effectiveSource: currentPrivateHand ? 'private' : currentPublicHand ? 'public' : 'none',
+    });
+
     const contractPresentation = buildMatchContractPresentation({
       publicMatchState,
       roomState,
@@ -218,11 +257,15 @@ export function MatchPage() {
       winner: contractPresentation.winner,
       awardedPoints: contractPresentation.awardedPoints,
       availableActions: contractPresentation.availableActions,
-      handFinished: contractPresentation.handFinished,
-      matchFinished: contractPresentation.matchFinished,
-      tablePhase: contractPresentation.tablePhase,
-      handStatusLabel: contractPresentation.handStatusLabel,
-      handStatusTone: contractPresentation.handStatusTone,
+      handFinished: matchFinished ? false : handFinished,
+      matchFinished,
+      tablePhase: matchFinished
+        ? 'match_finished'
+        : handFinished
+          ? 'hand_finished'
+          : contractPresentation.tablePhase,
+      handStatusLabel: matchFinished ? 'Partida encerrada' : contractPresentation.handStatusLabel,
+      handStatusTone: matchFinished ? 'success' : contractPresentation.handStatusTone,
       latestRound: contractPresentation.latestRound,
       rounds: contractPresentation.rounds,
       playedRoundsCount: contractPresentation.playedRoundsCount,
@@ -375,7 +418,6 @@ export function MatchPage() {
         </Link>
       </div>
 
-      {/* NOTE: The page is now viewport-bounded first. The table must fit inside real screen height at 100% zoom. */}
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center px-2 pb-2 md:px-4 md:pb-3">
         <div className="gold-frame flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden">
           <MatchPageHeader
@@ -396,7 +438,6 @@ export function MatchPage() {
             </div>
           )}
 
-          {/* NOTE: Fixed min-heights were forcing the redesign to only breathe at browser zoom 80%. */}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="min-h-0 flex-1">
               <MatchTableShell
@@ -450,7 +491,6 @@ export function MatchPage() {
               />
             </div>
 
-            {/* NOTE: Keep the technical panel inside the same viewport-bounded shell so it no longer pushes the page height. */}
             <div className="shrink-0 px-2 pb-2 pt-1 md:px-3 md:pb-3">
               <MatchSecondaryPanelSection
                 showSecondary={showSecondary}
@@ -491,8 +531,8 @@ function getViewerCards(
     currentPrivateHand.viewerPlayerId === 'P1'
       ? currentPrivateHand.playerOneHand
       : currentPrivateHand.viewerPlayerId === 'P2'
-      ? currentPrivateHand.playerTwoHand
-      : [];
+        ? currentPrivateHand.playerTwoHand
+        : [];
 
   return rawViewerHand
     .map((card: string) => cardStringToPayload(card))

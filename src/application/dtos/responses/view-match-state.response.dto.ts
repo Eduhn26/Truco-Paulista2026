@@ -5,12 +5,12 @@ import type { Rank } from '@game/domain/value-objects/rank';
 import type { RoundResult } from '@game/domain/value-objects/round-result';
 
 export type NextDecisionType =
+  | 'idle'
   | 'play-card'
   | 'respond-bet'
   | 'resolve-mao-de-onze'
   | 'start-next-hand'
-  | 'match-finished'
-  | 'idle';
+  | 'match-finished';
 
 export type ViewMatchStateResponseDto = {
   matchId: string;

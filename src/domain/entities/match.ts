@@ -55,6 +55,10 @@ export class Match {
       return;
     }
 
+    // NOTE: We intentionally replace the previous finished hand only when the
+    // next hand actually starts. This preserves the finished hand snapshot
+    // between hands so the frontend can render "start next hand" semantics
+    // instead of falling back to a null currentHand dead state.
     this.currentHand = Hand.start(viraRank, this.buildInitialHandState());
     this.state = 'in_progress';
   }
@@ -178,8 +182,10 @@ export class Match {
 
     const matchWinner = this.score.hasWinner(this.pointsToWin);
 
-    this.currentHand = null;
-
+    // NOTE: We keep the finished hand attached to the match until the next
+    // explicit start(). This allows the transport/frontend contract to expose
+    // "start-next-hand" instead of collapsing the match into a null-hand
+    // waiting state between hands. The hand is replaced atomically in start().
     if (matchWinner) {
       this.state = 'finished';
       return;

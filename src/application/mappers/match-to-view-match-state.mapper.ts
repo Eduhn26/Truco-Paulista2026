@@ -101,11 +101,7 @@ function resolveNextDecisionType(
     return 'respond-bet';
   }
 
-  if (!snapshot.finished) {
-    return 'play-card';
-  }
-
-  return 'idle';
+  return 'play-card';
 }
 
 function resolveViewerCanActNow(

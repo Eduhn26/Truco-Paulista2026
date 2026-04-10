@@ -66,7 +66,6 @@ import type {
 import type { MatchmakingPair } from './matchmaking/matchmaking-pairing-policy';
 import { RoomManager, type SeatId } from './multiplayer/room-manager';
 
-
 type GatewayErrorCode =
   | 'validation_error'
   | 'transport_error'
@@ -488,6 +487,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async getAuthoritativeMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
     return this.viewMatchStateUseCase.execute({ matchId });
+  }
+
+  private canStartSubsequentHand(state: ViewMatchStateResponseDto): boolean {
+    return state.state === 'waiting' && Boolean(state.currentHand?.finished);
   }
 
   private toPublicMatchState(state: ViewMatchStateResponseDto): ViewMatchStateResponseDto {
@@ -1826,7 +1829,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      if (!this.roomManager.canStart(session.matchId)) {
+      const authoritativeState = await this.getAuthoritativeMatchState(session.matchId);
+
+      const isStartingNextHand =
+        authoritativeState.state === 'waiting' && Boolean(authoritativeState.currentHand?.finished);
+
+      if (!isStartingNextHand && !this.roomManager.canStart(session.matchId)) {
         return this.reject(
           'start_hand_rejected',
           'All players must be ready before starting the hand.',
