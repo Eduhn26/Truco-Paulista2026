@@ -125,6 +125,43 @@ export type GameSocketEvents = {
   onCardPlayed?: (payload: CardPlayedPayload) => void;
 };
 
+// ── Suit display helpers ──
+// The canonical backend suits are C (Clubs/Paus), O (Ouros/Diamonds),
+// P (Copas/Hearts), E (Espadas/Spades). Some legacy paths may emit
+// H/D/S aliases — these helpers normalise both directions.
+
+export type SuitDisplay = { symbol: string; colorClass: string };
+
+const SUIT_DISPLAY_MAP: Record<string, SuitDisplay> = {
+  C: { symbol: '♣', colorClass: 'text-slate-900' },
+  O: { symbol: '♦', colorClass: 'text-red-700' },
+  D: { symbol: '♦', colorClass: 'text-red-700' },
+  P: { symbol: '♥', colorClass: 'text-red-700' },
+  H: { symbol: '♥', colorClass: 'text-red-700' },
+  E: { symbol: '♠', colorClass: 'text-slate-900' },
+  S: { symbol: '♠', colorClass: 'text-slate-900' },
+};
+
+const FALLBACK_SUIT_DISPLAY: SuitDisplay = { symbol: '?', colorClass: 'text-slate-500' };
+
+export function getSuitDisplay(suit: string): SuitDisplay {
+  return SUIT_DISPLAY_MAP[suit] ?? FALLBACK_SUIT_DISPLAY;
+}
+
+export function suitSymbol(suit: string): string {
+  return getSuitDisplay(suit).symbol;
+}
+
+export function suitColorClass(suit: string): string {
+  return getSuitDisplay(suit).colorClass;
+}
+
+export function isSuitRed(suit: string): boolean {
+  return suit === 'P' || suit === 'H' || suit === 'O' || suit === 'D';
+}
+
+// ── Normalisation helpers ──
+
 function asObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }

@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-
 import { getDefaultBackendUrl, resolveBackendUrl } from '../config/appConfig';
 import {
   clearPendingAuthBackendUrl,
@@ -11,7 +10,6 @@ import { useAuth } from '../features/auth/authStore';
 export function AuthCallbackPage() {
   const searchParams = new URLSearchParams(window.location.search);
   const { session, setSession } = useAuth();
-
   const payload = useMemo(() => {
     const authToken = searchParams.get('authToken');
     const expiresIn = searchParams.get('expiresIn');
@@ -20,11 +18,9 @@ export function AuthCallbackPage() {
     const email = searchParams.get('email');
     const displayName = searchParams.get('displayName');
     const avatarUrl = searchParams.get('avatarUrl');
-
     if (!authToken || !provider || !userId) {
       return null;
     }
-
     return { authToken, expiresIn, user: { id: userId, provider, email, displayName, avatarUrl } };
   }, [searchParams]);
 
@@ -32,127 +28,97 @@ export function AuthCallbackPage() {
     if (!payload) {
       return;
     }
-
     const pendingBackendUrl = loadPendingAuthBackendUrl();
     const resolvedBackendUrl = resolveBackendUrl(
       pendingBackendUrl,
       session?.backendUrl,
       getDefaultBackendUrl(),
     );
-
     setSession({
       backendUrl: resolvedBackendUrl,
       authToken: payload.authToken,
       expiresIn: payload.expiresIn,
       user: payload.user,
     });
-
     clearPendingAuthBackendUrl();
-
-    // NOTE: Hard redirect after OAuth is more reliable than client-side navigation
-    // since it avoids any stale SPA state from before the external round-trip.
     window.location.replace('/lobby');
   }, [payload, session?.backendUrl, setSession]);
 
   if (!payload) {
     return (
-      <section className="mx-auto flex max-w-md flex-col items-center py-20 text-center">
-        <div
-          className="rounded-2xl p-8 w-full"
-          style={{
-            background: 'rgba(15,25,35,0.8)',
-            border: '1px solid rgba(192,57,43,0.25)',
-          }}
-        >
-          <div className="text-[10px] font-bold uppercase tracking-[2px]" style={{ color: '#e74c3c' }}>
-            Erro no callback
-          </div>
-          <h1 className="mt-3 text-xl font-black text-white">
-            Payload de autenticação incompleto.
-          </h1>
-          <p className="mt-3 text-sm leading-6" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            O frontend esperava <code>authToken</code>, <code>provider</code> e <code>userId</code> na query string.
+      <div className="min-h-screen flex items-center justify-center bg-[#050810] p-4">
+        <div className="gold-frame p-12 text-center max-w-md w-full">
+          <div className="text-xs font-bold uppercase tracking-[0.2em] text-red-400 mb-4">Erro no Callback</div>
+          <h1 className="text-2xl font-black text-white mb-4">Falha na Autenticação</h1>
+          <p className="text-slate-400 text-sm mb-8">
+            O frontend esperava <code className="bg-slate-800 px-1 py-0.5 rounded text-red-300">authToken</code>, <code className="bg-slate-800 px-1 py-0.5 rounded text-red-300">provider</code> e <code className="bg-slate-800 px-1 py-0.5 rounded text-red-300">userId</code> na URL.
           </p>
-          <div className="mt-6">
-            <Link
-              to="/"
-              className="rounded-xl px-5 py-2.5 text-sm font-bold text-slate-900 transition"
-              style={{ background: '#c9a84c' }}
-            >
-              Voltar para home
-            </Link>
-          </div>
+          <Link
+            to="/"
+            className="inline-block px-6 py-3 bg-amber-600 hover:bg-amber-500 text-slate-900 font-bold rounded-xl transition-colors"
+          >
+            Voltar para Home
+          </Link>
         </div>
-      </section>
+      </div>
     );
   }
 
-  // NOTE: This view is shown briefly before window.location.replace('/lobby') fires.
-  // Design goal: communicate progress clearly without blocking or looking like an error.
   return (
-    <section className="mx-auto flex max-w-sm flex-col items-center py-20 text-center gap-6">
-      {/* Spinner with TP mark */}
-      <div className="relative">
-        <div
-          className="h-16 w-16 rounded-full border-[3px] border-t-transparent animate-spin"
-          style={{ borderColor: 'rgba(201,168,76,0.2)', borderTopColor: '#c9a84c' }}
-        />
-        <div
-          className="absolute inset-0 flex items-center justify-center text-sm font-black"
-          style={{ color: '#c9a84c', fontFamily: 'Georgia, serif' }}
-        >
-          TP
+    <div className="min-h-screen flex items-center justify-center bg-[#050810] relative overflow-hidden">
+      {/* Background Decor */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(201,168,76,0.1),transparent_60%)]" />
+      
+      <div className="relative z-10 w-full max-w-sm mx-4">
+        <div className="gold-frame p-8 sm:p-10 text-center relative overflow-hidden">
+          {/* Animated Golden Smoke/Glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-amber-500/20 blur-3xl rounded-full animate-pulse" />
+
+          {/* Spinner */}
+          <div className="relative mx-auto w-20 h-20 mb-8">
+            <div className="absolute inset-0 rounded-full border-4 border-slate-800" />
+            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-amber-400 animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xl font-black text-gradient-gold" style={{ fontFamily: 'Georgia, serif' }}>TP</span>
+            </div>
+          </div>
+
+          {/* Title */}
+          <h1 className="text-2xl font-black text-white mb-2">Autenticando...</h1>
+          <p className="text-amber-200/60 text-sm mb-8 font-medium">{payload.user.displayName ?? payload.user.email ?? 'Jogador'}</p>
+
+          {/* Steps */}
+          <div className="text-left space-y-4">
+            <StepItem status="success" label="Token OAuth verificado" />
+            <StepItem status="success" label={`Provedor: ${payload.user.provider}`} />
+            <StepItem status="loading" label="Persistindo sessão..." />
+            <StepItem status="pending" label="Redirecionando ao lobby" />
+          </div>
         </div>
       </div>
-
-      <div>
-        <div className="text-lg font-black text-white">Autenticando…</div>
-        <div className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          {payload.user.displayName ?? payload.user.email ?? 'Jogador'}
-        </div>
-      </div>
-
-      {/* Step indicators */}
-      <div
-        className="w-full rounded-2xl p-4 text-left"
-        style={{
-          background: 'rgba(15,25,35,0.7)',
-          border: '1px solid rgba(201,168,76,0.12)',
-        }}
-      >
-        <Step done label="Token OAuth verificado" />
-        <Step done label={`Provedor: ${payload.user.provider}`} />
-        <Step active label="Persistindo sessão…" />
-        <Step label="Redirecionando ao lobby" />
-      </div>
-    </section>
+    </div>
   );
 }
 
-function Step({ label, done = false, active = false }: { label: string; done?: boolean; active?: boolean }) {
+function StepItem({ status, label }: { status: 'success' | 'loading' | 'pending'; label: string }) {
   return (
-    <div className="flex items-center gap-3 py-1.5">
-      <div
-        className="h-2 w-2 flex-shrink-0 rounded-full transition-all"
-        style={{
-          background: done
-            ? '#3d8a6a'
-            : active
-              ? '#c9a84c'
-              : 'rgba(255,255,255,0.1)',
-          boxShadow: active ? '0 0 8px rgba(201,168,76,0.4)' : 'none',
-        }}
-      />
-      <span
-        className="text-[12px]"
-        style={{
-          color: done
-            ? 'rgba(255,255,255,0.5)'
-            : active
-              ? 'rgba(255,255,255,0.85)'
-              : 'rgba(255,255,255,0.2)',
-        }}
-      >
+    <div className="flex items-center gap-4">
+      {/* Icon */}
+      <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+        status === 'success' ? 'bg-green-500/20 text-green-400' :
+        status === 'loading' ? 'bg-amber-500/20 text-amber-400 animate-pulse' :
+        'bg-slate-800 text-slate-600'
+      }`}>
+        {status === 'success' && '✓'}
+        {status === 'loading' && '●'}
+        {status === 'pending' && '○'}
+      </div>
+      {/* Label */}
+      <span className={`text-sm font-medium ${
+        status === 'success' ? 'text-slate-300' :
+        status === 'loading' ? 'text-white' :
+        'text-slate-600'
+      }`}>
         {label}
       </span>
     </div>

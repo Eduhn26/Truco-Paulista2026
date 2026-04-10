@@ -45,6 +45,50 @@ type UseMatchRealtimeSessionResult = {
   emitDeclineMaoDeOnze: (matchId: string) => void;
 };
 
+type PersistSnapshotParams = {
+  effectiveMatchId: string;
+  roomStateRef: React.MutableRefObject<RoomStatePayload | null>;
+  publicMatchStateRef: React.MutableRefObject<MatchStatePayload | null>;
+  privateMatchStateRef: React.MutableRefObject<MatchStatePayload | null>;
+  playerAssignedRef: React.MutableRefObject<PlayerAssignedPayload | null>;
+  nextRoomState?: RoomStatePayload | null;
+  nextPublicMatchState?: MatchStatePayload | null;
+  nextPrivateMatchState?: MatchStatePayload | null;
+  nextPlayerAssigned?: PlayerAssignedPayload | null;
+};
+
+function persistLiveSnapshot(params: PersistSnapshotParams): void {
+  const {
+    effectiveMatchId,
+    roomStateRef,
+    publicMatchStateRef,
+    privateMatchStateRef,
+    playerAssignedRef,
+    nextRoomState,
+    nextPublicMatchState,
+    nextPrivateMatchState,
+    nextPlayerAssigned,
+  } = params;
+
+  const snapshotMatchId =
+    nextPrivateMatchState?.matchId ||
+    nextPublicMatchState?.matchId ||
+    nextRoomState?.matchId ||
+    nextPlayerAssigned?.matchId ||
+    effectiveMatchId;
+
+  if (!snapshotMatchId) {
+    return;
+  }
+
+  saveMatchSnapshot(snapshotMatchId, {
+    roomState: nextRoomState ?? roomStateRef.current,
+    publicMatchState: nextPublicMatchState ?? publicMatchStateRef.current,
+    privateMatchState: nextPrivateMatchState ?? privateMatchStateRef.current,
+    playerAssigned: nextPlayerAssigned ?? playerAssignedRef.current,
+  });
+}
+
 export function useMatchRealtimeSession(
   params: UseMatchRealtimeSessionParams,
 ): UseMatchRealtimeSessionResult {
@@ -53,6 +97,12 @@ export function useMatchRealtimeSession(
   const initialSnapshot = useMemo(() => loadMatchSnapshot(effectiveMatchId), [effectiveMatchId]);
 
   const clientRef = useRef<GameSocketClient | null>(null);
+  const connectionKeyRef = useRef<string | null>(null);
+  const assignedSeatRef = useRef<string | null>(initialSnapshot?.playerAssigned?.seatId ?? null);
+  const hasAutoReadiedRef = useRef(false);
+  const intentionalDisconnectRef = useRef(false);
+  const onHandStartedRef = useRef(onHandStarted);
+  const onCardPlayedRef = useRef(onCardPlayed);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(
@@ -69,35 +119,60 @@ export function useMatchRealtimeSession(
   );
   const [eventLog, setEventLog] = useState<string[]>([]);
 
+  const roomStateRef = useRef<RoomStatePayload | null>(initialSnapshot?.roomState ?? null);
+  const publicMatchStateRef = useRef<MatchStatePayload | null>(
+    initialSnapshot?.publicMatchState ?? null,
+  );
+  const privateMatchStateRef = useRef<MatchStatePayload | null>(
+    initialSnapshot?.privateMatchState ?? null,
+  );
+  const playerAssignedRef = useRef<PlayerAssignedPayload | null>(
+    initialSnapshot?.playerAssigned ?? null,
+  );
+
+  useEffect(() => {
+    onHandStartedRef.current = onHandStarted;
+  }, [onHandStarted]);
+
+  useEffect(() => {
+    onCardPlayedRef.current = onCardPlayed;
+  }, [onCardPlayed]);
+
+  useEffect(() => {
+    roomStateRef.current = roomState;
+  }, [roomState]);
+
+  useEffect(() => {
+    publicMatchStateRef.current = publicMatchState;
+  }, [publicMatchState]);
+
+  useEffect(() => {
+    privateMatchStateRef.current = privateMatchState;
+  }, [privateMatchState]);
+
+  useEffect(() => {
+    playerAssignedRef.current = playerAssigned;
+  }, [playerAssigned]);
+
+  useEffect(() => {
+    assignedSeatRef.current = initialSnapshot?.playerAssigned?.seatId ?? null;
+    roomStateRef.current = initialSnapshot?.roomState ?? null;
+    publicMatchStateRef.current = initialSnapshot?.publicMatchState ?? null;
+    privateMatchStateRef.current = initialSnapshot?.privateMatchState ?? null;
+    playerAssignedRef.current = initialSnapshot?.playerAssigned ?? null;
+
+    setRoomState(initialSnapshot?.roomState ?? null);
+    setPublicMatchState(initialSnapshot?.publicMatchState ?? null);
+    setPrivateMatchState(initialSnapshot?.privateMatchState ?? null);
+    setPlayerAssigned(initialSnapshot?.playerAssigned ?? null);
+    setConnectionStatus('offline');
+    setEventLog([]);
+  }, [initialSnapshot]);
+
   function appendLog(line: string): void {
     setEventLog((current) =>
       [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 40),
     );
-  }
-
-  function persistLiveSnapshot(next: {
-    nextRoomState?: RoomStatePayload | null;
-    nextPublicMatchState?: MatchStatePayload | null;
-    nextPrivateMatchState?: MatchStatePayload | null;
-    nextPlayerAssigned?: PlayerAssignedPayload | null;
-  }): void {
-    const snapshotMatchId =
-      next.nextPrivateMatchState?.matchId ||
-      next.nextPublicMatchState?.matchId ||
-      next.nextRoomState?.matchId ||
-      next.nextPlayerAssigned?.matchId ||
-      effectiveMatchId;
-
-    if (!snapshotMatchId) {
-      return;
-    }
-
-    saveMatchSnapshot(snapshotMatchId, {
-      roomState: next.nextRoomState ?? roomState,
-      publicMatchState: next.nextPublicMatchState ?? publicMatchState,
-      privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
-      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
-    });
   }
 
   useEffect(() => {
@@ -106,7 +181,13 @@ export function useMatchRealtimeSession(
     }
 
     const client = new GameSocketClient();
+    const connectionKey = `${session.backendUrl}|${effectiveMatchId}|${session.authToken}`;
+
     clientRef.current = client;
+    connectionKeyRef.current = connectionKey;
+    assignedSeatRef.current = initialSnapshot?.playerAssigned?.seatId ?? null;
+    hasAutoReadiedRef.current = false;
+    intentionalDisconnectRef.current = false;
 
     client.connect(
       {
@@ -115,6 +196,10 @@ export function useMatchRealtimeSession(
       },
       {
         onConnect: (socketId) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           setConnectionStatus('online');
           appendLog(`Socket connected (${socketId}).`);
           client.emitJoinMatch(effectiveMatchId);
@@ -123,87 +208,187 @@ export function useMatchRealtimeSession(
           appendLog(`Emitted get-state (${effectiveMatchId}).`);
         },
         onDisconnect: (reason) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           setConnectionStatus('offline');
+
+          if (intentionalDisconnectRef.current) {
+            return;
+          }
+
           appendLog(`Socket disconnected (${reason}).`);
         },
         onError: (payload: ServerErrorPayload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           appendLog(
             payload.message ? `Server error: ${payload.message}` : 'Server emitted error event.',
           );
         },
         onPlayerAssigned: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
+          assignedSeatRef.current = payload.seatId ?? null;
+          playerAssignedRef.current = payload;
           setPlayerAssigned(payload);
-          persistLiveSnapshot({ nextPlayerAssigned: payload });
+
+          persistLiveSnapshot({
+            effectiveMatchId,
+            roomStateRef,
+            publicMatchStateRef,
+            privateMatchStateRef,
+            playerAssignedRef,
+            nextPlayerAssigned: payload,
+          });
+
           appendLog(
             payload.seatId
               ? `Received player-assigned (${payload.seatId}).`
               : 'Received player-assigned.',
           );
+
+          // NOTE: The match page no longer exposes a dedicated ready toggle.
+          // We auto-ready the authenticated human once the backend confirms seat
+          // assignment so the 1v1 loop remains frictionless.
+          if (payload.seatId && !hasAutoReadiedRef.current) {
+            client.emitSetReady(true);
+            hasAutoReadiedRef.current = true;
+            appendLog('Emitted set-ready (true).');
+            client.emitGetState(effectiveMatchId);
+            appendLog(`Emitted get-state (${effectiveMatchId}) after auto-ready.`);
+          }
         },
         onRoomState: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
+          const assignedSeatId = assignedSeatRef.current;
+          const myRoomPlayer = assignedSeatId
+            ? payload.players.find((player) => player.seatId === assignedSeatId)
+            : null;
+
+          if (myRoomPlayer?.ready) {
+            hasAutoReadiedRef.current = true;
+          }
+
+          roomStateRef.current = payload;
           setRoomState(payload);
-          persistLiveSnapshot({ nextRoomState: payload });
+
+          persistLiveSnapshot({
+            effectiveMatchId,
+            roomStateRef,
+            publicMatchStateRef,
+            privateMatchStateRef,
+            playerAssignedRef,
+            nextRoomState: payload,
+          });
+
           appendLog('Received room-state.');
         },
         onMatchState: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
+          publicMatchStateRef.current = payload;
           setPublicMatchState(payload);
-          persistLiveSnapshot({ nextPublicMatchState: payload });
+
+          persistLiveSnapshot({
+            effectiveMatchId,
+            roomStateRef,
+            publicMatchStateRef,
+            privateMatchStateRef,
+            playerAssignedRef,
+            nextPublicMatchState: payload,
+          });
+
           appendLog('Received public match-state.');
         },
         onPrivateMatchState: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
+          privateMatchStateRef.current = payload;
           setPrivateMatchState(payload);
-          persistLiveSnapshot({ nextPrivateMatchState: payload });
+
+          persistLiveSnapshot({
+            effectiveMatchId,
+            roomStateRef,
+            publicMatchStateRef,
+            privateMatchStateRef,
+            playerAssignedRef,
+            nextPrivateMatchState: payload,
+          });
+
           appendLog('Received private match-state.');
         },
         onHandStarted: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
-          onHandStarted({
+          onHandStartedRef.current({
             matchId: payload.matchId,
             viraRank: payload.viraRank ?? null,
           });
+
           appendLog(`Received hand-started (${payload.viraRank}).`);
         },
         onCardPlayed: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
           const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
 
           if (!sameMatch) {
             return;
           }
 
-          onCardPlayed({
+          onCardPlayedRef.current({
             matchId: payload.matchId,
             playerId: payload.playerId ?? null,
             card: payload.card ?? null,
           });
+
           appendLog(
             payload.card ? `Received card-played (${payload.card}).` : 'Received card-played.',
           );
@@ -212,10 +397,14 @@ export function useMatchRealtimeSession(
     );
 
     return () => {
+      intentionalDisconnectRef.current = true;
+      connectionKeyRef.current = null;
       client.disconnect();
       clientRef.current = null;
+      assignedSeatRef.current = null;
+      hasAutoReadiedRef.current = false;
     };
-  }, [effectiveMatchId, onCardPlayed, onHandStarted, session?.authToken, session?.backendUrl]);
+  }, [effectiveMatchId, initialSnapshot?.playerAssigned?.seatId, session?.authToken, session?.backendUrl]);
 
   return {
     initialSnapshot,

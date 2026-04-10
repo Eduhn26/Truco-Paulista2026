@@ -1,26 +1,18 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../features/auth/authStore';
 import { useMatchActionBridge } from '../features/match/useMatchActionBridge';
+import type { MatchAction } from '../features/match/matchActionTypes';
 import { MatchPageHeader } from '../features/match/matchPageHeader';
 import { buildMatchContractPresentation } from '../features/match/matchPresentationSelectors';
+import { MatchSecondaryPanelSection } from '../features/match/matchSecondaryPanelSection';
 import { getLastActiveMatchId } from '../features/match/matchSnapshotStorage';
 import { MatchTableShell } from '../features/match/matchTableShell';
 import { useMatchRealtimeSession } from '../features/match/useMatchRealtimeSession';
 import { useMatchTableTransition } from '../features/match/useMatchTableTransition';
+import { useGameSound } from '../hooks/useGameSound';
 import { cardStringToPayload } from '../services/socket/socketTypes';
-import type { CardPayload, MatchStatePayload, Rank, Suit, MatchStateRoundPayload } from '../services/socket/socketTypes';
-
-const MatchLiveStatePanel = lazy(async () =>
-  import('../features/match/matchLiveStatePanel').then((module) => ({
-    default: module.MatchLiveStatePanel,
-  })),
-);
-const MatchRoundsHistoryPanel = lazy(async () =>
-  import('../features/match/matchRoundsHistoryPanel').then((module) => ({
-    default: module.MatchRoundsHistoryPanel,
-  })),
-);
+import type { CardPayload, MatchStatePayload, Rank } from '../services/socket/socketTypes';
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
@@ -33,6 +25,9 @@ type TableSeatView = {
   isCurrentTurn: boolean;
   isMine: boolean;
 };
+
+type MatchStatusTone = 'neutral' | 'success' | 'warning';
+type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 
 type MatchViewModel = {
   resolvedMatchId: string;
@@ -60,43 +55,42 @@ type MatchViewModel = {
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   handFinished: boolean;
   matchFinished: boolean;
-  tablePhase: 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+  tablePhase: TablePhase;
   handStatusLabel: string;
-  handStatusTone: 'neutral' | 'success' | 'warning';
-  latestRound: MatchStateRoundPayload | null;
+  handStatusTone: MatchStatusTone;
+  latestRound: NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
   rounds: NonNullable<MatchStatePayload['currentHand']>['rounds'];
   playedRoundsCount: number;
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
 };
 
-type SuitDisplay = { symbol: string; colorClass: string };
-
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
   const routeMatchId = params.matchId ?? '';
   const effectiveMatchId = routeMatchId || getLastActiveMatchId() || '';
+
   const mySeatRef = useRef<string | null>(null);
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [showSecondary, setShowSecondary] = useState(false);
+  const { play } = useGameSound();
 
-  const tableTransition = useMatchTableTransition({
-    tablePhase: 'missing_context',
-    myPlayedCard: null,
-    opponentPlayedCard: null,
-    playedRoundsCount: 0,
-    latestRoundFinished: false,
-  });
+  const [cachedMyCards, setCachedMyCards] = useState<CardPayload[]>([]);
+
+  const beginHandTransitionRef = useRef<() => void>(() => {});
+  const registerIncomingPlayedCardRef = useRef<
+    (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void
+  >(() => {});
 
   const handleRealtimeHandStarted = useCallback(
     (payload: { matchId?: string; viraRank?: Rank | null }) => {
-      tableTransition.beginHandTransition();
+      beginHandTransitionRef.current();
       if (payload.viraRank) {
         setViraRank(payload.viraRank);
       }
     },
-    [tableTransition],
+    [],
   );
 
   const handleRealtimeCardPlayed = useCallback(
@@ -105,12 +99,12 @@ export function MatchPage() {
         payloadPlayerId: payload.playerId ?? null,
         mySeat: mySeatRef.current,
       });
-      tableTransition.registerIncomingPlayedCard({
+      registerIncomingPlayedCardRef.current({
         owner,
         card: payload.card ?? null,
       });
     },
-    [tableTransition],
+    [],
   );
 
   const {
@@ -155,6 +149,7 @@ export function MatchPage() {
     const currentPrivateHand = privateMatchState?.currentHand ?? null;
     const isOneVsOne = roomState?.mode === '1v1';
     const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
+
     const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
       const player = roomState?.players.find((entry) => entry.seatId === seatId);
       return {
@@ -165,18 +160,20 @@ export function MatchPage() {
         isMine: mySeat === seatId,
       };
     });
+
     const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
     const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
     const myCards = getViewerCards(currentPrivateHand);
     const effectiveHand = currentPrivateHand ?? currentPublicHand;
     const availableActions = effectiveHand?.availableActions ?? emptyAvailableActions();
-    const myIsPlayerOne = mySeat === 'T1A' || mySeat === 'T1B';
     const rounds = currentPublicHand?.rounds ?? [];
     const playedRounds = rounds.filter(
       (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
     );
-    const latestRound: MatchStateRoundPayload | null =
+    const latestRound =
       playedRounds.length > 0 ? (playedRounds[playedRounds.length - 1] ?? null) : null;
+    const myIsPlayerOne = mySeat === 'T1A' || mySeat === 'T1B';
+
     const myPlayedCard = latestRound
       ? myIsPlayerOne
         ? latestRound.playerOneCard
@@ -187,8 +184,16 @@ export function MatchPage() {
         ? latestRound.playerTwoCard
         : latestRound.playerOneCard
       : null;
+
     const handFinished = Boolean(currentPublicHand?.finished);
-    const canStartHand = Boolean(roomState?.canStart && publicMatchState?.state === 'waiting');
+
+    // NOTE: Keep the CTA visible after a hand ends, but only enable the action
+    // when the backend room state has actually released the next hand.
+    // This avoids the previous transport rejection while preventing the button
+    // from disappearing during the hand-finished transition.
+    const canStartHand =
+      Boolean(roomState?.canStart) || (handFinished && publicMatchState?.state !== 'finished');
+
     const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       availableActions.canAttemptPlayCard && mySeat && myCards.length > 0 && !handFinished,
@@ -213,9 +218,7 @@ export function MatchPage() {
       myCards,
       myPlayedCard,
       opponentPlayedCard,
-      scoreLabel: `T1 ${publicMatchState?.score.playerOne ?? 0} × T2 ${
-        publicMatchState?.score.playerTwo ?? 0
-      }`,
+      scoreLabel: `T1 ${publicMatchState?.score.playerOne ?? 0} × T2 ${publicMatchState?.score.playerTwo ?? 0}`,
       currentTurnSeatId: contractPresentation.currentTurnSeatId,
       canStartHand: contractPresentation.canStartHand,
       canPlayCard: contractPresentation.canPlayCard,
@@ -234,13 +237,23 @@ export function MatchPage() {
       tablePhase: contractPresentation.tablePhase,
       handStatusLabel: contractPresentation.handStatusLabel,
       handStatusTone: contractPresentation.handStatusTone,
-      latestRound,
+      latestRound: contractPresentation.latestRound,
       rounds: contractPresentation.rounds,
       playedRoundsCount: contractPresentation.playedRoundsCount,
       currentPublicHand,
       currentPrivateHand,
     };
   }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
+
+  useEffect(() => {
+    mySeatRef.current = viewModel.mySeat;
+  }, [viewModel.mySeat]);
+
+  useEffect(() => {
+    if (viewModel.myCards.length > 0 && !viewModel.handFinished) {
+      setCachedMyCards(viewModel.myCards);
+    }
+  }, [viewModel.myCards, viewModel.handFinished]);
 
   const liveTableTransition = useMatchTableTransition({
     tablePhase: viewModel.tablePhase,
@@ -249,6 +262,20 @@ export function MatchPage() {
     playedRoundsCount: viewModel.playedRoundsCount,
     latestRoundFinished: Boolean(viewModel.latestRound?.finished),
   });
+
+  useEffect(() => {
+    beginHandTransitionRef.current = liveTableTransition.beginHandTransition;
+    registerIncomingPlayedCardRef.current = liveTableTransition.registerIncomingPlayedCard;
+  }, [liveTableTransition.beginHandTransition, liveTableTransition.registerIncomingPlayedCard]);
+
+  const prevLatestRoundFinished = useRef(false);
+  useEffect(() => {
+    const currentFinished = Boolean(viewModel.latestRound?.finished);
+    if (prevLatestRoundFinished.current && !currentFinished) {
+      liveTableTransition.beginHandTransition();
+    }
+    prevLatestRoundFinished.current = currentFinished;
+  }, [viewModel.latestRound?.finished, liveTableTransition.beginHandTransition]);
 
   const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
   const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
@@ -286,6 +313,24 @@ export function MatchPage() {
       beginOwnCardLaunch: liveTableTransition.beginOwnCardLaunch,
     });
 
+  const playCardWithSound = useCallback(
+    (card: CardPayload) => {
+      play('play-card', 0.4);
+      handlePlayCard(card);
+    },
+    [play, handlePlayCard],
+  );
+
+  const handleMatchActionWithSound = useCallback(
+    (action: MatchAction) => {
+      if (action === 'request-truco') {
+        play('truco-call', 0.7);
+      }
+      handleMatchAction(action);
+    },
+    [play, handleMatchAction],
+  );
+
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
   const hasHydratedMatchState = Boolean(
     roomState || publicMatchState || privateMatchState || playerAssigned,
@@ -293,20 +338,30 @@ export function MatchPage() {
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
+  const effectiveMyCards = viewModel.handFinished ? cachedMyCards : viewModel.myCards;
 
   if (!hasMinimumSession) {
     return (
       <section className="mx-auto grid max-w-xl gap-6 pt-20">
-        <div className="rounded-2xl p-8 text-center" style={{ background: 'rgba(15,25,35,0.8)', border: '1px solid rgba(201,168,76,0.2)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-[2px]" style={{ color: '#c9a84c' }}>
+        <div
+          className="rounded-2xl p-8 text-center gold-frame"
+          style={{ background: 'rgba(15,25,35,0.8)' }}
+        >
+          <div className="text-[10px] font-bold uppercase tracking-[2px] text-amber-400">
             Sessão necessária
           </div>
           <h1 className="mt-3 text-2xl font-black text-white">Faça login para acessar a mesa.</h1>
           <div className="mt-6 flex justify-center gap-3">
-            <Link to="/" className="rounded-xl px-5 py-2.5 text-sm font-bold text-slate-900 transition" style={{ background: '#c9a84c' }}>
+            <Link
+              to="/"
+              className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-bold text-slate-900 transition hover:bg-amber-400"
+            >
               Ir para home
             </Link>
-            <Link to="/lobby" className="rounded-xl border px-5 py-2.5 text-sm font-semibold text-white transition" style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)' }}>
+            <Link
+              to="/lobby"
+              className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
               Lobby
             </Link>
           </div>
@@ -315,157 +370,130 @@ export function MatchPage() {
     );
   }
 
-  if (!effectiveMatchId) {
-    return (
-      <section className="mx-auto grid max-w-xl gap-6 pt-20">
-        <div className="rounded-2xl p-8 text-center" style={{ background: 'rgba(15,25,35,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-[2px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            Sem contexto de partida
-          </div>
-          <h1 className="mt-3 text-2xl font-black text-white">Nenhuma partida ativa encontrada.</h1>
-          <div className="mt-6">
-            <Link to="/lobby" className="rounded-xl px-5 py-2.5 text-sm font-bold text-slate-900 transition" style={{ background: '#c9a84c' }}>
-              Voltar para lobby
-            </Link>
+  return (
+    <section className="relative min-h-screen w-full overflow-hidden bg-[#050810]">
+      {/* Background Atmosphere */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(201,168,76,0.08),transparent_50%)] pointer-events-none" />
+
+      {/* Header Navigation */}
+      <div className="relative z-50 flex items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[2px] text-slate-500">
+            Truco Paulista
+          </span>
+        </div>
+        <Link
+          to="/lobby"
+          className="rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[2px] text-slate-400 hover:text-amber-400 transition-colors border border-white/5 hover:border-amber-400/30"
+        >
+          ← Voltar ao lobby
+        </Link>
+      </div>
+
+      {/* Main Game Area */}
+      <main className="relative z-10 flex flex-col items-center justify-center p-4 md:p-6 h-[calc(100vh-100px)]">
+        {/* The Premium Table Container */}
+        <div className="relative w-full max-w-6xl h-full flex flex-col gold-frame bg-[radial-gradient(ellipse_at_center,_#0d1a0f_0%,_#050810_100%)] overflow-hidden">
+          {/* Top Header / HUD */}
+          <MatchPageHeader
+            connectionStatus={connectionStatus}
+            resolvedMatchId={viewModel.resolvedMatchId}
+            mySeat={viewModel.mySeat}
+            viraRank={viraRank}
+            viraRankOptions={VIRA_RANK_OPTIONS}
+            canStartHand={viewModel.canStartHand}
+            onRefreshState={handleRefreshState}
+            onChangeViraRank={setViraRank}
+            onStartHand={handleStartHand}
+          />
+
+          {!hasHydratedMatchState && (
+            <div className="px-4 py-2 text-center text-[10px] text-slate-500">
+              Aguardando estado do servidor…
+            </div>
+          )}
+
+          {/* The Battle Arena */}
+          <div className="flex-1 relative w-full">
+            <MatchTableShell
+              handStatusLabel={viewModel.handStatusLabel}
+              handStatusTone={viewModel.handStatusTone}
+              betState={viewModel.betState}
+              currentValue={viewModel.currentValue}
+              pendingValue={viewModel.pendingValue}
+              requestedBy={viewModel.requestedBy}
+              specialState={viewModel.specialState}
+              specialDecisionPending={viewModel.specialDecisionPending}
+              specialDecisionBy={viewModel.specialDecisionBy}
+              winner={viewModel.winner}
+              awardedPoints={viewModel.awardedPoints}
+              latestRound={viewModel.latestRound}
+              tablePhase={viewModel.tablePhase}
+              canStartHand={viewModel.canStartHand}
+              scoreLabel={viewModel.scoreLabel}
+              opponentSeatView={viewModel.opponentSeatView}
+              mySeatView={viewModel.mySeatView}
+              isOneVsOne={viewModel.isOneVsOne}
+              roomMode={roomState?.mode ?? null}
+              currentTurnSeatId={viewModel.currentTurnSeatId}
+              displayedOpponentPlayedCard={displayedOpponentPlayedCard}
+              displayedMyPlayedCard={displayedMyPlayedCard}
+              opponentRevealKey={liveTableTransition.opponentRevealKey}
+              myRevealKey={
+                liveTableTransition.pendingPlayedCard?.owner === 'mine'
+                  ? liveTableTransition.pendingPlayedCard.id
+                  : 0
+              }
+              myCardLaunching={Boolean(
+                liveTableTransition.pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard,
+              )}
+              roundIntroKey={liveTableTransition.roundIntroKey}
+              roundResolvedKey={liveTableTransition.roundResolvedKey}
+              currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
+              currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
+              viraRank={viraRank}
+              availableActions={viewModel.availableActions}
+              onAction={handleMatchActionWithSound}
+              myCards={effectiveMyCards}
+              canPlayCard={viewModel.canPlayCard}
+              launchingCardKey={liveTableTransition.launchingCardKey}
+              currentPrivateHand={viewModel.currentPrivateHand}
+              currentPublicHand={viewModel.currentPublicHand}
+              onPlayCard={playCardWithSound}
+              playedRoundsCount={viewModel.playedRoundsCount}
+              isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
+            />
           </div>
         </div>
-      </section>
-    );
-  }
+      </main>
 
-  return (
-    <section className="grid gap-4">
-      <div className="overflow-hidden rounded-[20px]" style={{ border: '1px solid rgba(201,168,76,0.12)', background: 'rgba(8,15,10,0.95)', boxShadow: '0 0 0 1px rgba(201,168,76,0.05), 0 32px 80px rgba(0,0,0,0.6)' }}>
-        <MatchPageHeader
+      {/* Secondary Panel (Technical) */}
+      <div className="relative z-10 w-full max-w-6xl mx-auto pb-4 px-4">
+        <MatchSecondaryPanelSection
+          showSecondary={showSecondary}
+          onToggle={() => setShowSecondary((state) => !state)}
+          eventLog={eventLog}
           connectionStatus={connectionStatus}
           resolvedMatchId={viewModel.resolvedMatchId}
+          publicState={publicMatchState?.state || '-'}
+          privateState={privateMatchState?.state || '-'}
           mySeat={viewModel.mySeat}
-          viraRank={viraRank}
-          viraRankOptions={VIRA_RANK_OPTIONS as Rank[]}
-          canStartHand={viewModel.canStartHand}
-          onRefreshState={handleRefreshState}
-          onChangeViraRank={setViraRank}
-          onStartHand={handleStartHand}
-        />
-        {!hasHydratedMatchState && (
-          <div className="px-4 py-2 text-center text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Aguardando estado do servidor…&nbsp;
-            <span style={{ color: connectionStatus === 'online' ? 'rgba(45,106,79,0.7)' : 'rgba(192,57,43,0.5)' }}>
-              {connectionStatus}
-            </span>
-          </div>
-        )}
-        <MatchTableShell
-          handStatusLabel={viewModel.handStatusLabel}
-          handStatusTone={viewModel.handStatusTone}
-          betState={viewModel.betState}
-          currentValue={viewModel.currentValue}
-          pendingValue={viewModel.pendingValue}
-          requestedBy={viewModel.requestedBy}
-          specialState={viewModel.specialState}
-          specialDecisionPending={viewModel.specialDecisionPending}
-          specialDecisionBy={viewModel.specialDecisionBy}
-          winner={viewModel.winner}
-          awardedPoints={viewModel.awardedPoints}
-          latestRound={viewModel.latestRound}
-          tablePhase={viewModel.tablePhase}
-          canStartHand={viewModel.canStartHand}
-          scoreLabel={viewModel.scoreLabel}
-          opponentSeatView={viewModel.opponentSeatView}
-          mySeatView={viewModel.mySeatView}
-          isOneVsOne={viewModel.isOneVsOne}
-          roomMode={roomState?.mode ?? null}
           currentTurnSeatId={viewModel.currentTurnSeatId}
-          displayedOpponentPlayedCard={displayedOpponentPlayedCard}
-          displayedMyPlayedCard={displayedMyPlayedCard}
-          opponentRevealKey={liveTableTransition.opponentRevealKey}
-          myRevealKey={
-            liveTableTransition.pendingPlayedCard?.owner === 'mine'
-              ? liveTableTransition.pendingPlayedCard.id
-              : 0
-          }
-          myCardLaunching={
-            liveTableTransition.pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard
-          }
-          roundIntroKey={liveTableTransition.roundIntroKey}
-          roundResolvedKey={liveTableTransition.roundResolvedKey}
-          currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
-          currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
-          viraRank={viraRank}
-          availableActions={viewModel.availableActions}
-          // ✅ CORREÇÃO: Cast explícito para satisfazer a tipagem do onAction
-          onAction={(action) => handleMatchAction(action as any)}
-          myCards={viewModel.myCards}
+          canStartHand={viewModel.canStartHand}
           canPlayCard={viewModel.canPlayCard}
-          launchingCardKey={liveTableTransition.launchingCardKey}
-          currentPrivateHand={viewModel.currentPrivateHand}
-          currentPublicHand={viewModel.currentPublicHand}
-          onPlayCard={handlePlayCard}
+          betState={viewModel.betState}
+          specialState={viewModel.specialState}
+          availableActions={viewModel.availableActions}
+          canRenderLiveState={canRenderLiveState}
+          rounds={viewModel.rounds}
+          latestRound={viewModel.latestRound}
           playedRoundsCount={viewModel.playedRoundsCount}
         />
       </div>
-      <div>
-        <button
-          type="button"
-          onClick={() => setShowSecondary((s) => !s)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2 text-[10px] font-bold uppercase tracking-[2px] transition"
-          style={{ color: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}
-        >
-          {showSecondary ? '▲' : '▼'} Painel técnico
-        </button>
-        {showSecondary && (
-          <div className="mt-3 grid gap-3 xl:grid-cols-3">
-            <Suspense fallback={<SecondaryFallback title="Rodadas" />}>
-              <MatchRoundsHistoryPanel
-                rounds={viewModel.rounds}
-                latestRound={viewModel.latestRound}
-                playedRoundsCount={viewModel.playedRoundsCount}
-              />
-            </Suspense>
-            <Suspense fallback={<SecondaryFallback title="Estado ao vivo" />}>
-              <MatchLiveStatePanel
-                connectionStatus={connectionStatus}
-                resolvedMatchId={viewModel.resolvedMatchId}
-                publicState={publicMatchState?.state || '-'}
-                privateState={privateMatchState?.state || '-'}
-                mySeat={viewModel.mySeat}
-                currentTurnSeatId={viewModel.currentTurnSeatId}
-                canStartHand={viewModel.canStartHand}
-                canPlayCard={viewModel.canPlayCard}
-                betState={viewModel.betState}
-                specialStateLabel={formatSpecialState(viewModel.specialState)}
-                availableActionsSummary={formatAvailableActionsSummary(viewModel.availableActions)}
-                canRenderLiveState={canRenderLiveState}
-              />
-            </Suspense>
-            <section className="rounded-2xl p-5" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(15,25,35,0.6)' }}>
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-sm font-black text-slate-100">Event log</div>
-                <span className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[1.5px]" style={{ color: 'rgba(255,255,255,0.25)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                  client-side
-                </span>
-              </div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[11px] leading-6" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                {eventLog.length > 0 ? eventLog.join('\n') : 'Sem eventos.'}
-              </pre>
-            </section>
-          </div>
-        )}
-      </div>
     </section>
   );
 }
 
-function SecondaryFallback({ title }: { title: string }) {
-  return (
-    <section className="rounded-2xl p-5" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(15,25,35,0.5)' }}>
-      <div className="text-sm font-black text-slate-100">{title}</div>
-      <div className="mt-3 h-3 w-24 animate-pulse rounded-full bg-white/10" />
-    </section>
-  );
-}
-
-// ── Pure helpers ──────────────────────────────────────────────────────────────
 function getViewerCards(
   currentPrivateHand: MatchStatePayload['currentHand'] | null,
 ): CardPayload[] {
@@ -483,7 +511,9 @@ function getViewerCards(
     .filter((card): card is CardPayload => card !== null);
 }
 
-function emptyAvailableActions(): NonNullable<MatchStatePayload['currentHand']>['availableActions'] {
+function emptyAvailableActions(): NonNullable<
+  MatchStatePayload['currentHand']
+>['availableActions'] {
   return {
     canRequestTruco: false,
     canRaiseToSix: false,
@@ -508,43 +538,4 @@ function resolvePlayedCardOwner({
     return 'opponent';
   }
   return payloadPlayerId === mySeat ? 'mine' : 'opponent';
-}
-
-function formatAvailableActionsSummary(
-  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
-): string {
-  const enabled = [
-    availableActions.canRequestTruco ? 'truco' : null,
-    availableActions.canRaiseToSix ? 'raise6' : null,
-    availableActions.canRaiseToNine ? 'raise9' : null,
-    availableActions.canRaiseToTwelve ? 'raise12' : null,
-    availableActions.canAcceptBet ? 'acceptBet' : null,
-    availableActions.canDeclineBet ? 'declineBet' : null,
-    availableActions.canAcceptMaoDeOnze ? 'accept11' : null,
-    availableActions.canDeclineMaoDeOnze ? 'decline11' : null,
-    availableActions.canAttemptPlayCard ? 'playCard' : null,
-  ].filter((action): action is string => action !== null);
-  return enabled.length > 0 ? enabled.join(', ') : 'none';
-}
-
-function formatSpecialState(value: string): string {
-  if (value === 'mao_de_onze') return 'Mão de 11';
-  if (value === 'mao_de_ferro') return 'Mão de ferro';
-  if (value === 'normal') return 'Normal';
-  return value;
-}
-
-function getSuitDisplay(suit: Suit): SuitDisplay {
-  if (suit === 'O' || suit === 'D') return { symbol: '♦', colorClass: 'text-rose-600' };
-  if (suit === 'P' || suit === 'H') return { symbol: '♥', colorClass: 'text-rose-600' };
-  if (suit === 'E' || suit === 'S') return { symbol: '♠', colorClass: 'text-slate-900' };
-  return { symbol: '♣', colorClass: 'text-slate-900' };
-}
-
-function suitSymbol(suit: Suit): string {
-  return getSuitDisplay(suit).symbol;
-}
-
-function suitColorClass(suit: Suit): string {
-  return getSuitDisplay(suit).colorClass;
 }

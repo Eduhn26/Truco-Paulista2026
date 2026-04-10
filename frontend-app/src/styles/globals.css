@@ -2,47 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
-/* NOTE: Root design token — gold-first palette for premium card game identity. */
+/* ── ROOT DESIGN TOKENS ── */
 :root {
   color-scheme: dark;
-
-  /* Gold system */
-  --gold: #c9a84c;
+  
+  /* Gold System - Premium Casino Identity */
+  --gold-primary: #c9a84c;
   --gold-light: #e8c76a;
-  --gold-dim: #8a6a28;
-  --gold-glow: rgba(201, 168, 76, 0.18);
-
-  /* Felt / table surfaces */
-  --felt: #0a1209;
-  --felt-mid: #0d1a0f;
-
-  /* Background system */
-  --bg-base: #080c10;
-  --bg-surface: #0f1923;
-  --bg-surface2: #141f2a;
-
-  /* Accent */
-  --accent-red: #c0392b;
-  --accent-red-light: #e74c3c;
-  --accent-green: #2d6a4f;
-
+  --gold-dark: #8a6a28;
+  --gold-glow: rgba(201, 168, 76, 0.35);
+  --gold-border: rgba(201, 168, 76, 0.3);
+  
+  /* Backgrounds: Deep Space / Casino Night */
+  --bg-deep: #050810;
+  --bg-card: #0a121a;
+  --bg-felt: #0a1209;
+  --bg-surface: rgba(10, 18, 26, 0.85);
+  
+  /* Accents */
+  --accent-green: #1a4731;
+  --accent-red: #8b1a1a;
+  --accent-amber: #b68a2f;
+  
   /* Text */
-  --text-primary: #f0e6d3;
-  --text-secondary: #a89b8c;
-  --text-muted: #5a6a75;
-
-  /* Borders */
-  --border-gold: rgba(201, 168, 76, 0.2);
-  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text-primary: #f0e6d3; /* Cream */
+  --text-gold: #c9a84c;
+  --text-muted: rgba(255, 255, 255, 0.4);
+  
+  /* Materiality */
+  --border-gold: 1px solid rgba(201, 168, 76, 0.3);
+  --border-gold-glow: 0 0 20px rgba(201, 168, 76, 0.3);
+  --shadow-premium: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 body {
   margin: 0;
-  background-color: var(--bg-base);
+  background-color: var(--bg-deep);
+  /* Cinematic depth gradient */
+  background-image: radial-gradient(circle at 50% 0%, #0f1923 0%, #050810 70%);
   color: var(--text-primary);
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden; /* Prevent ornament overflow */
+}
+
+/* ── ORNAMENTAL UTILITIES ── */
+
+/* Premium Container with Gold Glow Border */
+.gold-frame {
+  border: var(--border-gold);
+  border-radius: 32px;
+  box-shadow: var(--shadow-premium), inset 0 0 20px rgba(201, 168, 76, 0.05);
+  background: var(--bg-surface);
+  backdrop-filter: blur(12px);
+}
+
+.gold-frame:hover {
+  border-color: var(--gold-light);
+  box-shadow: var(--shadow-premium), 0 0 30px rgba(201, 168, 76, 0.15);
+  transition: all 0.3s ease;
+}
+
+/* Text Gradients */
+.text-gradient-gold {
+  background: linear-gradient(135deg, var(--gold-light) 0%, var(--gold-primary) 50%, var(--gold-dark) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* Custom Scrollbar for Premium Feel */
@@ -50,47 +77,14 @@ body {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: var(--bg-surface);
-  border-radius: 4px;
+  background: var(--bg-deep);
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--gold-dim);
+  background: var(--gold-dark);
   border-radius: 4px;
-  border: 2px solid var(--bg-surface);
+  border: 2px solid var(--bg-deep);
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--gold);
-}
-
-/* Utility: Text Gradients */
-.text-gradient-gold {
-  background: linear-gradient(135deg, var(--gold-light), var(--gold), var(--gold-dim));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* Utility: Glow Effects */
-.glow-gold {
-  box-shadow: 0 0 20px var(--gold-glow);
-}
-
-.glow-red {
-  box-shadow: 0 0 20px rgba(192, 57, 43, 0.4);
-}
-
-/* Card Back Pattern (Optional CSS pattern for card backs) */
-.card-back-pattern {
-  background-color: #1e293b;
-  background-image: repeating-linear-gradient(
-    45deg,
-    #1e293b 0,
-    #1e293b 10px,
-    #334155 10px,
-    #334155 20px
-  );
+  background: var(--gold-primary);
 }

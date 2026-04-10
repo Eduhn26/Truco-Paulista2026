@@ -1,17 +1,7 @@
 import { useMemo } from 'react';
 
-import type { Rank } from '../../services/socket/socketTypes';
-import type { CardPayload, MatchStatePayload } from '../../services/socket/socketTypes';
-
-type MatchActionType =
-  | 'request-truco'
-  | 'accept-bet'
-  | 'decline-bet'
-  | 'raise-to-six'
-  | 'raise-to-nine'
-  | 'raise-to-twelve'
-  | 'accept-mao-de-onze'
-  | 'decline-mao-de-onze';
+import type { MatchAction } from './matchActionTypes';
+import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 
 type UseMatchActionBridgeParams = {
   resolvedMatchId: string;
@@ -39,7 +29,7 @@ type UseMatchActionBridgeResult = {
   handleRefreshState: () => void;
   handleStartHand: () => void;
   handlePlayCard: (card: CardPayload) => void;
-  handleMatchAction: (action: MatchActionType) => void;
+  handleMatchAction: (action: MatchAction) => void;
 };
 
 export function useMatchActionBridge(
@@ -108,7 +98,7 @@ export function useMatchActionBridge(
         appendLog(`Emitted play-card (${card.rank}${suitSymbol(card.suit)}).`);
       },
 
-      handleMatchAction(action: MatchActionType): void {
+      handleMatchAction(action: MatchAction): void {
         if (!resolvedMatchId) {
           appendLog(`No matchId available for ${action}.`);
           return;
@@ -157,15 +147,7 @@ export function useMatchActionBridge(
 
 function isActionEnabled(
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'],
-  action:
-    | 'request-truco'
-    | 'accept-bet'
-    | 'decline-bet'
-    | 'raise-to-six'
-    | 'raise-to-nine'
-    | 'raise-to-twelve'
-    | 'accept-mao-de-onze'
-    | 'decline-mao-de-onze',
+  action: MatchAction,
 ): boolean {
   if (action === 'request-truco') return availableActions.canRequestTruco;
   if (action === 'accept-bet') return availableActions.canAcceptBet;
@@ -180,8 +162,8 @@ function isActionEnabled(
 }
 
 function suitSymbol(suit: CardPayload['suit']): string {
-  if (suit === 'H') return '♥';
-  if (suit === 'D') return '♦';
+  if (suit === 'H' || suit === 'P') return '♥';
+  if (suit === 'D' || suit === 'O') return '♦';
   if (suit === 'C') return '♣';
   return '♠';
 }

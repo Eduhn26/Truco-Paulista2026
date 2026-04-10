@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type PlayedCardOwner = 'mine' | 'opponent';
-
 type PendingPlayedCard = {
   owner: PlayedCardOwner;
   card: string;
   id: number;
 };
-
 type ClosingTableCards = {
   mine: string | null;
   opponent: string | null;
@@ -38,19 +36,14 @@ type UseMatchTableTransitionResult = {
   stopRoundResolution: () => void;
 };
 
-// ⚡ AJUSTE: 3500ms para garantir que o overlay de resultado seja lido
-const ROUND_RESOLUTION_DURATION_MS = 3500;
-const CARD_LAUNCH_DURATION_MS = 600;
 const CARD_REVEAL_DELAY_MS = 450;
-// ⚡ AJUSTE: 3200ms antes de limpar a mesa
-const ROUND_CLEAR_DELAY_MS = 3200;
 
 export function useMatchTableTransition(
   params: UseMatchTableTransitionParams,
 ): UseMatchTableTransitionResult {
   const { tablePhase, myPlayedCard, opponentPlayedCard, playedRoundsCount, latestRoundFinished } = params;
+
   const previousOpponentPlayedCardRef = useRef<string | null>(null);
-  const previousPlayedRoundsCountRef = useRef<number>(0);
 
   const [launchingCardKey, setLaunchingCardKey] = useState<string | null>(null);
   const [pendingPlayedCard, setPendingPlayedCard] = useState<PendingPlayedCard | null>(null);
@@ -62,28 +55,29 @@ export function useMatchTableTransition(
   const [isResolvingRound, setIsResolvingRound] = useState(false);
   const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({ mine: null, opponent: null });
 
-  const beginHandTransition = useMemo(() => () => {
-    setRoundIntroKey((k) => k + 1);
+  const beginHandTransition = useCallback(() => {
+    // Limpa tudo para começar uma nova mão/rodada
     setDisplayedMyPlayedCard(null);
     setDisplayedOpponentPlayedCard(null);
     setPendingPlayedCard(null);
     setLaunchingCardKey(null);
     setClosingTableCards({ mine: null, opponent: null });
     setIsResolvingRound(false);
+    setRoundIntroKey((k) => k + 1);
+    previousOpponentPlayedCardRef.current = null;
   }, []);
 
-  const beginOwnCardLaunch = useMemo(() => (params: { cardKey: string; serverCard: string }) => {
-    setLaunchingCardKey(params.cardKey);
+  const beginOwnCardLaunch = useCallback((launchParams: { cardKey: string; serverCard: string }) => {
+    setLaunchingCardKey(launchParams.cardKey);
     setPendingPlayedCard({
       id: Date.now(),
       owner: 'mine',
-      card: params.serverCard,
+      card: launchParams.serverCard,
     });
   }, []);
 
-  const registerIncomingPlayedCard = useMemo(() => ({ owner, card }: { owner: 'mine' | 'opponent' | null; card: string | null }) => {
+  const registerIncomingPlayedCard = useCallback(({ owner, card }: { owner: 'mine' | 'opponent' | null; card: string | null }) => {
     if (owner === 'opponent' && card) {
-      // ⚡ AJUSTE: Delay para simular "pensamento" do bot antes de revelar a carta
       setTimeout(() => {
         setDisplayedOpponentPlayedCard(card);
         setOpponentRevealKey((k) => k + 1);
@@ -97,28 +91,40 @@ export function useMatchTableTransition(
     setLaunchingCardKey(null);
   }, []);
 
-  const stopRoundResolution = useMemo(() => () => {
+  const stopRoundResolution = useCallback(() => {
     setIsResolvingRound(false);
   }, []);
 
-  // ⚡ AJUSTE: Efeito para manter as cartas na mesa por mais tempo após o resultado
+  // Sincroniza cartas exibidas quando as props mudam (back-end)
+  useEffect(() => {
+    if (myPlayedCard && myPlayedCard !== displayedMyPlayedCard && !isResolvingRound) {
+      setDisplayedMyPlayedCard(myPlayedCard);
+    }
+  }, [myPlayedCard, displayedMyPlayedCard, isResolvingRound]);
+
+  useEffect(() => {
+    if (
+      opponentPlayedCard &&
+      opponentPlayedCard !== previousOpponentPlayedCardRef.current &&
+      !isResolvingRound
+    ) {
+      setDisplayedOpponentPlayedCard(opponentPlayedCard);
+      setOpponentRevealKey((k) => k + 1);
+      previousOpponentPlayedCardRef.current = opponentPlayedCard;
+    }
+  }, [opponentPlayedCard, isResolvingRound]);
+
+  // Quando a rodada termina, não limpamos as cartas imediatamente.
+  // Apenas marcamos que está resolvendo e incrementamos o contador de resolução.
   useEffect(() => {
     if (latestRoundFinished) {
       setIsResolvingRound(true);
-      const timeout = setTimeout(() => {
-        if (playedRoundsCount < 3) {
-          setDisplayedMyPlayedCard(null);
-          setDisplayedOpponentPlayedCard(null);
-          setRoundResolvedKey((k) => k + 1);
-          setClosingTableCards({ mine: null, opponent: null });
-        }
-        setIsResolvingRound(false);
-      }, ROUND_CLEAR_DELAY_MS);
-      return () => clearTimeout(timeout);
+      setRoundResolvedKey((k) => k + 1);
+      // Não limpar cartas aqui! A limpeza ocorrerá apenas quando a próxima mão começar (beginHandTransition)
     }
-  }, [latestRoundFinished, playedRoundsCount]);
+  }, [latestRoundFinished]);
 
-  // Reset ao mudar fase
+  // Reseta o estado quando a fase da mesa muda para waiting ou missing_context
   useEffect(() => {
     if (tablePhase === 'waiting' || tablePhase === 'missing_context') {
       setDisplayedMyPlayedCard(null);
@@ -127,27 +133,42 @@ export function useMatchTableTransition(
       setLaunchingCardKey(null);
       setClosingTableCards({ mine: null, opponent: null });
       setIsResolvingRound(false);
+      previousOpponentPlayedCardRef.current = null;
     }
   }, [tablePhase]);
 
-  return useMemo(() => ({
-    launchingCardKey,
-    pendingPlayedCard,
-    closingTableCards,
-    opponentRevealKey,
-    roundIntroKey,
-    roundResolvedKey,
-    isResolvingRound,
-    isLiveTableFrame: tablePhase === 'playing' || tablePhase === 'hand_finished',
-    displayedMyPlayedCard,
-    displayedOpponentPlayedCard,
-    beginHandTransition,
-    beginOwnCardLaunch,
-    registerIncomingPlayedCard,
-    stopRoundResolution,
-  }), [
-    launchingCardKey, pendingPlayedCard, closingTableCards, opponentRevealKey, roundIntroKey, roundResolvedKey,
-    isResolvingRound, tablePhase, displayedMyPlayedCard, displayedOpponentPlayedCard,
-    beginHandTransition, beginOwnCardLaunch, registerIncomingPlayedCard, stopRoundResolution,
-  ]);
+  return useMemo(
+    () => ({
+      launchingCardKey,
+      pendingPlayedCard,
+      closingTableCards,
+      opponentRevealKey,
+      roundIntroKey,
+      roundResolvedKey,
+      isResolvingRound,
+      isLiveTableFrame: tablePhase === 'playing' || tablePhase === 'hand_finished',
+      displayedMyPlayedCard,
+      displayedOpponentPlayedCard,
+      beginHandTransition,
+      beginOwnCardLaunch,
+      registerIncomingPlayedCard,
+      stopRoundResolution,
+    }),
+    [
+      launchingCardKey,
+      pendingPlayedCard,
+      closingTableCards,
+      opponentRevealKey,
+      roundIntroKey,
+      roundResolvedKey,
+      isResolvingRound,
+      tablePhase,
+      displayedMyPlayedCard,
+      displayedOpponentPlayedCard,
+      beginHandTransition,
+      beginOwnCardLaunch,
+      registerIncomingPlayedCard,
+      stopRoundResolution,
+    ],
+  );
 }
