@@ -534,6 +534,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
   }
 
+  private async emitSyncedMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
+    const state = await this.emitPublicMatchState(matchId);
+    await this.emitPrivateMatchState(matchId);
+
+    return state;
+  }
+
+  private async continueAutomaticGameFlow(matchId: string): Promise<ViewMatchStateResponseDto> {
+    let state = await this.emitSyncedMatchState(matchId);
+    await this.finalizeMatchIfFinished(matchId, state);
+
+    if (state.state !== 'in_progress') {
+      return state;
+    }
+
+    await this.processBotTurns(matchId);
+    state = await this.emitSyncedMatchState(matchId);
+    await this.finalizeMatchIfFinished(matchId, state);
+
+    return state;
+  }
+
   private fillBotsAndBroadcast(matchId: string): void {
     this.roomManager.fillMissingSeatsWithBots(matchId);
     this.emitRoomState(matchId);
@@ -984,13 +1006,76 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     matchId: string,
     botTurnContext: BotTurnDecisionContext,
   ): Promise<boolean> {
+    const currentState = await this.getAuthoritativeMatchState(matchId);
+    const currentHand = currentState.currentHand;
+
+    if (!currentHand) {
+      return false;
+    }
+
+    if (
+      currentHand.specialState === 'mao_de_onze' &&
+      currentHand.specialDecisionPending &&
+      currentHand.specialDecisionBy === botTurnContext.playerId
+    ) {
+      const dto: AcceptMaoDeOnzeRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.acceptMaoDeOnzeUseCase.execute(dto);
+
+      const updatedState = await this.emitSyncedMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, updatedState);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'accept_mao_de_onze_succeeded',
+        status: 'succeeded',
+        matchId,
+        seatId: botTurnContext.seatId,
+        teamId: botTurnContext.teamId,
+        playerId: botTurnContext.playerId,
+      });
+
+      return updatedState.state === 'in_progress';
+    }
+
+    if (
+      currentHand.betState === 'awaiting_response' &&
+      currentHand.requestedBy !== null &&
+      currentHand.requestedBy !== botTurnContext.playerId
+    ) {
+      const dto: AcceptBetRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.acceptBetUseCase.execute(dto);
+
+      const updatedState = await this.emitSyncedMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, updatedState);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'accept_bet_succeeded',
+        status: 'succeeded',
+        matchId,
+        seatId: botTurnContext.seatId,
+        teamId: botTurnContext.teamId,
+        playerId: botTurnContext.playerId,
+      });
+
+      return updatedState.state === 'in_progress';
+    }
+
     const decision = this.botDecisionPort.decide(botTurnContext.context);
 
     if (decision.action !== 'play-card') {
       return false;
     }
 
-    const previousState = await this.getAuthoritativeMatchState(matchId);
+    const previousState = currentState;
 
     const dto: PlayCardRequestDto = {
       matchId,
@@ -1783,9 +1868,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.processBotTurns(matchId);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2116,9 +2199,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.requestTrucoUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2190,9 +2271,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.acceptBetUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2264,9 +2343,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.declineBetUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2338,9 +2415,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToSixUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2412,9 +2487,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToNineUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2486,9 +2559,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToTwelveUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2560,9 +2631,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.acceptMaoDeOnzeUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -2634,9 +2703,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.declineMaoDeOnzeUseCase.execute(dto);
 
-      const state = await this.emitPublicMatchState(matchId);
-      await this.emitPrivateMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, state);
+      await this.continueAutomaticGameFlow(matchId);
 
       this.logGateway('log', {
         layer: 'gateway',

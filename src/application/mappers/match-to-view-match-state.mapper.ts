@@ -2,7 +2,11 @@ import type { HandSnapshot, HandValue } from '@game/domain/entities/hand';
 import type { Match } from '@game/domain/entities/match';
 import { Round } from '@game/domain/entities/round';
 import type { PlayerId } from '@game/domain/value-objects/player-id';
-import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
+import type { RoundResult } from '@game/domain/value-objects/round-result';
+import type {
+  NextDecisionType,
+  ViewMatchStateResponseDto,
+} from '@game/application/dtos/responses/view-match-state.response.dto';
 
 function maskHand(cards: string[]): string[] {
   return cards.map(() => 'HIDDEN');
@@ -63,6 +67,82 @@ function buildAvailableActions(
   };
 }
 
+function resolveLastRoundResult(snapshot: HandSnapshot): RoundResult | null {
+  for (let index = snapshot.rounds.length - 1; index >= 0; index -= 1) {
+    const round = snapshot.rounds[index];
+
+    if (!round?.finished) {
+      continue;
+    }
+
+    return Round.fromSnapshot(round).getResult();
+  }
+
+  return null;
+}
+
+function resolveNextDecisionType(
+  matchState: ViewMatchStateResponseDto['state'],
+  snapshot: HandSnapshot,
+): NextDecisionType {
+  if (matchState === 'finished') {
+    return 'match-finished';
+  }
+
+  if (snapshot.finished) {
+    return 'start-next-hand';
+  }
+
+  if (snapshot.specialState === 'mao_de_onze' && snapshot.specialDecisionPending) {
+    return 'resolve-mao-de-onze';
+  }
+
+  if (snapshot.betState === 'awaiting_response') {
+    return 'respond-bet';
+  }
+
+  if (!snapshot.finished) {
+    return 'play-card';
+  }
+
+  return 'idle';
+}
+
+function resolveViewerCanActNow(
+  availableActions: NonNullable<ViewMatchStateResponseDto['currentHand']>['availableActions'],
+): boolean {
+  return Object.values(availableActions).some(Boolean);
+}
+
+function resolvePendingBotAction(
+  snapshot: HandSnapshot,
+  viewerPlayerId: PlayerId | undefined,
+  viewerCanActNow: boolean,
+): boolean {
+  if (!viewerPlayerId || snapshot.finished || viewerCanActNow) {
+    return false;
+  }
+
+  if (
+    snapshot.betState === 'awaiting_response' &&
+    snapshot.requestedBy !== null &&
+    snapshot.requestedBy === viewerPlayerId
+  ) {
+    return true;
+  }
+
+  if (
+    snapshot.specialState === 'mao_de_onze' &&
+    snapshot.specialDecisionPending &&
+    snapshot.specialDecisionBy !== null &&
+    snapshot.specialDecisionBy !== viewerPlayerId
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function mapMatchToViewMatchState(
   matchId: string,
   match: Match,
@@ -102,6 +182,9 @@ export function mapMatchToViewMatchState(
         ? playerTwoHand
         : maskHand(playerTwoHand);
 
+  const availableActions = buildAvailableActions(snapshot, viewerPlayerId);
+  const viewerCanActNow = resolveViewerCanActNow(availableActions);
+
   return {
     matchId,
     state: match.getState(),
@@ -122,7 +205,12 @@ export function mapMatchToViewMatchState(
       specialDecisionBy: snapshot.specialDecisionBy,
       winner: snapshot.winner,
       awardedPoints: snapshot.awardedPoints,
-      availableActions: buildAvailableActions(snapshot, viewerPlayerId),
+      currentRoundIndex: Math.max(snapshot.rounds.length - 1, 0),
+      lastRoundResult: resolveLastRoundResult(snapshot),
+      nextDecisionType: resolveNextDecisionType(match.getState(), snapshot),
+      viewerCanActNow,
+      pendingBotAction: resolvePendingBotAction(snapshot, viewerPlayerId, viewerCanActNow),
+      availableActions,
       playerOneHand: visiblePlayerOneHand,
       playerTwoHand: visiblePlayerTwoHand,
       rounds: snapshot.rounds.map((round) => ({
