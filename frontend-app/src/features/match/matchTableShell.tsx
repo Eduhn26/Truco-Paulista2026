@@ -9,7 +9,6 @@ import { useGameSound } from '../../hooks/useGameSound';
 
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 type HandStatusVariant = 'neutral' | 'success' | 'warning';
-
 type TableSeatView = {
   seatId: string;
   ready: boolean;
@@ -17,7 +16,6 @@ type TableSeatView = {
   isCurrentTurn: boolean;
   isMine: boolean;
 };
-
 type RoundView = NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
 
 type MatchTableShellProps = {
@@ -70,6 +68,10 @@ const SUIT_SYMBOL_MAP: Record<string, string> = {
   E: '♠',
 };
 
+function parseSuitColor(suit: string): boolean {
+  return suit === 'P' || suit === 'O';
+}
+
 function publicMatchStateScoreT1(scoreLabel: string): string {
   const match = scoreLabel.match(/T1\s+(\d+)/);
   return match?.[1] ?? '0';
@@ -80,7 +82,33 @@ function publicMatchStateScoreT2(scoreLabel: string): string {
   return match?.[1] ?? '0';
 }
 
-function PlayerHUD({
+function PokerChip({ filled, small = false }: { filled: boolean; small?: boolean }) {
+  const size = small ? 'h-3.5 w-3.5' : 'h-5 w-5';
+
+  return (
+    <div
+      className={`${size} flex items-center justify-center rounded-full`}
+      style={
+        filled
+          ? {
+              background:
+                'conic-gradient(from 0deg, #c9a84c, #8a6a28, #e8c76a, #8a6a28, #c9a84c)',
+              boxShadow: '0 0 10px rgba(201,168,76,0.45), 0 2px 6px rgba(0,0,0,0.28)',
+              border: '2px solid rgba(255,220,100,0.42)',
+            }
+          : {
+              background:
+                'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015))',
+              border: '2px solid rgba(255,255,255,0.08)',
+            }
+      }
+    >
+      {filled ? <div className="h-1.5 w-1.5 rounded-full bg-amber-200/60" /> : null}
+    </div>
+  );
+}
+
+function TopPlayerPlate({
   seat,
   isOpponent,
 }: {
@@ -91,54 +119,144 @@ function PlayerHUD({
 
   return (
     <motion.div
-      animate={isCurrentTurn ? { scale: [1, 1.03, 1] } : {}}
-      transition={{ duration: 1.5, repeat: isCurrentTurn ? Infinity : 0 }}
-      className="relative flex min-w-[168px] items-center justify-center gap-3 overflow-hidden rounded-[18px] px-4 py-2 backdrop-blur-xl"
+      animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
+      transition={{ duration: 1.8, repeat: isCurrentTurn ? Infinity : 0 }}
+      className="relative flex items-center gap-3 rounded-[20px] px-4 py-2.5 backdrop-blur-xl"
       style={{
-        background: isCurrentTurn
-          ? 'linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06))'
-          : 'linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.04))',
+        background: 'linear-gradient(180deg, rgba(4,10,18,0.66), rgba(5,12,20,0.48))',
         border: isCurrentTurn
-          ? '1px solid rgba(201,168,76,0.42)'
-          : '1px solid rgba(255,255,255,0.12)',
+          ? '1px solid rgba(201,168,76,0.24)'
+          : '1px solid rgba(255,255,255,0.08)',
         boxShadow: isCurrentTurn
-          ? '0 0 22px rgba(201,168,76,0.16)'
-          : '0 10px 20px rgba(0,0,0,0.18)',
+          ? '0 0 22px rgba(201,168,76,0.1), 0 14px 30px rgba(0,0,0,0.24)'
+          : '0 14px 30px rgba(0,0,0,0.2)',
       }}
     >
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-transparent" />
+      {isCurrentTurn ? (
+        <motion.div
+          className="pointer-events-none absolute inset-0 rounded-[20px]"
+          animate={{ opacity: [0.16, 0.28, 0.16] }}
+          transition={{ duration: 1.8, repeat: Infinity }}
+          style={{
+            background:
+              'radial-gradient(circle at 50% 50%, rgba(201,168,76,0.16), transparent 72%)',
+          }}
+        />
+      ) : null}
 
       <div
-        className="relative z-10 flex h-9 w-9 items-center justify-center rounded-full text-[10px] font-black"
+        className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full"
         style={{
           background: seat.isMine
             ? 'linear-gradient(135deg, #7a5b1a, #d2b15c)'
-            : 'linear-gradient(135deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06))',
-          color: seat.isMine ? '#090500' : 'rgba(255,255,255,0.82)',
-          boxShadow: seat.isMine ? '0 0 18px rgba(201,168,76,0.2)' : 'none',
+            : 'linear-gradient(135deg, rgba(47,69,96,0.95), rgba(13,27,42,0.98))',
+          border: '1px solid rgba(201,168,76,0.22)',
+          boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
         }}
       >
-        {seat.seatId}
+        <svg viewBox="0 0 24 24" className="h-5.5 w-5.5" fill="rgba(255,255,255,0.82)">
+          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+        </svg>
       </div>
 
-      <div className="relative z-10 flex flex-col">
+      <div className="relative z-10 flex min-w-0 items-center gap-2">
         <span
-          className="text-[11px] font-black uppercase tracking-[0.14em]"
-          style={{ color: isCurrentTurn ? '#e8c66e' : 'rgba(255,255,255,0.86)' }}
+          className="truncate text-[18px] font-black leading-none md:text-[20px]"
+          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
         >
           {seat.isMine ? 'Você' : isOpponent ? 'Oponente' : seat.seatId}
         </span>
-
-        <span className="text-[10px] font-medium text-slate-400">
-          {isCurrentTurn ? 'Em turno' : seat.ready ? 'Pronto' : 'Aguardando'}
-        </span>
+        {seat.isBot ? (
+          <span
+            className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.58)',
+            }}
+          >
+            Bot
+          </span>
+        ) : null}
       </div>
 
-      {seat.isBot && (
-        <span className="relative z-10 rounded-full border border-white/10 bg-black/30 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.18em] text-slate-300">
-          Bot
-        </span>
-      )}
+      <div
+        className="relative z-10 flex h-6.5 w-6.5 items-center justify-center rounded-full"
+        style={{
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          color: 'rgba(255,255,255,0.38)',
+        }}
+      >
+        <span className="text-[10px]">⚙</span>
+      </div>
+    </motion.div>
+  );
+}
+
+function BottomPlayerAnchor({
+  seat,
+}: {
+  seat: TableSeatView;
+}) {
+  const isCurrentTurn = seat.isCurrentTurn;
+
+  return (
+    <motion.div
+      animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
+      transition={{ duration: 1.8, repeat: isCurrentTurn ? Infinity : 0 }}
+      className="relative flex flex-col items-center gap-0.5"
+    >
+      {isCurrentTurn ? (
+        <motion.div
+          className="absolute -inset-3 rounded-full"
+          animate={{ opacity: [0.24, 0.5, 0.24] }}
+          transition={{ duration: 1.8, repeat: Infinity }}
+          style={{
+            background: 'radial-gradient(circle, rgba(201,168,76,0.2) 0%, transparent 74%)',
+          }}
+        />
+      ) : null}
+
+      <div
+        className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full"
+        style={{
+          background: 'linear-gradient(135deg, #7a5b1a, #d2b15c)',
+          border: '1px solid rgba(201,168,76,0.38)',
+          boxShadow: '0 10px 22px rgba(0,0,0,0.22)',
+        }}
+      >
+        <svg viewBox="0 0 24 24" className="h-5.5 w-5.5" fill="rgba(255,255,255,0.88)">
+          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+        </svg>
+
+        <div
+          className="absolute -bottom-1 -right-1 rounded-full px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-black"
+          style={{ background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }}
+        >
+          Você
+        </div>
+      </div>
+
+      <div
+        className="relative z-10 rounded-full px-2.5 py-1 text-[9px] font-bold"
+        style={{
+          background: 'rgba(0,0,0,0.3)',
+          border: isCurrentTurn
+            ? '1px solid rgba(201,168,76,0.22)'
+            : '1px solid rgba(255,255,255,0.08)',
+          color: isCurrentTurn ? '#e8c76a' : 'rgba(255,255,255,0.82)',
+        }}
+      >
+        Você
+      </div>
+
+      <div
+        className="text-[7px] font-medium tracking-wider"
+        style={{ color: 'rgba(255,255,255,0.4)' }}
+      >
+        {isCurrentTurn ? '— Em turno —' : seat.ready ? 'Pronto' : 'Aguardando'}
+      </div>
     </motion.div>
   );
 }
@@ -150,7 +268,7 @@ const TableCard = ({
   isFlipping,
   isFading,
   revealKey,
-  isHighlight,
+  rotation = 0,
   isLaunching,
 }: {
   rank: string;
@@ -159,111 +277,355 @@ const TableCard = ({
   isFlipping?: boolean;
   isFading?: boolean;
   revealKey?: number;
-  isHighlight?: boolean;
+  rotation?: number;
   isLaunching?: boolean;
 }) => {
-  const isRed = suit === 'P' || suit === 'O';
-  const textColor = isRed ? 'text-red-700' : 'text-slate-900';
+  const isRed = parseSuitColor(suit);
+  const textColor = isRed ? '#c0392b' : '#1a1a2e';
   const symbol = SUIT_SYMBOL_MAP[suit] ?? suit;
 
   return (
     <motion.div
       key={revealKey}
-      initial={isFlipping ? { scale: 0.82, rotateY: 180, opacity: 0 } : { scale: 1, opacity: 1 }}
+      initial={
+        isFlipping ? { scale: 0.86, rotateY: 180, opacity: 0, rotate: rotation } : { scale: 1 }
+      }
       animate={{
-        scale: isFading ? 0.88 : isHighlight ? 1.05 : 1,
+        scale: isFading ? 0.92 : 1,
         rotateY: 0,
-        opacity: isFading ? 0.38 : 1,
-        y: isLaunching ? -44 : 0,
+        opacity: isFading ? 0.34 : 1,
+        y: isLaunching ? -32 : 0,
+        rotate: rotation,
       }}
       transition={{
         type: 'spring',
-        stiffness: 300,
-        damping: 20,
-        duration: isFlipping ? 0.6 : 0.26,
+        stiffness: 280,
+        damping: 22,
+        duration: isFlipping ? 0.55 : 0.24,
       }}
-      className={`
-        relative flex h-[120px] w-[84px] flex-col items-center justify-center rounded-[20px] border bg-[#fdfbf7]
-        ${
-          isWinner
-            ? 'border-yellow-300 shadow-[0_0_30px_rgba(250,204,21,0.52),0_16px_34px_rgba(0,0,0,0.36)] ring-2 ring-yellow-400/45'
-            : isHighlight
-            ? 'border-amber-300/60 shadow-[0_0_22px_rgba(201,168,76,0.24),0_16px_34px_rgba(0,0,0,0.36)]'
-            : 'border-white/18 shadow-[0_16px_34px_rgba(0,0,0,0.4)]'
-        }
-        transition-all duration-500
-      `}
+      className="relative rounded-[16px]"
       style={{
-        transformStyle: 'preserve-3d',
-        backfaceVisibility: 'hidden',
+        width: 92,
+        height: 126,
+        background: 'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 60%, #f2edd8 100%)',
+        boxShadow: isWinner
+          ? '0 0 26px rgba(250,204,21,0.42), 0 12px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.9)'
+          : '0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.9)',
+        border: isWinner
+          ? '2px solid rgba(250,204,21,0.68)'
+          : '1px solid rgba(0,0,0,0.08)',
       }}
     >
       <div
-        className="pointer-events-none absolute inset-0 rounded-[20px]"
+        className="pointer-events-none absolute inset-0 rounded-[16px]"
         style={{
           background:
-            'linear-gradient(150deg, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.2) 16%, rgba(255,255,255,0) 32%)',
+            'linear-gradient(150deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.15) 18%, transparent 35%)',
         }}
       />
 
-      <span className={`text-[44px] ${textColor}`}>{symbol}</span>
-      <span className={`absolute bottom-3 left-3 text-[14px] font-black ${textColor}`}>{rank}</span>
-      <span className={`absolute right-3 top-3 rotate-180 text-[14px] font-black ${textColor}`}>
-        {rank}
-      </span>
+      <div className="absolute left-2 top-2 flex flex-col items-center leading-none">
+        <span className="text-[16px] font-black" style={{ color: textColor }}>
+          {rank}
+        </span>
+        <span className="text-[12px]" style={{ color: textColor }}>
+          {symbol}
+        </span>
+      </div>
 
-      {isWinner && (
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[48px] leading-none" style={{ color: textColor }}>
+          {symbol}
+        </span>
+      </div>
+
+      <div className="absolute bottom-2 right-2 flex rotate-180 flex-col items-center leading-none">
+        <span className="text-[16px] font-black" style={{ color: textColor }}>
+          {rank}
+        </span>
+        <span className="text-[12px]" style={{ color: textColor }}>
+          {symbol}
+        </span>
+      </div>
+
+      {isWinner ? (
         <motion.div
           initial={{ scale: 0, rotate: -180 }}
           animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 15, delay: 0.2 }}
-          className="absolute -right-3 -top-3 z-10 rounded-full bg-gradient-to-br from-yellow-300 to-amber-600 px-2.5 py-1 text-[10px] font-black text-black shadow-lg"
+          transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.2 }}
+          className="absolute -right-3 -top-3 z-20 rounded-full px-2 py-1 text-[10px] font-black text-black shadow-lg"
+          style={{ background: 'linear-gradient(135deg, #fde047, #f59e0b)' }}
         >
           🏆
         </motion.div>
-      )}
+      ) : null}
     </motion.div>
   );
 };
 
-function OpponentCardBack({ offset }: { offset: number }) {
+function OpponentBackCards() {
   return (
-    <motion.div
-      style={{
-        x: offset,
-        rotate: offset * 0.16,
-        zIndex: 20 + offset,
-      }}
-      className="absolute h-[82px] w-[58px] rounded-[14px] border border-slate-600/70 bg-[radial-gradient(circle_at_50%_35%,rgba(38,58,92,0.82),rgba(10,16,28,0.98))] shadow-[0_14px_24px_rgba(0,0,0,0.34)]"
-    >
-      <div className="absolute inset-[5px] rounded-[10px] border border-white/8" />
-      <div className="absolute inset-[11px] rounded-[8px] border border-white/6" />
-      <div className="absolute inset-0 flex items-center justify-center text-[20px] text-slate-500/70">
-        TP
-      </div>
-    </motion.div>
+    <div className="flex items-center justify-center gap-1.5">
+      {[0, 1, 2].map((index) => (
+        <motion.div
+          key={index}
+          initial={{ rotate: 0 }}
+          animate={{ rotate: index === 0 ? -7 : index === 1 ? 0 : 7 }}
+          transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+          style={{
+            width: 56,
+            height: 80,
+            borderRadius: 12,
+            background: 'linear-gradient(145deg, #1a1f29 0%, #171d27 50%, #232934 100%)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 7px 16px rgba(0,0,0,0.34)',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 8,
+              borderRadius: 9,
+              border: '1px solid rgba(230,195,100,0.12)',
+              backgroundImage:
+                'repeating-linear-gradient(45deg, rgba(230,195,100,0.14) 0, rgba(230,195,100,0.14) 1px, transparent 1px, transparent 5px)',
+            }}
+          />
+        </motion.div>
+      ))}
+    </div>
   );
 }
 
-function SideInfoCard({
-  title,
-  children,
-  align = 'left',
+function ViraCard({ rank, suit }: { rank: string; suit?: string }) {
+  const displaySuit = suit ?? 'C';
+  const isRed = parseSuitColor(displaySuit);
+  const textColor = isRed ? '#c0392b' : '#1a1a2e';
+  const symbol = SUIT_SYMBOL_MAP[displaySuit] ?? '♣';
+
+  return (
+    <div className="relative flex flex-col items-center gap-1.5 opacity-90">
+      <div
+        className="text-[8px] font-black uppercase tracking-[0.2em]"
+        style={{ color: 'rgba(230,195,100,0.76)' }}
+      >
+        Vira
+      </div>
+
+      <motion.div
+        initial={{ rotateY: 180, scale: 0.92 }}
+        animate={{ rotateY: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 20 }}
+        className="relative rounded-[16px]"
+        style={{
+          width: 84,
+          height: 114,
+          background: 'linear-gradient(145deg, #fefdf8, #f5f0e4)',
+          border: '1px solid rgba(201,168,76,0.26)',
+          boxShadow:
+            '0 0 12px rgba(201,168,76,0.12), 0 7px 16px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.92)',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(150deg, rgba(255,255,255,0.84) 0%, transparent 30%)',
+            borderRadius: 'inherit',
+          }}
+        />
+
+        <div className="absolute left-2 top-2 flex flex-col items-center leading-none">
+          <span className="text-[15px] font-black" style={{ color: textColor }}>
+            {rank}
+          </span>
+          <span className="text-[10px]" style={{ color: textColor }}>
+            {symbol}
+          </span>
+        </div>
+
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-[40px]" style={{ color: textColor }}>
+            {symbol}
+          </span>
+        </div>
+
+        <div className="absolute bottom-2 right-2 flex rotate-180 flex-col items-center leading-none">
+          <span className="text-[15px] font-black" style={{ color: textColor }}>
+            {rank}
+          </span>
+          <span className="text-[10px]" style={{ color: textColor }}>
+            {symbol}
+          </span>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ScoreBoard({
+  scoreT1,
+  scoreT2,
+  playedRoundsCount,
 }: {
-  title: string;
-  children: ReactNode;
-  align?: 'left' | 'right';
+  scoreT1: string;
+  scoreT2: string;
+  playedRoundsCount: number;
 }) {
   return (
-    <div className="w-full max-w-[190px] rounded-[20px] border border-white/10 bg-black/22 px-4 py-4 shadow-[0_10px_24px_rgba(0,0,0,0.22)] backdrop-blur-md">
-      <div
-        className={`text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 ${
-          align === 'right' ? 'text-right' : 'text-left'
-        }`}
-      >
-        {title}
+    <div
+      className="min-w-[170px] rounded-[20px] px-5 py-5 backdrop-blur-xl"
+      style={{
+        background: 'linear-gradient(180deg, rgba(4,10,18,0.62), rgba(3,8,14,0.46))',
+        border: '1px solid rgba(230,195,100,0.12)',
+        boxShadow: '0 14px 28px rgba(0,0,0,0.2)',
+      }}
+    >
+      <div className="flex items-center justify-center gap-2.5">
+        <span
+          className="text-[40px] font-black leading-none"
+          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
+        >
+          {scoreT1}
+        </span>
+        <span
+          className="text-[17px] font-light leading-none"
+          style={{ color: 'rgba(255,255,255,0.24)' }}
+        >
+          ×
+        </span>
+        <span
+          className="text-[40px] font-black leading-none"
+          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
+        >
+          {scoreT2}
+        </span>
       </div>
-      <div className={`mt-3 ${align === 'right' ? 'text-right' : 'text-left'}`}>{children}</div>
+
+      <div className="mt-4 flex items-center justify-center gap-2.5">
+        {[0, 1, 2].map((index) => (
+          <PokerChip key={index} filled={index < playedRoundsCount} />
+        ))}
+      </div>
+
+      <div
+        className="mt-3 text-center text-[8px] font-black uppercase tracking-[0.2em]"
+        style={{ color: 'rgba(255,255,255,0.24)' }}
+      >
+        {playedRoundsCount} / 3 Rodadas
+      </div>
+    </div>
+  );
+}
+
+function SideInfoBlock({
+  title,
+  value,
+  status,
+}: {
+  title: string;
+  value: string | number;
+  status: string;
+}) {
+  return (
+    <div className="flex max-w-[116px] flex-col gap-3 text-left">
+      <div
+        className="space-y-1 pb-3"
+        style={{ borderBottom: '1px solid rgba(230,195,100,0.14)' }}
+      >
+        <div
+          className="text-[8px] font-black uppercase tracking-[0.2em]"
+          style={{ color: 'rgba(255,255,255,0.38)' }}
+        >
+          {title}
+        </div>
+        <div
+          className="text-[40px] font-black leading-none"
+          style={{ color: '#f0e6d3', fontFamily: 'Georgia, serif' }}
+        >
+          {value}
+        </div>
+      </div>
+
+      <div>
+        <div
+          className="text-[8px] font-black uppercase tracking-[0.2em]"
+          style={{ color: 'rgba(255,255,255,0.3)' }}
+        >
+          Estado
+        </div>
+        <div className="mt-1 text-[12px] font-bold leading-snug text-white/90">{status}</div>
+      </div>
+    </div>
+  );
+}
+
+function PlayedSlot({
+  label,
+  card,
+  revealKey,
+  isWinner,
+  isFading,
+  rotation,
+  isLaunching = false,
+}: {
+  label: string;
+  card: { rank: string; suit: string } | null;
+  revealKey: number;
+  isWinner: boolean;
+  isFading: boolean;
+  rotation: number;
+  isLaunching?: boolean;
+}) {
+  return (
+    <div className="flex min-h-[140px] min-w-[100px] flex-col items-center gap-1.5">
+      <div
+        className="text-[8px] font-black uppercase tracking-[0.18em]"
+        style={{ color: 'rgba(255,255,255,0.3)' }}
+      >
+        {label}
+      </div>
+
+      <AnimatePresence mode="wait">
+        {card ? (
+          <motion.div
+            key={`${label}-${revealKey}`}
+            initial={{ opacity: 0, y: label === 'Oponente' ? -20 : 20, rotate: rotation }}
+            animate={{ opacity: 1, y: 0, rotate: rotation }}
+            exit={{ opacity: 0 }}
+          >
+            <TableCard
+              rank={card.rank}
+              suit={card.suit}
+              isWinner={isWinner}
+              isFlipping
+              isFading={isFading}
+              revealKey={revealKey}
+              rotation={rotation}
+              isLaunching={isLaunching}
+            />
+          </motion.div>
+        ) : (
+          <div
+            className="flex items-center justify-center rounded-[16px]"
+            style={{
+              width: 92,
+              height: 126,
+              border: '2px dashed rgba(255,255,255,0.1)',
+              background: 'rgba(0,0,0,0.08)',
+            }}
+          >
+            <span
+              className="text-[9px] font-bold uppercase tracking-[0.18em]"
+              style={{ color: 'rgba(255,255,255,0.18)' }}
+            >
+              {label === 'Oponente' ? 'Aguarde' : 'Sua jogada'}
+            </span>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -271,10 +633,8 @@ function SideInfoCard({
 export function MatchTableShell(props: MatchTableShellProps) {
   const {
     handStatusLabel,
-    handStatusTone,
     betState,
     currentValue,
-    pendingValue,
     specialState,
     latestRound,
     tablePhase,
@@ -282,7 +642,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     scoreLabel,
     opponentSeatView,
     mySeatView,
-    currentTurnSeatId,
     displayedOpponentPlayedCard,
     displayedMyPlayedCard,
     opponentRevealKey,
@@ -300,24 +659,38 @@ export function MatchTableShell(props: MatchTableShellProps) {
     currentPrivateHand,
     currentPublicHand,
     onPlayCard,
+    playedRoundsCount,
     isMyTurn = false,
   } = props;
 
   const { play } = useGameSound();
   const { fire } = useConfetti();
+
   const effectiveViraRank = currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
   const isAwaitingBet = betState === 'awaiting_response';
   const isMaoDeOnze = specialState === 'mao_de_onze';
   const isMatchFinished = tablePhase === 'match_finished';
   const isHandFinished = tablePhase === 'hand_finished';
-
   const scoreT1 = publicMatchStateScoreT1(scoreLabel);
   const scoreT2 = publicMatchStateScoreT2(scoreLabel);
-
   const shouldFadeMyCard = Boolean(latestRound?.finished && displayedMyPlayedCard);
   const shouldFadeOpponentCard = Boolean(latestRound?.finished && displayedOpponentPlayedCard);
   const myCardWon = Boolean(latestRound?.finished && latestRound.result === 'P1');
   const opponentCardWon = Boolean(latestRound?.finished && latestRound.result === 'P2');
+
+  const parseCard = (cardStr: string | null) => {
+    if (!cardStr || cardStr.length < 2) {
+      return null;
+    }
+
+    return {
+      rank: cardStr.slice(0, -1),
+      suit: cardStr.slice(-1),
+    };
+  };
+
+  const myCard = parseCard(displayedMyPlayedCard);
+  const opponentCard = parseCard(displayedOpponentPlayedCard);
 
   useEffect(() => {
     if (latestRound?.finished && latestRound.result === 'P1') {
@@ -331,327 +704,246 @@ export function MatchTableShell(props: MatchTableShellProps) {
   }, [latestRound?.finished, latestRound?.result, isMatchFinished, play, fire]);
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden rounded-[34px] border border-amber-400/22 bg-[#07111a] px-4 py-4 shadow-[0_30px_90px_rgba(0,0,0,0.48)] md:px-5 md:py-5">
-      {/* NOTE: This shell is compacted vertically so the full arena, action rail,
-          and hand dock remain visible at 100% browser zoom on common notebook
-          viewports. */}
-      <div className="pointer-events-none absolute inset-[1px] rounded-[33px] border border-white/5" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_12%,rgba(255,255,255,0.04),transparent_30%),radial-gradient(circle_at_50%_58%,rgba(201,168,76,0.1),transparent_52%),linear-gradient(180deg,#07131f_0%,#07111a_26%,#09131d_54%,#08111a_100%)]" />
-      <div className="pointer-events-none absolute inset-[22px] rounded-[30px] border border-white/6 opacity-70" />
-      <div className="pointer-events-none absolute left-[7%] right-[7%] top-[9%] bottom-[12%] rounded-[110px] border border-white/10 opacity-65" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(201,168,76,0.13),rgba(201,168,76,0)_48%)] blur-[6px]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_88%,rgba(201,168,76,0.1),rgba(201,168,76,0)_34%)]" />
-
+    <div
+      className="felt-table relative flex h-full min-h-0 w-full flex-col overflow-hidden"
+      style={{
+        borderRadius: 34,
+        border: '1px solid rgba(230,195,100,0.16)',
+        background:
+          'radial-gradient(circle at 50% 48%, rgba(32,64,98,0.42) 0%, rgba(15,31,47,0.7) 42%, rgba(7,14,24,0.96) 100%)',
+        boxShadow: '0 0 0 6px rgba(0,0,0,0.22), 0 34px 84px rgba(0,0,0,0.5)',
+      }}
+    >
       <div
-        className="pointer-events-none absolute inset-0 transition-all duration-1000"
-        style={{
-          background:
-            currentTurnSeatId === mySeatView?.seatId
-              ? 'radial-gradient(circle at 50% 84%, rgba(201,168,76,0.12), transparent 44%)'
-              : 'radial-gradient(circle at 50% 12%, rgba(201,168,76,0.09), transparent 38%)',
-        }}
+        className="pointer-events-none absolute inset-[1px]"
+        style={{ borderRadius: 32, border: '1px solid rgba(255,255,255,0.03)' }}
+      />
+      <div
+        className="pointer-events-none absolute inset-[12px]"
+        style={{ borderRadius: 30, border: '1px solid rgba(230,195,100,0.08)' }}
+      />
+      <div
+        className="pointer-events-none absolute bottom-[17%] left-[5.5%] right-[5.5%] top-[10%]"
+        style={{ borderRadius: 9999, border: '1px solid rgba(230,195,100,0.1)' }}
+      />
+      <div
+        className="pointer-events-none absolute bottom-[24%] left-[10.5%] right-[10.5%] top-[18%]"
+        style={{ borderRadius: 9999, border: '1px solid rgba(255,255,255,0.03)' }}
       />
 
-      <div className="relative z-20 flex w-full items-start justify-between gap-3">
-        <div className="rounded-[18px] border border-white/10 bg-black/34 px-4 py-2.5 backdrop-blur-xl">
-          <div className="flex items-center gap-4">
-            <div className="text-center">
-              <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500">
-                Você
-              </div>
-              <motion.div
-                key={scoreT1}
-                animate={{ scale: [1, 1.08, 1] }}
-                className="text-[28px] font-black text-white"
-              >
-                {scoreT1}
-              </motion.div>
-            </div>
-
-            <div className="h-8 w-px bg-white/10" />
-
-            <div className="text-center">
-              <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500">
-                Opo
-              </div>
-              <motion.div
-                key={scoreT2}
-                animate={{ scale: [1, 1.08, 1] }}
-                className="text-[28px] font-black text-amber-400"
-              >
-                {scoreT2}
-              </motion.div>
-            </div>
-          </div>
-        </div>
-
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={handStatusLabel}
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-[0.14em] backdrop-blur-md"
+      <div className="relative flex min-h-0 flex-1 flex-col px-6 pb-2 pt-5">
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            className="absolute inset-x-[24%] top-[14%] h-[190px] rounded-full"
             style={{
               background:
-                handStatusTone === 'success'
-                  ? 'rgba(45,106,79,0.2)'
-                  : handStatusTone === 'warning'
-                  ? 'rgba(201,168,76,0.18)'
-                  : 'rgba(255,255,255,0.05)',
-              borderColor:
-                handStatusTone === 'success'
-                  ? 'rgba(45,106,79,0.36)'
-                  : handStatusTone === 'warning'
-                  ? 'rgba(201,168,76,0.34)'
-                  : 'rgba(255,255,255,0.1)',
-              color:
-                handStatusTone === 'success'
-                  ? '#4ade80'
-                  : handStatusTone === 'warning'
-                  ? '#f2c86f'
-                  : 'rgba(255,255,255,0.56)',
+                'radial-gradient(circle, rgba(255,255,255,0.035) 0%, rgba(230,195,100,0.03) 28%, transparent 74%)',
+              filter: 'blur(18px)',
             }}
-          >
-            {handStatusLabel}
-          </motion.div>
-        </AnimatePresence>
-
-        <div className="rounded-[18px] border border-amber-400/24 bg-black/28 px-4 py-2.5 text-right backdrop-blur-xl">
-          <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500">
-            Valor atual
-          </div>
-          <motion.div
-            key={`value-${currentValue}-${betState}`}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="mt-1 text-[26px] font-black text-amber-300"
-          >
-            {isAwaitingBet ? pendingValue : currentValue}
-          </motion.div>
-        </div>
-      </div>
-
-      <div className="relative z-10 mt-3 flex flex-1 min-h-0 flex-col items-center justify-start">
-        {opponentSeatView && (
-          <div className="flex flex-col items-center gap-2">
-            <PlayerHUD seat={opponentSeatView} isOpponent={true} />
-
-            <div className="relative h-[82px] w-[190px]">
-              <OpponentCardBack offset={-28} />
-              <OpponentCardBack offset={0} />
-              <OpponentCardBack offset={28} />
-            </div>
-          </div>
-        )}
-
-        <div className="mt-2 grid w-full max-w-[980px] grid-cols-[190px_minmax(240px,1fr)_190px] items-center gap-4">
-          <div className="flex justify-start">
-            <SideInfoCard title="Estado">
-              <div>
-                <div className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-600">
-                  Valor
-                </div>
-                <div className="mt-1 text-[24px] font-black text-amber-300">{currentValue}</div>
-              </div>
-
-              <div className="mt-3">
-                <div className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-600">
-                  Fase
-                </div>
-                <div className="mt-1 text-[13px] font-bold text-white/90">{handStatusLabel}</div>
-              </div>
-            </SideInfoCard>
-          </div>
-
-          <div className="flex justify-center">
-            <div className="flex items-center justify-center gap-4 md:gap-5">
-              <div className="relative flex h-[120px] w-[84px] items-center justify-center">
-                {!displayedOpponentPlayedCard && !isMatchFinished && !isHandFinished && (
-                  <motion.div
-                    key="waiting-opponent"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="absolute text-[10px] font-black uppercase tracking-[0.16em] text-amber-400/45"
-                  >
-                    Aguardando
-                  </motion.div>
-                )}
-
-                {displayedOpponentPlayedCard && (
-                  <TableCard
-                    rank={displayedOpponentPlayedCard.slice(0, -1)}
-                    suit={displayedOpponentPlayedCard.slice(-1)}
-                    revealKey={opponentRevealKey}
-                    isWinner={opponentCardWon}
-                    isFlipping
-                    isFading={shouldFadeOpponentCard}
-                    isHighlight={Boolean(opponentSeatView?.isCurrentTurn)}
-                  />
-                )}
-              </div>
-
-              <motion.div
-                key={`vira-${effectiveViraRank}`}
-                animate={{ rotate: [0, 3, -3, 0] }}
-                transition={{ repeat: Infinity, duration: 4.5, ease: 'easeInOut' }}
-                className="relative z-20"
-              >
-                <div className="absolute -inset-5 rounded-full bg-amber-400/24 blur-3xl" />
-                <div className="absolute -inset-2 rounded-[24px] border border-amber-300/16" />
-
-                <div className="relative flex h-[148px] w-[100px] flex-col items-center justify-center rounded-[24px] border-2 border-amber-300 bg-gradient-to-br from-[#fffdf6] via-[#f6edd8] to-[#ead8af] shadow-[0_0_34px_rgba(251,191,36,0.32),0_20px_40px_rgba(0,0,0,0.26)]">
-                  <div className="absolute inset-0 rounded-[24px] bg-gradient-to-br from-white/45 via-transparent to-transparent" />
-                  <span className="text-[42px] font-black text-slate-800">{effectiveViraRank}</span>
-                  <span className="mt-1 text-[28px] text-amber-500">★</span>
-                </div>
-
-                <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 rounded-full border border-amber-300/24 bg-black/28 px-3 py-1 text-[8px] font-black uppercase tracking-[0.18em] text-amber-300 backdrop-blur-md">
-                  Vira
-                </div>
-              </motion.div>
-
-              <div className="relative flex h-[120px] w-[84px] items-center justify-center">
-                {displayedMyPlayedCard ? (
-                  <TableCard
-                    rank={displayedMyPlayedCard.slice(0, -1)}
-                    suit={displayedMyPlayedCard.slice(-1)}
-                    revealKey={myRevealKey}
-                    isWinner={myCardWon}
-                    isFlipping
-                    isFading={shouldFadeMyCard}
-                    isHighlight={Boolean(mySeatView?.isCurrentTurn)}
-                    isLaunching={myCardLaunching}
-                  />
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <SideInfoCard title="Placar" align="right">
-              <div className="text-[36px] font-black tracking-tight text-amber-200">
-                {scoreT1}
-                <span className="px-2 text-white/45">×</span>
-                {scoreT2}
-              </div>
-
-              <div className="mt-2 flex justify-end gap-2">
-                <div className="h-3.5 w-3.5 rounded-full border border-amber-300/30 bg-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.42)]" />
-                <div className="h-3.5 w-3.5 rounded-full border border-white/25 bg-white/10" />
-                <div className="h-3.5 w-3.5 rounded-full border border-white/25 bg-white/10" />
-              </div>
-            </SideInfoCard>
-          </div>
-        </div>
-
-        {mySeatView && (
-          <div className="mt-3">
-            <PlayerHUD seat={mySeatView} isOpponent={false} />
-          </div>
-        )}
-
-        <div className="mt-3 w-full max-w-[700px]">
-          <MatchActionSurface availableActions={availableActions} onAction={onAction} />
-        </div>
-
-        <div className="mt-2 w-full">
-          <MatchPlayerHandDock
-            myCards={myCards}
-            canPlayCard={canPlayCard}
-            tablePhase={tablePhase}
-            launchingCardKey={launchingCardKey}
-            currentPrivateHand={currentPrivateHand}
-            currentPublicHand={currentPublicHand}
-            onPlayCard={onPlayCard}
-            isMyTurn={isMyTurn}
-            viraRank={effectiveViraRank}
+          />
+          <div
+            className="absolute inset-x-[22%] bottom-[11%] h-[95px] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, rgba(230,195,100,0.05) 0%, transparent 76%)',
+              filter: 'blur(18px)',
+            }}
           />
         </div>
 
-        <AnimatePresence>
-          {latestRound?.finished && (
-            <motion.div
-              key={`result-${roundResolvedKey}`}
-              initial={{ scale: 0.5, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="pointer-events-none absolute left-1/2 top-[42%] z-50 -translate-x-1/2 -translate-y-1/2"
-            >
-              <motion.div
-                initial={{ boxShadow: '0 0 0px rgba(0,0,0,0)' }}
-                animate={{
-                  boxShadow:
-                    latestRound.result === 'TIE'
-                      ? '0 0 40px rgba(148,163,184,0.45)'
-                      : latestRound.result === 'P1'
-                      ? '0 0 54px rgba(251,191,36,0.56)'
-                      : '0 0 54px rgba(220,38,38,0.56)',
-                }}
-                className={`
-                  rounded-[22px] border-2 px-8 py-4 text-2xl font-black uppercase tracking-[0.16em] shadow-2xl backdrop-blur-md
-                  ${
-                    latestRound.result === 'TIE'
-                      ? 'border-slate-500 bg-slate-800/92 text-white'
-                      : latestRound.result === 'P1'
-                      ? 'border-amber-300 bg-gradient-to-br from-amber-300 to-amber-600 text-black'
-                      : 'border-red-500 bg-gradient-to-br from-red-600 to-red-900 text-white'
-                  }
-                `}
-              >
-                {latestRound.result === 'TIE'
-                  ? 'Empate'
-                  : latestRound.result === 'P1'
-                  ? 'Você venceu'
-                  : 'Derrota'}
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 self-center">
+            {opponentSeatView ? <TopPlayerPlate seat={opponentSeatView} isOpponent /> : null}
+          </div>
+
+          <div className="mt-4 shrink-0 self-center">
+            <OpponentBackCards />
+          </div>
+
+          {/* NOTE: Center stage now privileges the duel. Vira becomes support, not lead actor. */}
+          <div className="relative mt-2 flex min-h-0 flex-1 items-center justify-center">
+            <div className="absolute left-[4%] top-[42%] hidden -translate-y-1/2 xl:block">
+              <SideInfoBlock
+                title="Valor Atual"
+                value={currentValue}
+                status={isAwaitingBet ? 'Aguardando Truco' : handStatusLabel}
+              />
+            </div>
+
+            <div className="absolute right-[5%] top-[42%] hidden -translate-y-1/2 xl:block">
+              <ScoreBoard
+                scoreT1={scoreT1}
+                scoreT2={scoreT2}
+                playedRoundsCount={playedRoundsCount}
+              />
+            </div>
+
+            <div className="flex w-full max-w-[700px] items-center justify-center gap-5">
+              <div className="shrink-0">
+                <ViraCard rank={effectiveViraRank} suit="C" />
+              </div>
+
+              <div className="relative flex min-w-[250px] flex-col items-center gap-2">
+                <div
+                  className="pointer-events-none absolute left-1/2 top-1/2 h-[138px] w-[226px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                  style={{
+                    background:
+                      'radial-gradient(circle, rgba(255,255,255,0.035), rgba(230,195,100,0.02) 38%, transparent 74%)',
+                    filter: 'blur(14px)',
+                  }}
+                />
+
+                <div className="relative z-10 flex items-start justify-center gap-2">
+                  <PlayedSlot
+                    label="Oponente"
+                    card={opponentCard}
+                    revealKey={opponentRevealKey}
+                    isWinner={opponentCardWon}
+                    isFading={shouldFadeOpponentCard}
+                    rotation={-5}
+                  />
+
+                  <PlayedSlot
+                    label="Você"
+                    card={myCard}
+                    revealKey={myRevealKey}
+                    isWinner={myCardWon}
+                    isFading={shouldFadeMyCard}
+                    rotation={6}
+                    isLaunching={myCardLaunching}
+                  />
+                </div>
+
+                <div className="relative z-10 flex w-full max-w-[206px] items-center gap-3">
+                  <div className="h-px flex-1 bg-white/10" />
+                  <span
+                    className="text-[8px] font-black uppercase tracking-[0.18em]"
+                    style={{ color: 'rgba(255,255,255,0.24)' }}
+                  >
+                    duelo
+                  </span>
+                  <div className="h-px flex-1 bg-white/10" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* NOTE: Player anchor sits at the start of the lower stage, not inside the duel area. */}
+          <div className="relative z-10 -mt-2 shrink-0 self-center">
+            {mySeatView ? <BottomPlayerAnchor seat={mySeatView} /> : null}
+          </div>
+
+          {/* NOTE: Rail and hand are intentionally merged by spacing and width, reducing the “two separate modules” feeling. */}
+          <div className="mt-1 flex shrink-0 flex-col items-center gap-0.5">
+            <div className="w-full max-w-[560px]">
+              <MatchActionSurface availableActions={availableActions} onAction={onAction} />
+            </div>
+
+            <div className="w-full max-w-[610px]">
+              <MatchPlayerHandDock
+                myCards={myCards}
+                canPlayCard={canPlayCard}
+                tablePhase={tablePhase}
+                launchingCardKey={launchingCardKey}
+                currentPrivateHand={currentPrivateHand}
+                currentPublicHand={currentPublicHand}
+                onPlayCard={onPlayCard}
+                isMyTurn={isMyTurn}
+                viraRank={effectiveViraRank}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       <AnimatePresence>
-        {isMaoDeOnze && (
+        {latestRound?.finished ? (
           <motion.div
-            initial={{ y: -200, rotateZ: -10, opacity: 0 }}
-            animate={{ y: 0, rotateZ: 0, opacity: 1 }}
-            exit={{ y: 200, rotateZ: 10, opacity: 0 }}
-            transition={{ type: 'spring', damping: 12 }}
-            className="pointer-events-none fixed left-1/2 top-20 z-[100] -translate-x-1/2"
+            key={`result-${roundResolvedKey}`}
+            initial={{ scale: 0.5, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+            className="pointer-events-none absolute left-1/2 top-[46%] z-50 -translate-x-1/2 -translate-y-1/2"
           >
-            <div
-              className="rounded-full border-2 px-8 py-4 text-2xl font-black uppercase tracking-[0.16em] text-black shadow-[0_0_60px_rgba(201,168,76,0.8)]"
-              style={{
-                background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
-                borderColor: '#ffdf80',
+            <motion.div
+              animate={{
+                boxShadow:
+                  latestRound.result === 'TIE'
+                    ? '0 0 40px rgba(148,163,184,0.45)'
+                    : latestRound.result === 'P1'
+                      ? '0 0 60px rgba(201,168,76,0.65)'
+                      : '0 0 60px rgba(220,38,38,0.55)',
               }}
+              className={`
+                rounded-[22px] border-2 px-8 py-4 text-[22px] font-black uppercase tracking-[0.12em] shadow-2xl backdrop-blur-xl
+                ${
+                  latestRound.result === 'TIE'
+                    ? 'border-slate-500 bg-slate-900/90 text-white'
+                    : latestRound.result === 'P1'
+                      ? 'border-amber-300 text-black'
+                      : 'border-red-500 bg-red-950/90 text-white'
+                }
+              `}
+              style={
+                latestRound.result === 'P1'
+                  ? { background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }
+                  : {}
+              }
             >
-              ⚡ Mão de 11 ⚡
-              <br />
-              <span className="text-sm">Vale a partida</span>
-            </div>
+              {latestRound.result === 'TIE'
+                ? '🤝 Empate'
+                : latestRound.result === 'P1'
+                  ? '🏆 Você venceu!'
+                  : '❌ Derrota'}
+            </motion.div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
 
       <AnimatePresence>
-        {(isHandFinished || isMatchFinished) && (
+        {isMaoDeOnze ? (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute top-24 z-40 mx-auto w-full max-w-md self-center"
+            initial={{ y: -200, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 200, opacity: 0 }}
+            transition={{ type: 'spring', damping: 14 }}
+            className="pointer-events-none fixed left-1/2 top-16 z-[100] -translate-x-1/2"
           >
             <div
-              className="rounded-[20px] border px-6 py-4 text-center shadow-2xl backdrop-blur-xl"
+              className="rounded-full px-10 py-4 text-2xl font-black uppercase tracking-widest text-black shadow-2xl"
               style={{
-                background: isMatchFinished ? 'rgba(201,168,76,0.1)' : 'rgba(45,106,79,0.1)',
-                borderColor: isMatchFinished ? 'rgba(201,168,76,0.3)' : 'rgba(45,106,79,0.3)',
+                background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
+                border: '2px solid #ffdf80',
+                boxShadow: '0 0 60px rgba(201,168,76,0.8)',
+              }}
+            >
+              ⚡ Mão de 11 ⚡
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isHandFinished || isMatchFinished ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none absolute inset-x-4 top-16 z-40 mx-auto max-w-sm"
+          >
+            <div
+              className="rounded-2xl px-6 py-4 text-center shadow-2xl backdrop-blur-xl"
+              style={{
+                background: isMatchFinished
+                  ? 'rgba(201,168,76,0.12)'
+                  : 'rgba(22,101,52,0.12)',
+                border: isMatchFinished
+                  ? '1px solid rgba(201,168,76,0.35)'
+                  : '1px solid rgba(74,222,128,0.3)',
               }}
             >
               <div
-                className="text-xs font-black uppercase tracking-[0.18em]"
+                className="text-xs font-black uppercase tracking-[0.2em]"
                 style={{ color: isMatchFinished ? '#c9a84c' : '#4ade80' }}
               >
                 {isMatchFinished ? 'Partida encerrada' : 'Mão encerrada'}
@@ -661,12 +953,12 @@ export function MatchTableShell(props: MatchTableShellProps) {
                 {isMatchFinished
                   ? `Placar Final: ${scoreLabel}`
                   : canStartHand
-                  ? 'Próxima mão disponível'
-                  : 'Aguardando próxima mão...'}
+                    ? 'Próxima mão disponível'
+                    : 'Aguardando próxima mão...'}
               </div>
             </div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );

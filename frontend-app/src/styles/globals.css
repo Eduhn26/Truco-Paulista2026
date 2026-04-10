@@ -2,34 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── ROOT DESIGN TOKENS ── */
 :root {
   color-scheme: dark;
-  
-  /* Gold System - Premium Casino Identity */
   --gold-primary: #c9a84c;
   --gold-light: #e8c76a;
   --gold-dark: #8a6a28;
   --gold-glow: rgba(201, 168, 76, 0.35);
   --gold-border: rgba(201, 168, 76, 0.3);
-  
-  /* Backgrounds: Deep Space / Casino Night */
   --bg-deep: #050810;
   --bg-card: #0a121a;
-  --bg-felt: #0a1209;
+  --bg-felt: #0d1f0f;
+  --bg-felt-mid: #112614;
   --bg-surface: rgba(10, 18, 26, 0.85);
-  
-  /* Accents */
   --accent-green: #1a4731;
   --accent-red: #8b1a1a;
   --accent-amber: #b68a2f;
-  
-  /* Text */
-  --text-primary: #f0e6d3; /* Cream */
+  --text-primary: #f0e6d3;
   --text-gold: #c9a84c;
   --text-muted: rgba(255, 255, 255, 0.4);
-  
-  /* Materiality */
   --border-gold: 1px solid rgba(201, 168, 76, 0.3);
   --border-gold-glow: 0 0 20px rgba(201, 168, 76, 0.3);
   --shadow-premium: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -38,18 +28,48 @@
 body {
   margin: 0;
   background-color: var(--bg-deep);
-  /* Cinematic depth gradient */
   background-image: radial-gradient(circle at 50% 0%, #0f1923 0%, #050810 70%);
   color: var(--text-primary);
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-family: "Georgia", "Times New Roman", serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden; /* Prevent ornament overflow */
+  overflow-x: hidden;
 }
 
-/* ── ORNAMENTAL UTILITIES ── */
+.felt-table {
+  position: relative;
+  background-color: #0d1e10;
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 50% 50%, rgba(201, 168, 76, 0.12) 0%, transparent 65%),
+    radial-gradient(ellipse at 50% 0%, #162b18 0%, #0d1e10 40%, #091509 100%);
+  box-shadow:
+    inset 0 0 120px rgba(0, 0, 0, 0.6),
+    inset 0 0 60px rgba(0, 0, 0, 0.4);
+  /* Removed min-height !important and transform: scale workarounds.
+     Layout height is now controlled via flexbox and parent containers. */
+}
 
-/* Premium Container with Gold Glow Border */
+.felt-table::before {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 50% / 38%;
+  border: 2px solid rgba(201, 168, 76, 0.18);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.felt-table::after {
+  content: '';
+  position: absolute;
+  inset: 28px;
+  border-radius: 50% / 42%;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .gold-frame {
   border: var(--border-gold);
   border-radius: 32px;
@@ -64,7 +84,32 @@ body {
   transition: all 0.3s ease;
 }
 
-/* Text Gradients */
+.playing-card {
+  background: linear-gradient(145deg, #fefdf8 0%, #f8f5ec 50%, #f5f0e4 100%);
+  box-shadow:
+    0 2px 4px rgba(0,0,0,0.15),
+    0 8px 24px rgba(0,0,0,0.35),
+    0 20px 48px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.9);
+  border: 1px solid rgba(0,0,0,0.12);
+}
+
+.playing-card-back {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgba(255,255,255,0.03) 3px,
+      rgba(255,255,255,0.03) 6px
+    ),
+    linear-gradient(135deg, #1a3a5c 0%, #0d2340 40%, #162d52 100%);
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.45),
+    0 20px 48px rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
 .text-gradient-gold {
   background: linear-gradient(135deg, var(--gold-light) 0%, var(--gold-primary) 50%, var(--gold-dark) 100%);
   -webkit-background-clip: text;
@@ -72,19 +117,37 @@ body {
   background-clip: text;
 }
 
-/* Custom Scrollbar for Premium Feel */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@keyframes chip-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
 }
-::-webkit-scrollbar-track {
-  background: var(--bg-deep);
+.chip-active { animation: chip-pulse 2s infinite; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: var(--gold-dark); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-primary); }
+
+@keyframes turn-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
-::-webkit-scrollbar-thumb {
-  background: var(--gold-dark);
-  border-radius: 4px;
-  border: 2px solid var(--bg-deep);
+.my-turn-glow { animation: turn-pulse 2s ease-in-out infinite; }
+
+.card-hover {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--gold-primary);
+.card-hover:hover {
+  transform: translateY(-20px) scale(1.04);
+}
+
+/* Removed all media queries with transform: scale and min-height !important.
+   Responsiveness is now handled via flexbox, clamp(), and native vw/vh units. */
+@media (max-width: 768px) {
+  .felt-table { overflow-x: auto; }
+}
+
+main.relative.z-10 {
+  overflow-x: hidden;
+  width: 100%;
 }
