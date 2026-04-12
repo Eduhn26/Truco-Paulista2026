@@ -32,6 +32,7 @@ type MatchScreenSourceViewModel = {
   opponentSeatView: TableSeatView | null;
   myCards: CardPayload[];
   myPlayedCard: string | null;
+  opponentPlayedCard: string | null;
   scoreLabel: string;
   currentTurnSeatId: string | null;
   canStartHand: boolean;
@@ -73,6 +74,11 @@ type MatchScreenTransitionState = {
   roundIntroKey: number;
   roundResolvedKey: number;
   launchingCardKey: string | null;
+  isResolvingRound: boolean;
+  closingTableCards: {
+    mine: string | null;
+    opponent: string | null;
+  };
 };
 
 type BuildMatchScreenViewModelParams = {
@@ -157,6 +163,8 @@ export function buildMatchScreenViewModel({
       winner: viewModel.winner,
       awardedPoints: viewModel.awardedPoints,
       latestRound: viewModel.latestRound,
+      latestRoundMyPlayedCard: viewModel.myPlayedCard,
+      latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
       tablePhase: viewModel.tablePhase,
       canStartHand: viewModel.canStartHand,
       scoreLabel: viewModel.scoreLabel,
@@ -187,6 +195,8 @@ export function buildMatchScreenViewModel({
       currentPublicHand: viewModel.currentPublicHand,
       playedRoundsCount: viewModel.playedRoundsCount,
       isMyTurn: viewModel.currentTurnSeatId === viewModel.mySeat,
+      isResolvingRound: liveTableTransition.isResolvingRound,
+      closingTableCards: liveTableTransition.closingTableCards,
     },
     secondaryToggleLabel: `${showSecondary ? '▲' : '▼'} Painel técnico`,
     showSecondary,

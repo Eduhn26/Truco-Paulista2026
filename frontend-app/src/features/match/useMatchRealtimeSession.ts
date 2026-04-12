@@ -5,6 +5,7 @@ import { loadMatchSnapshot, saveMatchSnapshot, type MatchSnapshot } from './matc
 import { GameSocketClient } from '../../services/socket/gameSocketClient';
 import type {
   CardPayload,
+  CardPlayedPayload,
   MatchStatePayload,
   PlayerAssignedPayload,
   Rank,
@@ -19,7 +20,11 @@ type UseMatchRealtimeSessionParams = {
   onCardPlayed: (payload: {
     matchId?: string;
     playerId?: string | null;
+    seatId?: string | null;
+    teamId?: string | null;
     card?: string | null;
+    currentTurnSeatId?: string | null;
+    isBot?: boolean;
   }) => void;
 };
 
@@ -105,6 +110,17 @@ function describeRoomStatePayload(payload: RoomStatePayload): string {
     'Received room-state',
     `canStart=${String(payload.canStart)}`,
     `turn=${payload.currentTurnSeatId ?? 'null'}`,
+  ].join(' | ');
+}
+
+function describeCardPlayedPayload(payload: CardPlayedPayload): string {
+  return [
+    'Received card-played',
+    `card=${payload.card ?? 'null'}`,
+    `playerId=${payload.playerId ?? 'null'}`,
+    `seatId=${payload.seatId ?? 'null'}`,
+    `turn=${payload.currentTurnSeatId ?? 'null'}`,
+    `isBot=${String(payload.isBot ?? false)}`,
   ].join(' | ');
 }
 
@@ -402,12 +418,14 @@ export function useMatchRealtimeSession(
           onCardPlayedRef.current({
             matchId: payload.matchId,
             playerId: payload.playerId ?? null,
+            seatId: payload.seatId ?? null,
+            teamId: payload.teamId ?? null,
             card: payload.card ?? null,
+            currentTurnSeatId: payload.currentTurnSeatId ?? null,
+            isBot: payload.isBot ?? false,
           });
 
-          appendLog(
-            payload.card ? `Received card-played (${payload.card}).` : 'Received card-played.',
-          );
+          appendLog(describeCardPlayedPayload(payload));
         },
       },
     );

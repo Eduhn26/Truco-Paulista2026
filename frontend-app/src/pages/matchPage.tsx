@@ -12,11 +12,20 @@ import { useMatchRealtimeSession } from '../features/match/useMatchRealtimeSessi
 import { useMatchTableTransition } from '../features/match/useMatchTableTransition';
 import { useGameSound } from '../hooks/useGameSound';
 import { cardStringToPayload } from '../services/socket/socketTypes';
-import type { CardPayload, MatchStatePayload, Rank } from '../services/socket/socketTypes';
+import type {
+  CardPayload,
+  MatchStatePayload,
+  Rank,
+  RoomStatePayload,
+} from '../services/socket/socketTypes';
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
 const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+
+const HAND_INTRO_HOLD_MS = 650;
+const HAND_RESULT_HOLD_MS = 900;
+const NEXT_HAND_COMMIT_MS = 220;
 
 type TableSeatView = {
   seatId: string;
@@ -28,6 +37,7 @@ type TableSeatView = {
 
 type MatchStatusTone = 'neutral' | 'success' | 'warning';
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+type VisualBeat = 'idle' | 'hand_intro' | 'hand_result_hold' | 'live';
 
 type MatchViewModel = {
   resolvedMatchId: string;
@@ -41,6 +51,7 @@ type MatchViewModel = {
   opponentPlayedCard: string | null;
   scoreLabel: string;
   currentTurnSeatId: string | null;
+  nextDecisionType: string | null;
   canStartHand: boolean;
   canPlayCard: boolean;
   currentValue: number;
@@ -65,6 +76,12 @@ type MatchViewModel = {
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
 };
 
+type PendingVisualState = {
+  roomState: RoomStatePayload | null;
+  publicMatchState: MatchStatePayload | null;
+  privateMatchState: MatchStatePayload | null;
+};
+
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -73,19 +90,25 @@ export function MatchPage() {
   const mySeatRef = useRef<string | null>(null);
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [showSecondary, setShowSecondary] = useState(false);
+  const [visualBeat, setVisualBeat] = useState<VisualBeat>('idle');
   const { play } = useGameSound();
   const [cachedMyCards, setCachedMyCards] = useState<CardPayload[]>([]);
   const beginHandTransitionRef = useRef<() => void>(() => {});
   const registerIncomingPlayedCardRef = useRef<
     (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void
   >(() => {});
+  const isDeferringVisualCommitRef = useRef(false);
+  const lastHandStartedAtRef = useRef<number | null>(null);
+  const handIntroTimeoutRef = useRef<number | null>(null);
 
   const handleRealtimeHandStarted = useCallback(
     (payload: { matchId?: string; viraRank?: Rank | null }) => {
-      beginHandTransitionRef.current();
       if (payload.viraRank) {
         setViraRank(payload.viraRank);
       }
+
+      lastHandStartedAtRef.current = Date.now();
+      setVisualBeat('hand_intro');
     },
     [],
   );
@@ -96,12 +119,39 @@ export function MatchPage() {
         payloadPlayerId: payload.playerId ?? null,
         mySeat: mySeatRef.current,
       });
+
+      const isBlockingRealtimeCard =
+        isDeferringVisualCommitRef.current || visualBeat === 'hand_intro';
+
+      console.log('[matchPage][event][card-played]', {
+        owner,
+        card: payload.card ?? null,
+        playerId: payload.playerId ?? null,
+        mySeat: mySeatRef.current,
+        isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+        visualBeat,
+        isBlockingRealtimeCard,
+      });
+
+      // NOTE: The next-hand commit already has a dedicated delayed visual path.
+      // Realtime card events that arrive during that hold must not pierce the
+      // transition, or the bot move appears "glued" to the previous trick.
+      if (isBlockingRealtimeCard) {
+        console.log('[matchPage][event][card-played][deferred-skip]', {
+          owner,
+          card: payload.card ?? null,
+          playerId: payload.playerId ?? null,
+          visualBeat,
+        });
+        return;
+      }
+
       registerIncomingPlayedCardRef.current({
         owner,
         card: payload.card ?? null,
       });
     },
-    [],
+    [visualBeat],
   );
 
   const {
@@ -131,19 +181,173 @@ export function MatchPage() {
     onCardPlayed: handleRealtimeCardPlayed,
   });
 
+  const [visualRoomState, setVisualRoomState] = useState<RoomStatePayload | null>(
+    roomState ?? initialSnapshot?.roomState ?? null,
+  );
+  const [visualPublicMatchState, setVisualPublicMatchState] = useState<MatchStatePayload | null>(
+    publicMatchState ?? initialSnapshot?.publicMatchState ?? null,
+  );
+  const [visualPrivateMatchState, setVisualPrivateMatchState] = useState<MatchStatePayload | null>(
+    privateMatchState ?? initialSnapshot?.privateMatchState ?? null,
+  );
+
+  const visualPublicMatchStateRef = useRef<MatchStatePayload | null>(visualPublicMatchState);
+  const visualPrivateMatchStateRef = useRef<MatchStatePayload | null>(visualPrivateMatchState);
+  const pendingVisualStateRef = useRef<PendingVisualState | null>(null);
+  const deferredNextHandTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    visualPublicMatchStateRef.current = visualPublicMatchState;
+  }, [visualPublicMatchState]);
+
+  useEffect(() => {
+    visualPrivateMatchStateRef.current = visualPrivateMatchState;
+  }, [visualPrivateMatchState]);
+
   useEffect(() => {
     mySeatRef.current = playerAssigned?.seatId ?? initialSnapshot?.playerAssigned?.seatId ?? null;
   }, [initialSnapshot?.playerAssigned?.seatId, playerAssigned]);
 
+  useEffect(() => {
+    const displayedHandFinished = isResolvedHandFinished({
+      publicMatchState: visualPublicMatchState,
+      privateMatchState: visualPrivateMatchState,
+    });
+
+    const incomingFreshPlayableHand = isFreshPlayableHandState({
+      publicMatchState,
+      privateMatchState,
+    });
+
+    const shouldDeferNextHandCommit = displayedHandFinished && incomingFreshPlayableHand;
+
+    const isFreshOpeningHand =
+      !displayedHandFinished &&
+      incomingFreshPlayableHand &&
+      visualPublicMatchState?.state !== 'in_progress' &&
+      visualPrivateMatchState?.state !== 'in_progress' &&
+      lastHandStartedAtRef.current !== null;
+
+    if (shouldDeferNextHandCommit) {
+      isDeferringVisualCommitRef.current = true;
+      setVisualBeat('hand_result_hold');
+
+      pendingVisualStateRef.current = {
+        roomState: roomState ?? null,
+        publicMatchState: publicMatchState ?? null,
+        privateMatchState: privateMatchState ?? null,
+      };
+
+      if (deferredNextHandTimeoutRef.current !== null) {
+        return;
+      }
+
+      deferredNextHandTimeoutRef.current = window.setTimeout(() => {
+        const pendingState = pendingVisualStateRef.current;
+        pendingVisualStateRef.current = null;
+        deferredNextHandTimeoutRef.current = null;
+
+        beginHandTransitionRef.current();
+
+        setVisualRoomState(pendingState?.roomState ?? null);
+        setVisualPublicMatchState(pendingState?.publicMatchState ?? null);
+        setVisualPrivateMatchState(pendingState?.privateMatchState ?? null);
+        setVisualBeat('live');
+
+        // NOTE: Keep the gate until the deferred state has been committed.
+        // The authoritative match state will drive the next visible cards after
+        // this point, so releasing the gate here avoids the event path racing
+        // ahead of the committed visual frame.
+        isDeferringVisualCommitRef.current = false;
+      }, HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS);
+
+      return;
+    }
+
+    if (isFreshOpeningHand) {
+      if (handIntroTimeoutRef.current !== null) {
+        return;
+      }
+
+      isDeferringVisualCommitRef.current = true;
+      setVisualBeat('hand_intro');
+
+      pendingVisualStateRef.current = {
+        roomState: roomState ?? null,
+        publicMatchState: publicMatchState ?? null,
+        privateMatchState: privateMatchState ?? null,
+      };
+
+      handIntroTimeoutRef.current = window.setTimeout(() => {
+        const pendingState = pendingVisualStateRef.current;
+        pendingVisualStateRef.current = null;
+        handIntroTimeoutRef.current = null;
+        lastHandStartedAtRef.current = null;
+
+        beginHandTransitionRef.current();
+
+        setVisualRoomState(pendingState?.roomState ?? null);
+        setVisualPublicMatchState(pendingState?.publicMatchState ?? null);
+        setVisualPrivateMatchState(pendingState?.privateMatchState ?? null);
+        setVisualBeat('live');
+        isDeferringVisualCommitRef.current = false;
+      }, HAND_INTRO_HOLD_MS);
+
+      return;
+    }
+
+    if (deferredNextHandTimeoutRef.current !== null) {
+      window.clearTimeout(deferredNextHandTimeoutRef.current);
+      deferredNextHandTimeoutRef.current = null;
+      pendingVisualStateRef.current = null;
+    }
+
+    if (handIntroTimeoutRef.current !== null) {
+      window.clearTimeout(handIntroTimeoutRef.current);
+      handIntroTimeoutRef.current = null;
+      pendingVisualStateRef.current = null;
+      lastHandStartedAtRef.current = null;
+    }
+
+    isDeferringVisualCommitRef.current = false;
+    setVisualRoomState(roomState ?? initialSnapshot?.roomState ?? null);
+    setVisualPublicMatchState(publicMatchState ?? initialSnapshot?.publicMatchState ?? null);
+    setVisualPrivateMatchState(privateMatchState ?? initialSnapshot?.privateMatchState ?? null);
+    setVisualBeat(incomingFreshPlayableHand ? 'live' : 'idle');
+  }, [
+    initialSnapshot?.privateMatchState,
+    initialSnapshot?.publicMatchState,
+    initialSnapshot?.roomState,
+    privateMatchState,
+    publicMatchState,
+    roomState,
+    visualPrivateMatchState,
+    visualPublicMatchState,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      isDeferringVisualCommitRef.current = false;
+
+      if (deferredNextHandTimeoutRef.current !== null) {
+        window.clearTimeout(deferredNextHandTimeoutRef.current);
+      }
+
+      if (handIntroTimeoutRef.current !== null) {
+        window.clearTimeout(handIntroTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const viewModel = useMemo<MatchViewModel>(() => {
     const resolvedMatchId =
-      privateMatchState?.matchId ||
-      publicMatchState?.matchId ||
-      roomState?.matchId ||
+      visualPrivateMatchState?.matchId ||
+      visualPublicMatchState?.matchId ||
+      visualRoomState?.matchId ||
       effectiveMatchId;
     const mySeat = playerAssigned?.seatId ?? null;
-    const currentPublicHand = publicMatchState?.currentHand ?? null;
-    const currentPrivateHand = privateMatchState?.currentHand ?? null;
+    const currentPublicHand = visualPublicMatchState?.currentHand ?? null;
+    const currentPrivateHand = visualPrivateMatchState?.currentHand ?? null;
     const effectiveHand = currentPrivateHand ?? currentPublicHand;
     const nextDecisionType = effectiveHand?.nextDecisionType ?? 'idle';
     const viewerCanActNow = effectiveHand?.viewerCanActNow ?? false;
@@ -151,17 +355,18 @@ export function MatchPage() {
     const handFinished =
       nextDecisionType === 'start-next-hand' || Boolean(currentPublicHand?.finished);
     const matchFinished =
-      nextDecisionType === 'match-finished' || publicMatchState?.state === 'finished';
+      nextDecisionType === 'match-finished' || visualPublicMatchState?.state === 'finished';
 
-    const isOneVsOne = roomState?.mode === '1v1';
+    const isOneVsOne = visualRoomState?.mode === '1v1';
     const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
     const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
-      const player = roomState?.players.find((entry) => entry.seatId === seatId);
+      const player = visualRoomState?.players.find((entry) => entry.seatId === seatId);
+
       return {
         seatId,
         ready: player?.ready ?? false,
         isBot: player?.isBot ?? false,
-        isCurrentTurn: roomState?.currentTurnSeatId === seatId,
+        isCurrentTurn: visualRoomState?.currentTurnSeatId === seatId,
         isMine: mySeat === seatId,
       };
     });
@@ -188,15 +393,15 @@ export function MatchPage() {
       : null;
 
     const isFirstHandReady =
-      publicMatchState?.state === 'waiting' &&
+      visualPublicMatchState?.state === 'waiting' &&
       !currentPublicHand &&
-      Boolean(roomState?.canStart);
+      Boolean(visualRoomState?.canStart);
 
     const isNextHandReady = !matchFinished && nextDecisionType === 'start-next-hand';
 
     const canStartHand = isFirstHandReady || isNextHandReady;
 
-    const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
+    const isMyTurn = Boolean(mySeat && visualRoomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
         !handFinished &&
@@ -208,25 +413,9 @@ export function MatchPage() {
         !pendingBotAction,
     );
 
-    console.log({
-      publicState: publicMatchState?.state,
-      privateState: privateMatchState?.state,
-      publicHand: Boolean(publicMatchState?.currentHand),
-      privateHand: Boolean(privateMatchState?.currentHand),
-      publicNext: publicMatchState?.currentHand?.nextDecisionType ?? null,
-      privateNext: privateMatchState?.currentHand?.nextDecisionType ?? null,
-      publicFinished: publicMatchState?.currentHand?.finished ?? null,
-      privateFinished: privateMatchState?.currentHand?.finished ?? null,
-      roomCanStart: roomState?.canStart ?? null,
-      isFirstHandReady,
-      isNextHandReady,
-      localCanStartHand: canStartHand,
-      effectiveSource: currentPrivateHand ? 'private' : currentPublicHand ? 'public' : 'none',
-    });
-
     const contractPresentation = buildMatchContractPresentation({
-      publicMatchState,
-      roomState,
+      publicMatchState: visualPublicMatchState,
+      roomState: visualRoomState,
       canStartHand,
       canPlayCard,
       isMyTurn,
@@ -243,8 +432,9 @@ export function MatchPage() {
       myCards,
       myPlayedCard,
       opponentPlayedCard,
-      scoreLabel: `T1 ${publicMatchState?.score.playerOne ?? 0} × T2 ${publicMatchState?.score.playerTwo ?? 0}`,
+      scoreLabel: `T1 ${visualPublicMatchState?.score.playerOne ?? 0} × T2 ${visualPublicMatchState?.score.playerTwo ?? 0}`,
       currentTurnSeatId: contractPresentation.currentTurnSeatId,
+      nextDecisionType,
       canStartHand: contractPresentation.canStartHand,
       canPlayCard: contractPresentation.canPlayCard,
       currentValue: contractPresentation.currentValue,
@@ -272,7 +462,55 @@ export function MatchPage() {
       currentPublicHand,
       currentPrivateHand,
     };
-  }, [effectiveMatchId, playerAssigned, privateMatchState, publicMatchState, roomState]);
+  }, [
+    effectiveMatchId,
+    playerAssigned,
+    visualPrivateMatchState,
+    visualPublicMatchState,
+    visualRoomState,
+  ]);
+
+  useEffect(() => {
+    console.log('[matchPage][viewModel][opponentPlayedCard]', {
+      opponentPlayedCard: viewModel.opponentPlayedCard,
+      myPlayedCard: viewModel.myPlayedCard,
+      latestRoundFinished: Boolean(viewModel.latestRound?.finished),
+      playedRoundsCount: viewModel.playedRoundsCount,
+      tablePhase: viewModel.tablePhase,
+      currentTurnSeatId: viewModel.currentTurnSeatId,
+      mySeat: viewModel.mySeat,
+      visualBeat,
+    });
+  }, [
+    viewModel.currentTurnSeatId,
+    viewModel.latestRound?.finished,
+    viewModel.myPlayedCard,
+    viewModel.mySeat,
+    viewModel.opponentPlayedCard,
+    viewModel.playedRoundsCount,
+    viewModel.tablePhase,
+    visualBeat,
+  ]);
+
+  useEffect(() => {
+    console.log('[matchPage][visualStates]', {
+      roomTurn: visualRoomState?.currentTurnSeatId ?? null,
+      publicState: visualPublicMatchState?.state ?? null,
+      privateState: visualPrivateMatchState?.state ?? null,
+      publicNext: visualPublicMatchState?.currentHand?.nextDecisionType ?? null,
+      privateNext: visualPrivateMatchState?.currentHand?.nextDecisionType ?? null,
+      publicLatestRound:
+        visualPublicMatchState?.currentHand?.rounds[
+          visualPublicMatchState.currentHand.rounds.length - 1
+        ] ?? null,
+      privateLatestRound:
+        visualPrivateMatchState?.currentHand?.rounds[
+          visualPrivateMatchState.currentHand.rounds.length - 1
+        ] ?? null,
+      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+      visualBeat,
+    });
+  }, [visualBeat, visualPrivateMatchState, visualPublicMatchState, visualRoomState]);
 
   useEffect(() => {
     mySeatRef.current = viewModel.mySeat;
@@ -290,21 +528,34 @@ export function MatchPage() {
     opponentPlayedCard: viewModel.opponentPlayedCard,
     playedRoundsCount: viewModel.playedRoundsCount,
     latestRoundFinished: Boolean(viewModel.latestRound?.finished),
+    currentTurnSeatId: viewModel.currentTurnSeatId,
+    nextDecisionType: viewModel.nextDecisionType,
   });
+
+  useEffect(() => {
+    console.log('[matchPage][transition-output]', {
+      displayedOpponentPlayedCard: liveTableTransition.displayedOpponentPlayedCard,
+      displayedMyPlayedCard: liveTableTransition.displayedMyPlayedCard,
+      closingTableCards: liveTableTransition.closingTableCards,
+      isResolvingRound: liveTableTransition.isResolvingRound,
+      pendingPlayedCard: liveTableTransition.pendingPlayedCard,
+      opponentRevealKey: liveTableTransition.opponentRevealKey,
+      visualBeat,
+    });
+  }, [
+    liveTableTransition.closingTableCards,
+    liveTableTransition.displayedMyPlayedCard,
+    liveTableTransition.displayedOpponentPlayedCard,
+    liveTableTransition.isResolvingRound,
+    liveTableTransition.opponentRevealKey,
+    liveTableTransition.pendingPlayedCard,
+    visualBeat,
+  ]);
 
   useEffect(() => {
     beginHandTransitionRef.current = liveTableTransition.beginHandTransition;
     registerIncomingPlayedCardRef.current = liveTableTransition.registerIncomingPlayedCard;
   }, [liveTableTransition.beginHandTransition, liveTableTransition.registerIncomingPlayedCard]);
-
-  const prevLatestRoundFinished = useRef(false);
-  useEffect(() => {
-    const currentFinished = Boolean(viewModel.latestRound?.finished);
-    if (prevLatestRoundFinished.current && !currentFinished) {
-      liveTableTransition.beginHandTransition();
-    }
-    prevLatestRoundFinished.current = currentFinished;
-  }, [viewModel.latestRound?.finished, liveTableTransition.beginHandTransition]);
 
   const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
   const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
@@ -314,6 +565,7 @@ export function MatchPage() {
       setViraRank(viewModel.currentPrivateHand.viraRank);
       return;
     }
+
     if (viewModel.currentPublicHand?.viraRank) {
       setViraRank(viewModel.currentPublicHand.viraRank);
     }
@@ -323,6 +575,7 @@ export function MatchPage() {
     useMatchActionBridge({
       resolvedMatchId: viewModel.resolvedMatchId,
       mySeat: viewModel.mySeat,
+      canStartHand: viewModel.canStartHand,
       canPlayCard: viewModel.canPlayCard,
       availableActions: viewModel.availableActions,
       viraRank,
@@ -355,6 +608,7 @@ export function MatchPage() {
       if (action === 'request-truco') {
         play('truco-call', 0.7);
       }
+
       handleMatchAction(action);
     },
     [play, handleMatchAction],
@@ -362,7 +616,7 @@ export function MatchPage() {
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
   const hasHydratedMatchState = Boolean(
-    roomState || publicMatchState || privateMatchState || playerAssigned,
+    visualRoomState || visualPublicMatchState || visualPrivateMatchState || playerAssigned,
   );
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
@@ -453,13 +707,15 @@ export function MatchPage() {
                 winner={viewModel.winner}
                 awardedPoints={viewModel.awardedPoints}
                 latestRound={viewModel.latestRound}
+                latestRoundMyPlayedCard={viewModel.myPlayedCard}
+                latestRoundOpponentPlayedCard={viewModel.opponentPlayedCard}
                 tablePhase={viewModel.tablePhase}
                 canStartHand={viewModel.canStartHand}
                 scoreLabel={viewModel.scoreLabel}
                 opponentSeatView={viewModel.opponentSeatView}
                 mySeatView={viewModel.mySeatView}
                 isOneVsOne={viewModel.isOneVsOne}
-                roomMode={roomState?.mode ?? null}
+                roomMode={visualRoomState?.mode ?? null}
                 currentTurnSeatId={viewModel.currentTurnSeatId}
                 displayedOpponentPlayedCard={displayedOpponentPlayedCard}
                 displayedMyPlayedCard={displayedMyPlayedCard}
@@ -475,6 +731,8 @@ export function MatchPage() {
                 )}
                 roundIntroKey={liveTableTransition.roundIntroKey}
                 roundResolvedKey={liveTableTransition.roundResolvedKey}
+                isResolvingRound={liveTableTransition.isResolvingRound}
+                closingTableCards={liveTableTransition.closingTableCards}
                 currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                 currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
                 viraRank={viraRank}
@@ -498,8 +756,8 @@ export function MatchPage() {
                 eventLog={eventLog}
                 connectionStatus={connectionStatus}
                 resolvedMatchId={viewModel.resolvedMatchId}
-                publicState={publicMatchState?.state || '-'}
-                privateState={privateMatchState?.state || '-'}
+                publicState={visualPublicMatchState?.state || '-'}
+                privateState={visualPrivateMatchState?.state || '-'}
                 mySeat={viewModel.mySeat}
                 currentTurnSeatId={viewModel.currentTurnSeatId}
                 canStartHand={viewModel.canStartHand}
@@ -566,5 +824,76 @@ function resolvePlayedCardOwner({
     return 'opponent';
   }
 
-  return payloadPlayerId === mySeat ? 'mine' : 'opponent';
+  const myPlayerId = mapSeatToPlayerId(mySeat);
+
+  if (!myPlayerId) {
+    return 'opponent';
+  }
+
+  return payloadPlayerId === myPlayerId ? 'mine' : 'opponent';
+}
+
+function mapSeatToPlayerId(seatId: string | null): 'P1' | 'P2' | null {
+  if (!seatId) {
+    return null;
+  }
+
+  if (seatId === 'T1A' || seatId === 'T1B') {
+    return 'P1';
+  }
+
+  if (seatId === 'T2A' || seatId === 'T2B') {
+    return 'P2';
+  }
+
+  return null;
+}
+
+function isHandFinishedState(matchState: MatchStatePayload | null | undefined): boolean {
+  const currentHand = matchState?.currentHand;
+
+  if (!matchState || !currentHand) {
+    return false;
+  }
+
+  return (
+    matchState.state === 'finished' ||
+    Boolean(currentHand.finished) ||
+    currentHand.nextDecisionType === 'start-next-hand' ||
+    currentHand.nextDecisionType === 'match-finished'
+  );
+}
+
+function isFreshPlayableState(matchState: MatchStatePayload | null | undefined): boolean {
+  const currentHand = matchState?.currentHand;
+
+  if (!matchState || !currentHand) {
+    return false;
+  }
+
+  return (
+    matchState.state === 'in_progress' &&
+    !currentHand.finished &&
+    currentHand.nextDecisionType === 'play-card'
+  );
+}
+
+function isResolvedHandFinished({
+  publicMatchState,
+  privateMatchState,
+}: {
+  publicMatchState: MatchStatePayload | null | undefined;
+  privateMatchState: MatchStatePayload | null | undefined;
+}): boolean {
+  return isHandFinishedState(privateMatchState) || isHandFinishedState(publicMatchState);
+}
+
+function isFreshPlayableHandState({
+  publicMatchState,
+  privateMatchState,
+}: {
+  publicMatchState: MatchStatePayload | null | undefined;
+  privateMatchState: MatchStatePayload | null | undefined;
+}): boolean {
+  return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }

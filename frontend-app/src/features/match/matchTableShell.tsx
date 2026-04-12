@@ -31,6 +31,8 @@ type MatchTableShellProps = {
   winner: string | null;
   awardedPoints: number | null;
   latestRound: RoundView;
+  latestRoundMyPlayedCard: string | null;
+  latestRoundOpponentPlayedCard: string | null;
   tablePhase: TablePhase;
   canStartHand: boolean;
   scoreLabel: string;
@@ -59,6 +61,8 @@ type MatchTableShellProps = {
   onPlayCard: (card: CardPayload) => void;
   playedRoundsCount: number;
   isMyTurn?: boolean;
+  isResolvingRound: boolean;
+  closingTableCards: { mine: string | null; opponent: string | null };
 };
 
 const SUIT_SYMBOL_MAP: Record<string, string> = {
@@ -588,7 +592,7 @@ function PlayedSlot({
         {label}
       </div>
 
-      <AnimatePresence mode="wait">
+      <AnimatePresence initial={false}>
         {card ? (
           <motion.div
             key={`${label}-${revealKey}`}
@@ -661,6 +665,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     onPlayCard,
     playedRoundsCount,
     isMyTurn = false,
+    isResolvingRound,
+    closingTableCards,
   } = props;
 
   const { play } = useGameSound();
@@ -673,10 +679,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const isHandFinished = tablePhase === 'hand_finished';
   const scoreT1 = publicMatchStateScoreT1(scoreLabel);
   const scoreT2 = publicMatchStateScoreT2(scoreLabel);
-  const shouldFadeMyCard = Boolean(latestRound?.finished && displayedMyPlayedCard);
-  const shouldFadeOpponentCard = Boolean(latestRound?.finished && displayedOpponentPlayedCard);
-  const myCardWon = Boolean(latestRound?.finished && latestRound.result === 'P1');
-  const opponentCardWon = Boolean(latestRound?.finished && latestRound.result === 'P2');
 
   const parseCard = (cardStr: string | null) => {
     if (!cardStr || cardStr.length < 2) {
@@ -689,11 +691,63 @@ export function MatchTableShell(props: MatchTableShellProps) {
     };
   };
 
-  const myCard = parseCard(displayedMyPlayedCard);
-  const opponentCard = parseCard(displayedOpponentPlayedCard);
+  const resolvedMyCardString = isResolvingRound ? closingTableCards.mine : displayedMyPlayedCard;
+  const resolvedOpponentCardString = isResolvingRound
+    ? closingTableCards.opponent
+    : displayedOpponentPlayedCard;
+
+  const myCard = parseCard(resolvedMyCardString);
+  const opponentCard = parseCard(resolvedOpponentCardString);
+
+  const isShowingResolvedRoundCards = Boolean(
+    latestRound?.finished &&
+      isResolvingRound &&
+      closingTableCards.mine !== null &&
+      closingTableCards.opponent !== null,
+  );
+
+  const shouldFadeMyCard = Boolean(
+    closingTableCards.mine !== null &&
+      resolvedMyCardString === closingTableCards.mine &&
+      isResolvingRound,
+  );
+  const shouldFadeOpponentCard = Boolean(
+    closingTableCards.opponent !== null &&
+      resolvedOpponentCardString === closingTableCards.opponent &&
+      isResolvingRound,
+  );
+
+  const myCardWon = Boolean(isShowingResolvedRoundCards && latestRound?.result === 'P1');
+  const opponentCardWon = Boolean(isShowingResolvedRoundCards && latestRound?.result === 'P2');
 
   useEffect(() => {
-    if (latestRound?.finished && latestRound.result === 'P1') {
+    console.log('[shell][render-source]', {
+      isResolvingRound,
+      closingTableCards,
+      displayedMyPlayedCard,
+      displayedOpponentPlayedCard,
+      resolvedMyCardString,
+      resolvedOpponentCardString,
+      latestRoundFinished: Boolean(latestRound?.finished),
+      latestRoundResult: latestRound?.result ?? null,
+    });
+  }, [
+    closingTableCards,
+    displayedMyPlayedCard,
+    displayedOpponentPlayedCard,
+    isResolvingRound,
+    latestRound?.finished,
+    latestRound?.result,
+    resolvedMyCardString,
+    resolvedOpponentCardString,
+  ]);
+
+  useEffect(() => {
+    if (!isShowingResolvedRoundCards) {
+      return;
+    }
+
+    if (latestRound?.result === 'P1') {
       play('round-win', 0.6);
 
       if (isMatchFinished) {
@@ -701,7 +755,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         fire();
       }
     }
-  }, [latestRound?.finished, latestRound?.result, isMatchFinished, play, fire]);
+  }, [fire, isMatchFinished, isShowingResolvedRoundCards, latestRound?.result, play]);
 
   return (
     <div
@@ -759,7 +813,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
             <OpponentBackCards />
           </div>
 
-          {/* NOTE: Center stage now privileges the duel. Vira becomes support, not lead actor. */}
           <div className="relative mt-2 flex min-h-0 flex-1 items-center justify-center">
             <div className="absolute left-[4%] top-[42%] hidden -translate-y-1/2 xl:block">
               <SideInfoBlock
@@ -827,12 +880,10 @@ export function MatchTableShell(props: MatchTableShellProps) {
             </div>
           </div>
 
-          {/* NOTE: Player anchor sits at the start of the lower stage, not inside the duel area. */}
           <div className="relative z-10 -mt-2 shrink-0 self-center">
             {mySeatView ? <BottomPlayerAnchor seat={mySeatView} /> : null}
           </div>
 
-          {/* NOTE: Rail and hand are intentionally merged by spacing and width, reducing the “two separate modules” feeling. */}
           <div className="mt-1 flex shrink-0 flex-col items-center gap-0.5">
             <div className="w-full max-w-[560px]">
               <MatchActionSurface availableActions={availableActions} onAction={onAction} />
@@ -856,7 +907,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
       </div>
 
       <AnimatePresence>
-        {latestRound?.finished ? (
+        {isShowingResolvedRoundCards ? (
           <motion.div
             key={`result-${roundResolvedKey}`}
             initial={{ scale: 0.5, opacity: 0, y: 20 }}
@@ -868,31 +919,31 @@ export function MatchTableShell(props: MatchTableShellProps) {
             <motion.div
               animate={{
                 boxShadow:
-                  latestRound.result === 'TIE'
+                  latestRound?.result === 'TIE'
                     ? '0 0 40px rgba(148,163,184,0.45)'
-                    : latestRound.result === 'P1'
+                    : latestRound?.result === 'P1'
                       ? '0 0 60px rgba(201,168,76,0.65)'
                       : '0 0 60px rgba(220,38,38,0.55)',
               }}
               className={`
                 rounded-[22px] border-2 px-8 py-4 text-[22px] font-black uppercase tracking-[0.12em] shadow-2xl backdrop-blur-xl
                 ${
-                  latestRound.result === 'TIE'
+                  latestRound?.result === 'TIE'
                     ? 'border-slate-500 bg-slate-900/90 text-white'
-                    : latestRound.result === 'P1'
+                    : latestRound?.result === 'P1'
                       ? 'border-amber-300 text-black'
                       : 'border-red-500 bg-red-950/90 text-white'
                 }
               `}
               style={
-                latestRound.result === 'P1'
+                latestRound?.result === 'P1'
                   ? { background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }
                   : {}
               }
             >
-              {latestRound.result === 'TIE'
+              {latestRound?.result === 'TIE'
                 ? '🤝 Empate'
-                : latestRound.result === 'P1'
+                : latestRound?.result === 'P1'
                   ? '🏆 Você venceu!'
                   : '❌ Derrota'}
             </motion.div>

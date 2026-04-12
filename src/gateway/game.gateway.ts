@@ -291,6 +291,9 @@ type BotTurnDecisionContext = {
   context: BotDecisionContext;
 };
 
+const BOT_CHAINED_TURN_DELAY_MS = 900;
+
+
 @WebSocketGateway({
   cors: {
     origin: readGatewayCorsOrigin(),
@@ -302,6 +305,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly server!: Server;
 
   private readonly logger = new Logger(GameGateway.name);
+  private readonly scheduledBotTurns = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pendingStartHands = new Set<string>();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -545,7 +550,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async continueAutomaticGameFlow(matchId: string): Promise<ViewMatchStateResponseDto> {
-    let state = await this.emitSyncedMatchState(matchId);
+    const state = await this.emitSyncedMatchState(matchId);
     await this.finalizeMatchIfFinished(matchId, state);
 
     if (state.state !== 'in_progress') {
@@ -553,10 +558,72 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     await this.processBotTurns(matchId);
-    state = await this.emitSyncedMatchState(matchId);
-    await this.finalizeMatchIfFinished(matchId, state);
 
-    return state;
+    return this.getAuthoritativeMatchState(matchId);
+  }
+
+  private acquireStartHandLock(matchId: string): boolean {
+    if (this.pendingStartHands.has(matchId)) {
+      return false;
+    }
+
+    this.pendingStartHands.add(matchId);
+
+    return true;
+  }
+
+  private releaseStartHandLock(matchId: string): void {
+    this.pendingStartHands.delete(matchId);
+  }
+
+  private isHandCurrentlyInProgress(state: ViewMatchStateResponseDto): boolean {
+    return state.state === 'in_progress' && Boolean(state.currentHand) && !state.currentHand?.finished;
+  }
+
+  private didOpenNewRound(
+    previousState: ViewMatchStateResponseDto,
+    updatedState: ViewMatchStateResponseDto,
+  ): boolean {
+    const previousRounds = previousState.currentHand?.rounds ?? [];
+    const updatedRounds = updatedState.currentHand?.rounds ?? [];
+
+    return updatedRounds.length > previousRounds.length;
+  }
+
+  private clearScheduledBotTurn(matchId: string): void {
+    const timeout = this.scheduledBotTurns.get(matchId);
+
+    if (!timeout) {
+      return;
+    }
+
+    clearTimeout(timeout);
+    this.scheduledBotTurns.delete(matchId);
+  }
+
+  private scheduleDeferredBotTurn(matchId: string): void {
+    if (this.scheduledBotTurns.has(matchId)) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      this.scheduledBotTurns.delete(matchId);
+
+      void this.processBotTurns(matchId).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown deferred bot turn error';
+
+        this.logGateway('warn', {
+          layer: 'gateway',
+          event: 'play_card_rejected',
+          status: 'rejected',
+          matchId,
+          errorType: 'unexpected_error',
+          errorMessage: message,
+        });
+      });
+    }, BOT_CHAINED_TURN_DELAY_MS);
+
+    this.scheduledBotTurns.set(matchId, timeout);
   }
 
   private fillBotsAndBroadcast(matchId: string): void {
@@ -988,21 +1055,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
   }
 
-  private async processBotTurns(matchId: string): Promise<void> {
-    while (true) {
-      const state = await this.getAuthoritativeMatchState(matchId);
-      const botTurnContext = this.buildBotDecisionContext(matchId, state);
+  private async processBotTurns(matchId: string): Promise<boolean> {
+    this.clearScheduledBotTurn(matchId);
 
-      if (!botTurnContext) {
-        return;
-      }
+    const state = await this.getAuthoritativeMatchState(matchId);
+    const botTurnContext = this.buildBotDecisionContext(matchId, state);
 
-      const shouldContinue = await this.executeBotTurn(matchId, botTurnContext);
-
-      if (!shouldContinue) {
-        return;
-      }
+    if (!botTurnContext) {
+      return false;
     }
+
+    const shouldScheduleFollowUp = await this.executeBotTurn(matchId, botTurnContext);
+
+    if (shouldScheduleFollowUp) {
+      this.scheduleDeferredBotTurn(matchId);
+    }
+
+    return true;
   }
 
   private async executeBotTurn(
@@ -1041,7 +1110,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: botTurnContext.playerId,
       });
 
-      return updatedState.state === 'in_progress';
+      // NOTE: Accepting mao de onze changes the decision surface for the hand.
+      // The next automatic action, if any, must happen in a new paced cycle.
+      return false;
     }
 
     if (
@@ -1069,7 +1140,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: botTurnContext.playerId,
       });
 
-      return updatedState.state === 'in_progress';
+      // NOTE: Bet acceptance is a dramatic boundary. The bot must not chain a
+      // new move inside the same automatic cycle after resolving the wager.
+      return false;
     }
 
     const decision = this.botDecisionPort.decide(botTurnContext.context);
@@ -1124,7 +1197,28 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await this.finalizeMatchIfFinished(matchId, updatedState);
 
-    return updatedState.state === 'in_progress';
+    if (updatedState.state !== 'in_progress' || !updatedState.currentHand) {
+      return false;
+    }
+
+    if (updatedState.currentHand.finished || updatedState.currentHand.nextDecisionType !== 'play-card') {
+      return false;
+    }
+
+    const openedNewRound = this.didOpenNewRound(previousState, updatedState);
+    const nextBotTurnContext = this.buildBotDecisionContext(matchId, updatedState);
+
+    if (!nextBotTurnContext) {
+      return false;
+    }
+
+    // NOTE: When a bot action closes a round and opens the next one, the next
+    // automatic response must be deferred to a brand-new paced cycle.
+    if (openedNewRound) {
+      return true;
+    }
+
+    return true;
   }
 
   handleConnection(socket: Socket): void {
@@ -1199,6 +1293,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.logGateway('log', logContext);
+    this.clearScheduledBotTurn(result.matchId);
     this.emitRoomState(result.matchId);
   }
 
@@ -1831,21 +1926,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const authoritativeState = await this.getAuthoritativeMatchState(session.matchId);
 
-      const isStartingNextHand =
-        authoritativeState.state === 'waiting' && Boolean(authoritativeState.currentHand?.finished);
-
-      if (!isStartingNextHand && !this.roomManager.canStart(session.matchId)) {
-        return this.reject(
-          'start_hand_rejected',
-          'All players must be ready before starting the hand.',
-          {
-            socketId: socket.id,
-            matchId: session.matchId,
-          },
-          'transport_error',
-        );
-      }
-
       const matchIdRaw = payload?.matchId;
       const viraRankRaw = payload?.viraRank;
 
@@ -1864,30 +1944,98 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const dto: StartHandRequestDto = { matchId, viraRank };
-      const result = await this.startHandUseCase.execute(dto);
+      if (matchId !== session.matchId) {
+        return this.reject(
+          'start_hand_rejected',
+          'Invalid payload: matchId does not match the active room.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'transport_error',
+        );
+      }
 
-      const roomState = this.roomManager.beginHand(matchId);
-      this.server.to(matchId).emit('room-state', roomState);
+      if (authoritativeState.state === 'finished') {
+        return this.reject(
+          'start_hand_rejected',
+          'Cannot start a new hand because the match is already finished.',
+          {
+            socketId: socket.id,
+            matchId,
+          },
+          'transport_error',
+        );
+      }
 
-      this.server.to(matchId).emit('hand-started', {
-        matchId,
-        viraRank,
-        currentTurnSeatId: roomState.currentTurnSeatId,
-      });
+      if (this.isHandCurrentlyInProgress(authoritativeState)) {
+        return this.reject(
+          'start_hand_rejected',
+          'A hand is already in progress for this match.',
+          {
+            socketId: socket.id,
+            matchId,
+          },
+          'transport_error',
+        );
+      }
 
-      await this.continueAutomaticGameFlow(matchId);
+      const isStartingNextHand =
+        authoritativeState.state === 'waiting' && Boolean(authoritativeState.currentHand?.finished);
 
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'start_hand_succeeded',
-        status: 'succeeded',
-        socketId: socket.id,
-        matchId,
-        viraRank,
-      });
+      if (!isStartingNextHand && !this.roomManager.canStart(session.matchId)) {
+        return this.reject(
+          'start_hand_rejected',
+          'All players must be ready before starting the hand.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'transport_error',
+        );
+      }
 
-      return { event: 'hand-started', data: result };
+      if (!this.acquireStartHandLock(matchId)) {
+        return this.reject(
+          'start_hand_rejected',
+          'A start-hand request is already being processed for this match.',
+          {
+            socketId: socket.id,
+            matchId,
+          },
+          'transport_error',
+        );
+      }
+
+      try {
+        const dto: StartHandRequestDto = { matchId, viraRank };
+        const result = await this.startHandUseCase.execute(dto);
+
+        const roomState = this.roomManager.beginHand(matchId);
+        this.server.to(matchId).emit('room-state', roomState);
+
+        this.server.to(matchId).emit('hand-started', {
+          matchId,
+          viraRank,
+          currentTurnSeatId: roomState.currentTurnSeatId,
+        });
+
+        this.clearScheduledBotTurn(matchId);
+        await this.continueAutomaticGameFlow(matchId);
+
+        this.logGateway('log', {
+          layer: 'gateway',
+          event: 'start_hand_succeeded',
+          status: 'succeeded',
+          socketId: socket.id,
+          matchId,
+          viraRank,
+        });
+
+        return { event: 'start-hand:ack', data: result };
+      } finally {
+        this.releaseStartHandLock(matchId);
+      }
     } catch (error) {
       return this.rejectFromError('start_hand_rejected', error, {
         socketId: socket.id,
@@ -2003,10 +2151,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.finalizeMatchIfFinished(matchId, state);
 
       if (state.state === 'in_progress') {
+        this.clearScheduledBotTurn(matchId);
         await this.processBotTurns(matchId);
       }
 
-      return { event: 'card-played', data: { matchId: result.matchId } };
+      return { event: 'play-card:ack', data: { matchId: result.matchId } };
     } catch (error) {
       return this.rejectFromError('play_card_rejected', error, {
         socketId: socket.id,

@@ -84,6 +84,10 @@ export class Hand {
   }
 
   static fromSnapshot(snapshot: HandSnapshot): Hand {
+    // NOTE: Rebuild the hand in an invariant-safe order.
+    // Winner/awardedPoints are only valid when finished === true, so they must
+    // be restored after finished is restored. Otherwise the constructor runs
+    // invariants with finished=false and throws.
     const hand = new Hand(
       snapshot.viraRank,
       snapshot.playerOneHand.map((card) => Card.from(card)),
@@ -96,8 +100,6 @@ export class Hand {
         specialState: snapshot.specialState ?? 'normal',
         specialDecisionPending: snapshot.specialDecisionPending ?? false,
         specialDecisionBy: snapshot.specialDecisionBy ?? null,
-        winner: snapshot.winner ?? null,
-        awardedPoints: snapshot.awardedPoints ?? null,
       },
     );
 
@@ -107,7 +109,10 @@ export class Hand {
       hand.rounds.length,
       ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]),
     );
+
     hand.finished = snapshot.finished;
+    hand.winner = snapshot.winner ?? null;
+    hand.awardedPoints = snapshot.awardedPoints ?? null;
     hand.assertStateInvariants();
 
     return hand;
