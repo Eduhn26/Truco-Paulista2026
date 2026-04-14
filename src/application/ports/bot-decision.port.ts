@@ -25,18 +25,56 @@ export type BotRoundView = {
   result: 'P1' | 'P2' | 'TIE' | null;
 };
 
+export type BotAvailableActionsView = {
+  canRequestTruco: boolean;
+  canRaiseToSix: boolean;
+  canRaiseToNine: boolean;
+  canRaiseToTwelve: boolean;
+  canAcceptBet: boolean;
+  canDeclineBet: boolean;
+  canAcceptMaoDeOnze: boolean;
+  canDeclineMaoDeOnze: boolean;
+  canAttemptPlayCard: boolean;
+};
+
+export type BotBetView = {
+  currentValue: number;
+  betState: 'idle' | 'awaiting_response';
+  pendingValue: number | null;
+  requestedBy: 'P1' | 'P2' | null;
+  specialState: 'normal' | 'mao_de_onze' | 'mao_de_ferro';
+  specialDecisionPending: boolean;
+  availableActions: BotAvailableActionsView;
+};
+
 export type BotDecisionContext = {
   matchId: string;
   profile: BotProfile;
   viraRank: Rank;
   currentRound: BotRoundView | null;
   player: BotPlayerView;
+  bet?: BotBetView;
 };
 
 export type BotDecision =
   | {
       action: 'play-card';
       card: string;
+    }
+  | {
+      action: 'accept-bet';
+    }
+  | {
+      action: 'decline-bet';
+    }
+  | {
+      action: 'raise-to-six';
+    }
+  | {
+      action: 'raise-to-nine';
+    }
+  | {
+      action: 'raise-to-twelve';
     }
   | {
       action: 'pass';

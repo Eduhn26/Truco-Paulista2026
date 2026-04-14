@@ -23,12 +23,34 @@ type PythonBotDecisionRequest = {
     playerId: 'P1' | 'P2';
     hand: string[];
   };
+  bet?: {
+    currentValue: number;
+    betState: 'idle' | 'awaiting_response';
+    pendingValue: number | null;
+    requestedBy: 'P1' | 'P2' | null;
+    specialState: 'normal' | 'mao_de_onze' | 'mao_de_ferro';
+    specialDecisionPending: boolean;
+    availableActions: {
+      canRequestTruco: boolean;
+      canRaiseToSix: boolean;
+      canRaiseToNine: boolean;
+      canRaiseToTwelve: boolean;
+      canAcceptBet: boolean;
+      canDeclineBet: boolean;
+      canAcceptMaoDeOnze: boolean;
+      canDeclineMaoDeOnze: boolean;
+      canAttemptPlayCard: boolean;
+    };
+  };
 };
 
 type PythonBotDecisionResponse =
   | {
       action: 'play-card';
       card: string;
+    }
+  | {
+      action: 'accept-bet' | 'decline-bet' | 'raise-to-six' | 'raise-to-nine' | 'raise-to-twelve';
     }
   | {
       action: 'pass';
@@ -202,6 +224,21 @@ export class PythonBotAdapter implements BotDecisionPort {
         playerId: context.player.playerId,
         hand: [...context.player.hand],
       },
+      ...(context.bet
+        ? {
+            bet: {
+              currentValue: context.bet.currentValue,
+              betState: context.bet.betState,
+              pendingValue: context.bet.pendingValue,
+              requestedBy: context.bet.requestedBy,
+              specialState: context.bet.specialState,
+              specialDecisionPending: context.bet.specialDecisionPending,
+              availableActions: {
+                ...context.bet.availableActions,
+              },
+            },
+          }
+        : {}),
     };
   }
 
@@ -213,9 +250,15 @@ export class PythonBotAdapter implements BotDecisionPort {
       };
     }
 
+    if (response.action === 'pass') {
+      return {
+        action: 'pass',
+        reason: response.reason,
+      };
+    }
+
     return {
-      action: 'pass',
-      reason: response.reason,
+      action: response.action,
     };
   }
 
@@ -228,6 +271,16 @@ export class PythonBotAdapter implements BotDecisionPort {
 
     if (candidate.action === 'play-card') {
       return typeof candidate.card === 'string' && candidate.card.trim().length > 0;
+    }
+
+    if (
+      candidate.action === 'accept-bet' ||
+      candidate.action === 'decline-bet' ||
+      candidate.action === 'raise-to-six' ||
+      candidate.action === 'raise-to-nine' ||
+      candidate.action === 'raise-to-twelve'
+    ) {
+      return true;
     }
 
     if (candidate.action === 'pass') {

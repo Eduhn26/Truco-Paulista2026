@@ -1,11 +1,12 @@
 import { useEffect, type ReactNode } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 import { useConfetti } from '../../hooks/useConfetti';
 import { useGameSound } from '../../hooks/useGameSound';
-import { AnimatePresence, motion } from 'framer-motion';
 
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 type HandStatusVariant = 'neutral' | 'success' | 'warning';
@@ -88,6 +89,53 @@ function publicMatchStateScoreT1(scoreLabel: string): string {
 function publicMatchStateScoreT2(scoreLabel: string): string {
   const match = scoreLabel.match(/T2\s+(\d+)/);
   return match?.[1] ?? '0';
+}
+
+function formatPlayerIdLabel(playerId: string | null): string {
+  if (playerId === 'P1') {
+    return 'T1';
+  }
+
+  if (playerId === 'P2') {
+    return 'T2';
+  }
+
+  return '—';
+}
+
+function getBetRequestLabel(nextValue: number | null): string {
+  if (nextValue === 3) {
+    return 'Truco';
+  }
+
+  if (nextValue === 6 || nextValue === 9 || nextValue === 12) {
+    return `${nextValue}`;
+  }
+
+  return 'Aposta';
+}
+
+function getRequestedByStatus(requestedBy: string | null): string {
+  const label = formatPlayerIdLabel(requestedBy);
+
+  if (label === '—') {
+    return 'Pedido pendente';
+  }
+
+  return `${label} pediu`;
+}
+
+function getBetDecisionLabel(availableActions: MatchTableShellProps['availableActions']): string {
+  const canRaise =
+    availableActions.canRaiseToSix ||
+    availableActions.canRaiseToNine ||
+    availableActions.canRaiseToTwelve;
+
+  if (availableActions.canAcceptBet || availableActions.canDeclineBet) {
+    return canRaise ? 'Aceite, corra ou suba a aposta' : 'Aceite ou corra';
+  }
+
+  return 'Aguardando resposta';
 }
 
 function PokerChip({ filled, small = false }: { filled: boolean; small?: boolean }) {
@@ -638,12 +686,233 @@ function PlayedSlot({
   );
 }
 
+function BetStateBanner({
+  handStatusLabel,
+  handStatusTone,
+  currentValue,
+  pendingValue,
+  requestedBy,
+  availableActions,
+}: {
+  handStatusLabel: string;
+  handStatusTone: HandStatusVariant;
+  currentValue: number;
+  pendingValue: number | null;
+  requestedBy: string | null;
+  availableActions: MatchTableShellProps['availableActions'];
+}) {
+  const nextValue = pendingValue ?? currentValue;
+  const requestLabel = getBetRequestLabel(nextValue);
+  const requestedByStatus = getRequestedByStatus(requestedBy);
+  const decisionLabel = getBetDecisionLabel(availableActions);
+
+  const glowColor =
+    handStatusTone === 'success'
+      ? 'rgba(74,222,128,0.28)'
+      : handStatusTone === 'warning'
+        ? 'rgba(230,195,100,0.28)'
+        : 'rgba(255,255,255,0.14)';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -18, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -12, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 280, damping: 24 }}
+      className="pointer-events-none absolute left-1/2 top-6 z-30 w-[min(92%,720px)] -translate-x-1/2"
+    >
+      <div
+        className="relative overflow-hidden rounded-[24px] px-5 py-4 backdrop-blur-xl"
+        style={{
+          background: 'linear-gradient(180deg, rgba(7,14,24,0.92), rgba(9,18,30,0.82))',
+          border: '1px solid rgba(230,195,100,0.24)',
+          boxShadow: `0 0 28px ${glowColor}, 0 22px 44px rgba(0,0,0,0.34)`,
+        }}
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(230,195,100,0.08), transparent 32%, rgba(230,195,100,0.05) 100%)',
+          }}
+        />
+
+        <div className="relative z-10 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{
+                  background: 'rgba(230,195,100,0.12)',
+                  border: '1px solid rgba(230,195,100,0.2)',
+                  color: '#e8c76a',
+                }}
+              >
+                Decisão de aposta
+              </div>
+
+              <div
+                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: 'rgba(255,255,255,0.78)',
+                }}
+              >
+                {requestedByStatus}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div
+                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: 'rgba(255,255,255,0.68)',
+                }}
+              >
+                Atual {currentValue}
+              </div>
+
+              <div
+                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(201,168,76,0.22), rgba(232,199,106,0.16))',
+                  border: '1px solid rgba(230,195,100,0.24)',
+                  color: '#f0e6d3',
+                }}
+              >
+                Pedido {requestLabel}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="space-y-1">
+              <div
+                className="text-[22px] font-black leading-none"
+                style={{ color: '#f3ead8', fontFamily: 'Georgia, serif' }}
+              >
+                {handStatusLabel}
+              </div>
+
+              <div className="text-[12px] font-semibold text-white/70">{decisionLabel}</div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {availableActions.canAcceptBet ? (
+                <div
+                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
+                  style={{
+                    background: 'rgba(74,222,128,0.12)',
+                    border: '1px solid rgba(74,222,128,0.24)',
+                    color: '#86efac',
+                  }}
+                >
+                  Aceitar
+                </div>
+              ) : null}
+
+              {availableActions.canDeclineBet ? (
+                <div
+                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
+                  style={{
+                    background: 'rgba(248,113,113,0.12)',
+                    border: '1px solid rgba(248,113,113,0.22)',
+                    color: '#fca5a5',
+                  }}
+                >
+                  Correr
+                </div>
+              ) : null}
+
+              {availableActions.canRaiseToSix ||
+              availableActions.canRaiseToNine ||
+              availableActions.canRaiseToTwelve ? (
+                <div
+                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
+                  style={{
+                    background: 'rgba(230,195,100,0.12)',
+                    border: '1px solid rgba(230,195,100,0.24)',
+                    color: '#fcd34d',
+                  }}
+                >
+                  Subir
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function HandOutcomeBanner({
+  winner,
+  awardedPoints,
+  canStartHand,
+}: {
+  winner: string | null;
+  awardedPoints: number | null;
+  canStartHand: boolean;
+}) {
+  if (!winner || awardedPoints === null) {
+    return null;
+  }
+
+  const winnerLabel = winner === 'P1' ? 'T1' : 'T2';
+  const pointsLabel = awardedPoints === 1 ? '1 ponto' : `${awardedPoints} pontos`;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 18, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 12, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 280, damping: 24 }}
+      className="pointer-events-none absolute bottom-20 left-1/2 z-30 w-[min(92%,520px)] -translate-x-1/2"
+    >
+      <div
+        className="rounded-[22px] px-5 py-4 text-center backdrop-blur-xl"
+        style={{
+          background: 'linear-gradient(180deg, rgba(7,14,24,0.92), rgba(9,18,30,0.82))',
+          border: '1px solid rgba(74,222,128,0.22)',
+          boxShadow: '0 0 22px rgba(74,222,128,0.18), 0 18px 40px rgba(0,0,0,0.34)',
+        }}
+      >
+        <div
+          className="text-[10px] font-black uppercase tracking-[0.2em]"
+          style={{ color: '#86efac' }}
+        >
+          Resultado da mão
+        </div>
+
+        <div className="mt-1 text-[22px] font-black text-white">
+          {winnerLabel} venceu e marcou {pointsLabel}
+        </div>
+
+        <div className="mt-1 text-[12px] font-semibold text-white/68">
+          {canStartHand
+            ? 'A próxima mão já pode ser iniciada.'
+            : 'Aguardando a mesa ficar pronta para a próxima mão.'}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export function MatchTableShell(props: MatchTableShellProps) {
   const {
     handStatusLabel,
+    handStatusTone,
     betState,
     currentValue,
+    pendingValue,
+    requestedBy,
     specialState,
+    winner,
+    awardedPoints,
     latestRound,
     displayedResolvedRoundFinished,
     displayedResolvedRoundResult,
@@ -705,9 +974,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const myCard = parseCard(resolvedMyCardString);
   const opponentCard = parseCard(resolvedOpponentCardString);
 
-  // NOTE: The visual resolution state must come only from the frozen display state.
-  // Falling back to latestRound reintroduces the exact race we are trying to remove:
-  // cards from one round rendered with the semantic result of the next round.
   const resolvedRoundFinished = displayedResolvedRoundFinished;
   const resolvedRoundResult = displayedResolvedRoundResult;
 
@@ -736,6 +1002,14 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const myCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P1');
   const opponentCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P2');
 
+  const shouldBlockHandDock =
+    isAwaitingBet ||
+    availableActions.canAcceptBet ||
+    availableActions.canDeclineBet ||
+    availableActions.canRaiseToSix ||
+    availableActions.canRaiseToNine ||
+    availableActions.canRaiseToTwelve;
+
   useEffect(() => {
     console.log('[shell][render-source]', {
       isResolvingRound,
@@ -750,9 +1024,18 @@ export function MatchTableShell(props: MatchTableShellProps) {
       displayedResolvedRoundResult,
       resolvedRoundFinished,
       resolvedRoundResult,
+      betState,
+      currentValue,
+      pendingValue,
+      requestedBy,
+      winner,
+      awardedPoints,
     });
   }, [
+    awardedPoints,
+    betState,
     closingTableCards,
+    currentValue,
     displayedMyPlayedCard,
     displayedOpponentPlayedCard,
     displayedResolvedRoundFinished,
@@ -760,10 +1043,13 @@ export function MatchTableShell(props: MatchTableShellProps) {
     isResolvingRound,
     latestRound?.finished,
     latestRound?.result,
+    pendingValue,
+    requestedBy,
     resolvedRoundFinished,
     resolvedRoundResult,
     resolvedMyCardString,
     resolvedOpponentCardString,
+    winner,
   ]);
 
   useEffect(() => {
@@ -809,6 +1095,39 @@ export function MatchTableShell(props: MatchTableShellProps) {
         style={{ borderRadius: 9999, border: '1px solid rgba(255,255,255,0.03)' }}
       />
 
+      <AnimatePresence>
+        {isAwaitingBet ? (
+          <BetStateBanner
+            handStatusLabel={handStatusLabel}
+            handStatusTone={handStatusTone}
+            currentValue={currentValue}
+            pendingValue={pendingValue}
+            requestedBy={requestedBy}
+            availableActions={availableActions}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isHandFinished && winner && awardedPoints !== null ? (
+          <HandOutcomeBanner
+            winner={winner}
+            awardedPoints={awardedPoints}
+            canStartHand={canStartHand}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      {shouldBlockHandDock ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-20"
+          style={{
+            background:
+              'radial-gradient(circle at 50% 48%, rgba(8,14,24,0.18), rgba(6,12,20,0.3) 62%, rgba(5,10,18,0.42) 100%)',
+          }}
+        />
+      ) : null}
+
       <div className="relative flex min-h-0 flex-1 flex-col px-6 pb-2 pt-5">
         <div className="pointer-events-none absolute inset-0">
           <div
@@ -842,7 +1161,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
               <SideInfoBlock
                 title="Valor Atual"
                 value={currentValue}
-                status={isAwaitingBet ? 'Aguardando Truco' : handStatusLabel}
+                status={isAwaitingBet ? 'Aposta pendente' : handStatusLabel}
               />
             </div>
 
@@ -896,7 +1215,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
                     className="text-[8px] font-black uppercase tracking-[0.18em]"
                     style={{ color: 'rgba(255,255,255,0.24)' }}
                   >
-                    duelo
+                    {isAwaitingBet ? 'truco em decisão' : 'duelo'}
                   </span>
                   <div className="h-px flex-1 bg-white/10" />
                 </div>
@@ -913,10 +1232,26 @@ export function MatchTableShell(props: MatchTableShellProps) {
               <MatchActionSurface availableActions={availableActions} onAction={onAction} />
             </div>
 
-            <div className="w-full max-w-[610px]">
+            <div className="relative w-full max-w-[610px]">
+              {shouldBlockHandDock ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[24px]">
+                  <div
+                    className="rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+                    style={{
+                      background: 'rgba(7,14,24,0.88)',
+                      border: '1px solid rgba(230,195,100,0.18)',
+                      color: '#e8c76a',
+                      boxShadow: '0 12px 24px rgba(0,0,0,0.26)',
+                    }}
+                  >
+                    Responda o truco antes de jogar carta
+                  </div>
+                </div>
+              ) : null}
+
               <MatchPlayerHandDock
                 myCards={myCards}
-                canPlayCard={canPlayCard}
+                canPlayCard={shouldBlockHandDock ? false : canPlayCard}
                 tablePhase={tablePhase}
                 launchingCardKey={launchingCardKey}
                 currentPrivateHand={currentPrivateHand}

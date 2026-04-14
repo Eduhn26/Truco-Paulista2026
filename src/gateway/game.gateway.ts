@@ -29,6 +29,7 @@ import type { RequestTrucoRequestDto } from '@game/application/dtos/requests/req
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
 import {
   BOT_DECISION_PORT,
+  type BotDecision,
   type BotDecisionContext,
   type BotDecisionPort,
   type BotProfile,
@@ -284,10 +285,13 @@ type ResolvedHandshakeIdentity = {
   playerToken: string;
 };
 
-type BotTurnDecisionContext = {
+type BotTurnDecisionActor = {
   seatId: string;
   teamId: 'T1' | 'T2';
   playerId: 'P1' | 'P2';
+};
+
+type BotTurnDecisionContext = BotTurnDecisionActor & {
   context: BotDecisionContext;
 };
 
@@ -912,15 +916,107 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
-  private buildBotDecisionContext(
+  private buildBotBetView(currentHand: ViewMatchStateResponseDto['currentHand']) {
+    if (!currentHand) {
+      return undefined;
+    }
+
+    const hasBetContext =
+      currentHand.currentValue !== undefined ||
+      currentHand.betState !== undefined ||
+      currentHand.pendingValue !== undefined ||
+      currentHand.requestedBy !== undefined ||
+      currentHand.specialState !== undefined ||
+      currentHand.specialDecisionPending !== undefined ||
+      Object.keys(currentHand.availableActions ?? {}).length > 0;
+
+    if (!hasBetContext) {
+      return undefined;
+    }
+
+    return {
+      currentValue: currentHand.currentValue,
+      betState: currentHand.betState,
+      pendingValue: currentHand.pendingValue,
+      requestedBy: currentHand.requestedBy,
+      specialState: currentHand.specialState,
+      specialDecisionPending: currentHand.specialDecisionPending,
+      availableActions: {
+        ...currentHand.availableActions,
+      },
+    };
+  }
+
+  private resolveBetResponderPlayerId(requestedBy: 'P1' | 'P2' | null): 'P1' | 'P2' | null {
+    if (requestedBy === 'P1') {
+      return 'P2';
+    }
+
+    if (requestedBy === 'P2') {
+      return 'P1';
+    }
+
+    return null;
+  }
+
+  private resolveBotTurnDecisionActor(
     matchId: string,
     state: ViewMatchStateResponseDto,
-  ): BotTurnDecisionContext | null {
+  ): BotTurnDecisionActor | null {
     const roomState = this.roomManager.getState(matchId);
-    const currentTurnSeatId = roomState.currentTurnSeatId;
     const currentHand = state.currentHand;
 
-    if (!currentTurnSeatId || !currentHand) {
+    if (!currentHand) {
+      return null;
+    }
+
+    if (
+      currentHand.specialState === 'mao_de_onze' &&
+      currentHand.specialDecisionPending &&
+      currentHand.specialDecisionBy
+    ) {
+      const decisionTeamId = currentHand.specialDecisionBy === 'P1' ? 'T1' : 'T2';
+      const decisionSeat = roomState.players.find(
+        (player) => player.teamId === decisionTeamId && player.isBot,
+      );
+
+      if (!decisionSeat) {
+        return null;
+      }
+
+      return {
+        seatId: decisionSeat.seatId,
+        teamId: decisionSeat.teamId,
+        playerId: currentHand.specialDecisionBy,
+      };
+    }
+
+    if (currentHand.betState === 'awaiting_response' && currentHand.requestedBy !== null) {
+      const responderPlayerId = this.resolveBetResponderPlayerId(currentHand.requestedBy);
+
+      if (!responderPlayerId) {
+        return null;
+      }
+
+      const responderTeamId = responderPlayerId === 'P1' ? 'T1' : 'T2';
+      const responderSeat = roomState.players.find(
+        (player) => player.teamId === responderTeamId && player.isBot,
+      );
+
+      if (!responderSeat) {
+        return null;
+      }
+
+      return {
+        seatId: responderSeat.seatId,
+        teamId: responderSeat.teamId,
+        playerId: responderPlayerId,
+      };
+    }
+
+    const currentTurnSeatId = roomState.currentTurnSeatId;
+
+    if (!currentTurnSeatId) {
       return null;
     }
 
@@ -930,22 +1026,49 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return null;
     }
 
-    const playerId: 'P1' | 'P2' = currentSeat.teamId === 'T1' ? 'P1' : 'P2';
-    const hand = playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
-
     return {
       seatId: currentSeat.seatId,
       teamId: currentSeat.teamId,
-      playerId,
+      playerId: currentSeat.teamId === 'T1' ? 'P1' : 'P2',
+    };
+  }
+
+  private async buildBotDecisionContext(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+  ): Promise<BotTurnDecisionContext | null> {
+    const actor = this.resolveBotTurnDecisionActor(matchId, state);
+
+    if (!actor) {
+      return null;
+    }
+
+    const viewerState = await this.viewMatchStateUseCase.execute({
+      matchId,
+      viewerPlayerId: actor.playerId,
+    });
+    const currentHand = viewerState.currentHand;
+
+    if (!currentHand) {
+      return null;
+    }
+
+    const hand = actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
+
+    const betView = this.buildBotBetView(currentHand);
+
+    return {
+      ...actor,
       context: {
         matchId,
-        profile: this.resolveBotProfile(matchId, currentSeat.seatId),
+        profile: this.resolveBotProfile(matchId, actor.seatId),
         viraRank: currentHand.viraRank,
-        currentRound: this.getCurrentBotRoundView(state),
+        currentRound: this.getCurrentBotRoundView(viewerState),
         player: {
-          playerId,
+          playerId: actor.playerId,
           hand,
         },
+        ...(betView ? { bet: betView } : {}),
       },
     };
   }
@@ -1196,7 +1319,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.clearScheduledBotTurn(matchId);
 
     const state = await this.getAuthoritativeMatchState(matchId);
-    const botTurnContext = this.buildBotDecisionContext(matchId, state);
+    const botTurnContext = await this.buildBotDecisionContext(matchId, state);
 
     if (!botTurnContext) {
       return false;
@@ -1209,6 +1332,87 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return true;
+  }
+
+  private async executeBotBetDecision(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+    decision: BotDecision,
+  ): Promise<boolean> {
+    const action =
+      decision.action === 'pass' || decision.action === 'play-card'
+        ? 'accept-bet'
+        : decision.action;
+
+    if (action === 'accept-bet') {
+      const dto: AcceptBetRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.acceptBetUseCase.execute(dto);
+    } else if (action === 'decline-bet') {
+      const dto: DeclineBetRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.declineBetUseCase.execute(dto);
+    } else if (action === 'raise-to-six') {
+      const dto: RaiseToSixRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.raiseToSixUseCase.execute(dto);
+    } else if (action === 'raise-to-nine') {
+      const dto: RaiseToNineRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.raiseToNineUseCase.execute(dto);
+    } else if (action === 'raise-to-twelve') {
+      const dto: RaiseToTwelveRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.raiseToTwelveUseCase.execute(dto);
+    }
+
+    const updatedState = await this.emitSyncedMatchState(matchId);
+    await this.finalizeMatchIfFinished(matchId, updatedState);
+
+    const eventByAction = {
+      'accept-bet': 'accept_bet_succeeded',
+      'decline-bet': 'decline_bet_succeeded',
+      'raise-to-six': 'raise_to_six_succeeded',
+      'raise-to-nine': 'raise_to_nine_succeeded',
+      'raise-to-twelve': 'raise_to_twelve_succeeded',
+    } as const;
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: eventByAction[action],
+      status: 'succeeded',
+      matchId,
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+    });
+
+    if (updatedState.state !== 'in_progress' || !updatedState.currentHand) {
+      return false;
+    }
+
+    if (updatedState.currentHand.finished) {
+      return false;
+    }
+
+    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
+
+    return Boolean(nextBotTurnContext);
   }
 
   private async executeBotTurn(
@@ -1250,35 +1454,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
+    const decision = this.botDecisionPort.decide(botTurnContext.context);
+
     if (
       currentHand.betState === 'awaiting_response' &&
       currentHand.requestedBy !== null &&
       currentHand.requestedBy !== botTurnContext.playerId
     ) {
-      const dto: AcceptBetRequestDto = {
-        matchId,
-        playerId: botTurnContext.playerId,
-      };
-
-      await this.acceptBetUseCase.execute(dto);
-
-      const updatedState = await this.emitSyncedMatchState(matchId);
-      await this.finalizeMatchIfFinished(matchId, updatedState);
-
-      this.logGateway('log', {
-        layer: 'gateway',
-        event: 'accept_bet_succeeded',
-        status: 'succeeded',
-        matchId,
-        seatId: botTurnContext.seatId,
-        teamId: botTurnContext.teamId,
-        playerId: botTurnContext.playerId,
-      });
-
-      return false;
+      return this.executeBotBetDecision(matchId, botTurnContext, decision);
     }
-
-    const decision = this.botDecisionPort.decide(botTurnContext.context);
 
     if (decision.action !== 'play-card') {
       return false;
@@ -1348,7 +1532,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const nextBotTurnContext = this.buildBotDecisionContext(matchId, updatedState);
+    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
 
     if (!nextBotTurnContext) {
       return false;

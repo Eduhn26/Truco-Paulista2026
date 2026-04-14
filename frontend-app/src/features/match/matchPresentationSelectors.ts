@@ -79,6 +79,74 @@ function resolveTablePhase(params: {
   return 'playing';
 }
 
+function formatRequestedBy(requestedBy: PlayerId | null): string {
+  if (requestedBy === 'P1') {
+    return 'T1';
+  }
+
+  if (requestedBy === 'P2') {
+    return 'T2';
+  }
+
+  return 'alguém';
+}
+
+function buildBetDecisionStatus(params: {
+  currentPublicHand: MatchStateHandPayload;
+  availableActions: MatchAvailableActionsPayload;
+}): { handStatusLabel: string; handStatusTone: MatchStatusTone } {
+  const { currentPublicHand, availableActions } = params;
+
+  const requestedBy = formatRequestedBy(currentPublicHand.requestedBy ?? null);
+  const pendingValue = currentPublicHand.pendingValue ?? currentPublicHand.currentValue;
+
+  if (availableActions.canAcceptBet || availableActions.canDeclineBet) {
+    const canRaise =
+      availableActions.canRaiseToSix ||
+      availableActions.canRaiseToNine ||
+      availableActions.canRaiseToTwelve;
+
+    return {
+      handStatusLabel: canRaise
+        ? `${requestedBy} pediu ${pendingValue}. Responda agora: aceitar, correr ou subir a aposta.`
+        : `${requestedBy} pediu ${pendingValue}. Responda agora: aceitar ou correr.`,
+      handStatusTone: 'warning',
+    };
+  }
+
+  return {
+    handStatusLabel: `${requestedBy} pediu ${pendingValue}. Aguarde a resposta da aposta.`,
+    handStatusTone: 'warning',
+  };
+}
+
+function buildHandResultStatus(params: {
+  currentPublicHand: MatchStateHandPayload;
+  canStartHand: boolean;
+}): { handStatusLabel: string; handStatusTone: MatchStatusTone } {
+  const { currentPublicHand, canStartHand } = params;
+
+  if (currentPublicHand.winner && currentPublicHand.awardedPoints !== null) {
+    const winnerLabel = currentPublicHand.winner === 'P1' ? 'T1' : 'T2';
+    const pointsLabel =
+      currentPublicHand.awardedPoints === 1
+        ? '1 ponto'
+        : `${currentPublicHand.awardedPoints} pontos`;
+
+    return {
+      handStatusLabel: `Mão encerrada. ${winnerLabel} venceu e marcou ${pointsLabel}.${canStartHand ? ' Você já pode iniciar a próxima mão.' : ''}`,
+      handStatusTone: 'success',
+    };
+  }
+
+  return {
+    handStatusLabel: canStartHand
+      ? 'Mão encerrada. Você já pode iniciar a próxima mão.'
+      : 'Mão encerrada. Aguardando a próxima mão.',
+    handStatusTone: 'warning',
+  };
+}
+
 function buildHandStatus(params: {
   publicMatchState: MatchStatePayload | null;
   currentPublicHand: MatchStateHandPayload | null;
@@ -102,33 +170,51 @@ function buildHandStatus(params: {
 
   if (publicMatchState?.state === 'finished') {
     return {
-      handStatusLabel: 'Partida encerrada.',
+      handStatusLabel: 'Partida encerrada. O placar final já foi definido.',
       handStatusTone: 'success',
     };
   }
 
-  if (publicMatchState?.state !== 'in_progress' || !currentPublicHand) {
-    return canStartHand
-      ? {
-          handStatusLabel: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
-          handStatusTone: 'success',
-        }
-      : {
-          handStatusLabel: 'Aguardando início da próxima mão.',
-          handStatusTone: 'neutral',
-        };
+  if (!currentPublicHand) {
+    if (publicMatchState?.state === 'waiting' && canStartHand) {
+      return {
+        handStatusLabel: 'Todos estão prontos. Você já pode iniciar a próxima mão.',
+        handStatusTone: 'neutral',
+      };
+    }
+
+    return {
+      handStatusLabel: 'Aguardando início da mão.',
+      handStatusTone: 'neutral',
+    };
   }
 
-  if (currentPublicHand.finished) {
+  if (currentPublicHand.specialState === 'mao_de_onze' && currentPublicHand.specialDecisionPending) {
+    const requestedBy = formatRequestedBy(currentPublicHand.specialDecisionBy ?? null);
+
     return {
-      handStatusLabel: 'Mão encerrada. Aguardando próxima mão.',
+      handStatusLabel: `Mão de 11 em decisão para ${requestedBy}. Aguarde a confirmação antes de seguir.`,
       handStatusTone: 'warning',
     };
   }
 
+  if (currentPublicHand.betState === 'awaiting_response') {
+    return buildBetDecisionStatus({
+      currentPublicHand,
+      availableActions: currentPublicHand.availableActions ?? EMPTY_AVAILABLE_ACTIONS,
+    });
+  }
+
+  if (currentPublicHand.finished) {
+    return buildHandResultStatus({
+      currentPublicHand,
+      canStartHand,
+    });
+  }
+
   if (latestRound?.finished) {
     return {
-      handStatusLabel: 'Rodada encerrada. Preparando próxima jogada.',
+      handStatusLabel: 'Rodada encerrada. Preparando a próxima jogada.',
       handStatusTone: 'warning',
     };
   }
@@ -170,6 +256,7 @@ export function buildMatchContractPresentation(
 
   const handFinished = Boolean(currentPublicHand?.finished);
   const matchFinished = publicMatchState?.state === 'finished';
+  const betDecisionPending = currentPublicHand?.betState === 'awaiting_response';
 
   const tablePhase = resolveTablePhase({
     publicMatchState,
@@ -181,7 +268,7 @@ export function buildMatchContractPresentation(
     publicMatchState,
     currentPublicHand,
     canStartHand,
-    canPlayCard,
+    canPlayCard: betDecisionPending ? false : canPlayCard,
     isMyTurn,
     myCardsCount,
     playedRoundsCount: playedRounds.length,
@@ -208,7 +295,7 @@ export function buildMatchContractPresentation(
     rounds,
     playedRoundsCount: playedRounds.length,
     canStartHand,
-    canPlayCard,
+    canPlayCard: betDecisionPending ? false : canPlayCard,
     currentTurnSeatId: roomState?.currentTurnSeatId ?? null,
   };
 }
