@@ -66,6 +66,7 @@ type MatchScreenSourceViewModel = {
 type MatchScreenTransitionState = {
   displayedMyPlayedCard: string | null;
   displayedOpponentPlayedCard: string | null;
+  resolvedRoundResult: string | null;
   opponentRevealKey: number;
   pendingPlayedCard: {
     owner: 'mine' | 'opponent';
@@ -165,6 +166,10 @@ export function buildMatchScreenViewModel({
       latestRound: viewModel.latestRound,
       latestRoundMyPlayedCard: viewModel.myPlayedCard,
       latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
+      displayedResolvedRoundFinished: liveTableTransition.isResolvingRound,
+      displayedResolvedRoundResult: liveTableTransition.isResolvingRound
+        ? liveTableTransition.resolvedRoundResult
+        : null,
       tablePhase: viewModel.tablePhase,
       canStartHand: viewModel.canStartHand,
       scoreLabel: viewModel.scoreLabel,
