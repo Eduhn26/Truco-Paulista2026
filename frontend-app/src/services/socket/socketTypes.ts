@@ -125,6 +125,25 @@ export type CardPlayedPayload = {
   isBot?: boolean;
 };
 
+export type RoundTransitionPhase = 'round-resolved' | 'next-round-opened';
+
+export type RoundTransitionPayload = {
+  matchId: string;
+  phase: RoundTransitionPhase;
+  roundWinner: RoundResult | null;
+  finishedRoundsCount: number;
+  totalRoundsCount: number;
+  handContinues: boolean;
+  openingSeatId: SeatId | null;
+  currentTurnSeatId: SeatId | null;
+  triggeredBy?: {
+    seatId: string;
+    teamId: 'T1' | 'T2';
+    playerId: 'P1' | 'P2';
+    isBot: boolean;
+  };
+};
+
 export type GameSocketEvents = {
   onConnect?: (socketId: string) => void;
   onDisconnect?: (reason: string) => void;
@@ -136,11 +155,8 @@ export type GameSocketEvents = {
   onRanking?: (payload: RankingPayload) => void;
   onHandStarted?: (payload: HandStartedPayload) => void;
   onCardPlayed?: (payload: CardPlayedPayload) => void;
+  onRoundTransition?: (payload: RoundTransitionPayload) => void;
 };
-
-// NOTE: The canonical backend suits are C (Clubs/Paus), O (Ouros/Diamonds),
-// P (Copas/Hearts), and E (Espadas/Spades). Some legacy or compatibility
-// paths may still emit H/D/S aliases, so the frontend normalises both forms.
 
 export type SuitDisplay = { symbol: string; colorClass: string };
 
@@ -397,6 +413,57 @@ export function normalizeCardPlayedPayload(payload: unknown): CardPlayedPayload 
     ...(card !== undefined ? { card } : {}),
     ...(currentTurnSeatId !== null ? { currentTurnSeatId } : { currentTurnSeatId: null }),
     ...(isBot !== undefined ? { isBot } : {}),
+  };
+}
+
+export function normalizeRoundTransitionPayload(payload: unknown): RoundTransitionPayload {
+  const input = asObject(payload);
+  const triggeredBy = asObject(input.triggeredBy);
+
+  const seatId = asOptionalString(triggeredBy.seatId);
+  const teamId =
+    triggeredBy.teamId === 'T1' || triggeredBy.teamId === 'T2' ? triggeredBy.teamId : undefined;
+  const playerId =
+    triggeredBy.playerId === 'P1' || triggeredBy.playerId === 'P2'
+      ? triggeredBy.playerId
+      : undefined;
+  const isBot = typeof triggeredBy.isBot === 'boolean' ? triggeredBy.isBot : undefined;
+
+  const normalizedTriggeredBy:
+    | {
+        seatId: string;
+        teamId: 'T1' | 'T2';
+        playerId: 'P1' | 'P2';
+        isBot: boolean;
+      }
+    | undefined =
+    seatId !== undefined &&
+    teamId !== undefined &&
+    playerId !== undefined &&
+    isBot !== undefined
+      ? {
+          seatId,
+          teamId,
+          playerId,
+          isBot,
+        }
+      : undefined;
+
+  const phase =
+    input.phase === 'round-resolved' || input.phase === 'next-round-opened'
+      ? input.phase
+      : 'round-resolved';
+
+  return {
+    matchId: asString(input.matchId),
+    phase,
+    roundWinner: typeof input.roundWinner === 'string' ? input.roundWinner : null,
+    finishedRoundsCount: asNumber(input.finishedRoundsCount, 0),
+    totalRoundsCount: asNumber(input.totalRoundsCount, 0),
+    handContinues: asBoolean(input.handContinues),
+    openingSeatId: asNullableString(input.openingSeatId),
+    currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+    ...(normalizedTriggeredBy !== undefined ? { triggeredBy: normalizedTriggeredBy } : {}),
   };
 }
 

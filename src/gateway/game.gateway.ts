@@ -291,8 +291,35 @@ type BotTurnDecisionContext = {
   context: BotDecisionContext;
 };
 
-const BOT_CHAINED_TURN_DELAY_MS = 900;
+type RoundTransitionPhase = 'round-resolved' | 'next-round-opened';
 
+type RoundTransitionPayload = {
+  matchId: string;
+  phase: RoundTransitionPhase;
+  roundWinner: 'P1' | 'P2' | 'TIE' | null;
+  finishedRoundsCount: number;
+  totalRoundsCount: number;
+  handContinues: boolean;
+  openingSeatId: string | null;
+  currentTurnSeatId: string | null;
+  triggeredBy?: {
+    seatId: string;
+    teamId: 'T1' | 'T2';
+    playerId: 'P1' | 'P2';
+    isBot: boolean;
+  };
+};
+
+type CardPlayedActor = {
+  seatId: string;
+  teamId: 'T1' | 'T2';
+  playerId: 'P1' | 'P2';
+  isBot: boolean;
+};
+
+// [AÇÃO B] Aumentado de 900 para 1800 — dá tempo ao frontend de exibir a
+// resolução da rodada (hold ~1600ms) antes que o bot jogue a próxima carta.
+const BOT_CHAINED_TURN_DELAY_MS = 1800;
 
 @WebSocketGateway({
   cors: {
@@ -577,7 +604,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private isHandCurrentlyInProgress(state: ViewMatchStateResponseDto): boolean {
-    return state.state === 'in_progress' && Boolean(state.currentHand) && !state.currentHand?.finished;
+    return (
+      state.state === 'in_progress' && Boolean(state.currentHand) && !state.currentHand?.finished
+    );
   }
 
   private didOpenNewRound(
@@ -940,9 +969,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const previousRounds = previousState.currentHand?.rounds ?? [];
     const updatedRounds = updatedState.currentHand?.rounds ?? [];
 
-    // NOTE: The domain pushes the next Round immediately after a finished round
-    // when the hand is still alive. That makes "round count increased" the most
-    // reliable signal that a new round has just started.
     if (updatedRounds.length <= previousRounds.length) {
       return null;
     }
@@ -978,8 +1004,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (roundResult === 'TIE') {
-      // NOTE: In 1v1, when the second player closes a tied round, the opener of
-      // that round is the opposite seat of the acting player.
       return this.getOneVsOneOpponentSeat(matchId, actingSeatId);
     }
 
@@ -1016,6 +1040,119 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return this.roomManager.advanceTurn(matchId);
+  }
+
+  private getFinishedRoundsCount(state: ViewMatchStateResponseDto): number {
+    const rounds = state.currentHand?.rounds ?? [];
+
+    return rounds.filter((round) => round.finished).length;
+  }
+
+  private getTotalRoundsCount(state: ViewMatchStateResponseDto): number {
+    return state.currentHand?.rounds.length ?? 0;
+  }
+
+  private buildRoundResolvedTransitionPayload(
+    matchId: string,
+    updatedState: ViewMatchStateResponseDto,
+    roomState: ReturnType<RoomManager['getState']>,
+    roundWinner: 'P1' | 'P2' | 'TIE' | null,
+    actor: CardPlayedActor,
+  ): RoundTransitionPayload | null {
+    if (!roundWinner) {
+      return null;
+    }
+
+    const currentHand = updatedState.currentHand;
+
+    if (!currentHand) {
+      return null;
+    }
+
+    return {
+      matchId,
+      phase: 'round-resolved',
+      roundWinner,
+      finishedRoundsCount: this.getFinishedRoundsCount(updatedState),
+      totalRoundsCount: this.getTotalRoundsCount(updatedState),
+      handContinues: updatedState.state === 'in_progress' && !currentHand.finished,
+      openingSeatId: null,
+      currentTurnSeatId: roomState.currentTurnSeatId ?? null,
+      triggeredBy: actor,
+    };
+  }
+
+  private buildNextRoundOpenedTransitionPayload(
+    matchId: string,
+    updatedState: ViewMatchStateResponseDto,
+    roomState: ReturnType<RoomManager['getState']>,
+    roundWinner: 'P1' | 'P2' | 'TIE' | null,
+    actor: CardPlayedActor,
+  ): RoundTransitionPayload | null {
+    if (
+      updatedState.state !== 'in_progress' ||
+      !updatedState.currentHand ||
+      updatedState.currentHand.finished
+    ) {
+      return null;
+    }
+
+    return {
+      matchId,
+      phase: 'next-round-opened',
+      roundWinner,
+      finishedRoundsCount: this.getFinishedRoundsCount(updatedState),
+      totalRoundsCount: this.getTotalRoundsCount(updatedState),
+      handContinues: true,
+      openingSeatId: roomState.currentTurnSeatId ?? null,
+      currentTurnSeatId: roomState.currentTurnSeatId ?? null,
+      triggeredBy: actor,
+    };
+  }
+
+  private emitRoundTransition(payload: RoundTransitionPayload): void {
+    this.server.to(payload.matchId).emit('round-transition', payload);
+  }
+
+  private emitRoundTransitionAfterCardPlay(
+    matchId: string,
+    previousState: ViewMatchStateResponseDto,
+    updatedState: ViewMatchStateResponseDto,
+    roomState: ReturnType<RoomManager['getState']>,
+    actor: CardPlayedActor,
+  ): void {
+    const openedNewRound = this.didOpenNewRound(previousState, updatedState);
+    const roundWinner = openedNewRound
+      ? this.getFinishedRoundResultThatOpenedANewRound(previousState, updatedState)
+      : this.getLatestRoundResult(updatedState);
+
+    const resolvedPayload = this.buildRoundResolvedTransitionPayload(
+      matchId,
+      updatedState,
+      roomState,
+      roundWinner,
+      actor,
+    );
+
+    if (resolvedPayload) {
+      this.emitRoundTransition(resolvedPayload);
+    }
+
+    if (!openedNewRound) {
+      return;
+    }
+
+    const nextRoundPayload = this.buildNextRoundOpenedTransitionPayload(
+      matchId,
+      updatedState,
+      roomState,
+      roundWinner,
+      actor,
+    );
+
+    if (nextRoundPayload) {
+      this.emitRoundTransition(nextRoundPayload);
+    }
   }
 
   private async finalizeMatchIfFinished(
@@ -1110,8 +1247,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: botTurnContext.playerId,
       });
 
-      // NOTE: Accepting mao de onze changes the decision surface for the hand.
-      // The next automatic action, if any, must happen in a new paced cycle.
       return false;
     }
 
@@ -1140,8 +1275,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: botTurnContext.playerId,
       });
 
-      // NOTE: Bet acceptance is a dramatic boundary. The bot must not chain a
-      // new move inside the same automatic cycle after resolving the wager.
       return false;
     }
 
@@ -1184,6 +1317,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
     await this.emitPrivateMatchState(matchId);
 
+    this.emitRoundTransitionAfterCardPlay(matchId, previousState, updatedState, nextRoomState, {
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+      isBot: true,
+    });
+
     this.logGateway('log', {
       layer: 'gateway',
       event: 'play_card_succeeded',
@@ -1201,23 +1341,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    if (updatedState.currentHand.finished || updatedState.currentHand.nextDecisionType !== 'play-card') {
+    if (
+      updatedState.currentHand.finished ||
+      updatedState.currentHand.nextDecisionType !== 'play-card'
+    ) {
       return false;
     }
 
-    const openedNewRound = this.didOpenNewRound(previousState, updatedState);
     const nextBotTurnContext = this.buildBotDecisionContext(matchId, updatedState);
 
     if (!nextBotTurnContext) {
       return false;
     }
 
-    // NOTE: When a bot action closes a round and opens the next one, the next
-    // automatic response must be deferred to a brand-new paced cycle.
-    if (openedNewRound) {
-      return true;
-    }
-
+    // NOTE: Every consecutive bot action is always deferred. The delay gives
+    // the frontend enough time to display the round resolution hold before the
+    // next card appears on the table.
     return true;
   }
 
@@ -1980,8 +2119,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const isStartingNextHand =
-        authoritativeState.state === 'waiting' && Boolean(authoritativeState.currentHand?.finished);
+      const isStartingNextHand = this.canStartSubsequentHand(authoritativeState);
 
       if (!isStartingNextHand && !this.roomManager.canStart(session.matchId)) {
         return this.reject(
@@ -2136,6 +2274,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(matchId).emit('match-state', this.toPublicMatchState(state));
       await this.emitPrivateMatchState(matchId);
 
+      this.emitRoundTransitionAfterCardPlay(matchId, previousState, state, roomState, {
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        isBot: false,
+      });
+
       this.logGateway('log', {
         layer: 'gateway',
         event: 'play_card_succeeded',
@@ -2150,9 +2295,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       await this.finalizeMatchIfFinished(matchId, state);
 
+      // [AÇÃO A] NUNCA executar o bot imediatamente após a jogada humana.
+      // Sempre agendar com delay para dar tempo ao frontend de exibir a
+      // resolução da rodada antes que o bot jogue a próxima carta.
+      // Antes: await this.processBotTurns(matchId) — executava sem delay.
+      // Agora: scheduleDeferredBotTurn — sempre com BOT_CHAINED_TURN_DELAY_MS.
       if (state.state === 'in_progress') {
         this.clearScheduledBotTurn(matchId);
-        await this.processBotTurns(matchId);
+        this.scheduleDeferredBotTurn(matchId);
       }
 
       return { event: 'play-card:ack', data: { matchId: result.matchId } };
@@ -2890,7 +3040,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleGetState(
     @ConnectedSocket() socket: Socket,
     @MessageBody() payload: GetStatePayload,
-  ): Promise<WsResponse<ViewMatchStateResponseDto> | WsResponse<ErrorResponseDto>> {
+  ): Promise<WsResponse<{ ok: true }> | WsResponse<ErrorResponseDto>> {
     this.logGateway('debug', {
       layer: 'gateway',
       event: 'get_state_requested',
@@ -2911,13 +3061,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
+      const roomState = this.roomManager.getState(matchId);
       const viewerPlayerId = this.resolveViewerPlayerId(socket.id, matchId);
+      const publicState = await this.viewMatchStateUseCase.execute({ matchId });
+      const privateState = viewerPlayerId
+        ? await this.viewMatchStateUseCase.execute({ matchId, viewerPlayerId })
+        : null;
 
-      const state = await this.viewMatchStateUseCase.execute(
-        viewerPlayerId === undefined ? { matchId } : { matchId, viewerPlayerId },
-      );
+      socket.emit('room-state', roomState);
+      socket.emit('match-state', this.toPublicMatchState(publicState));
 
-      socket.emit('match-state', state);
+      if (privateState) {
+        socket.emit('match-state:private', privateState);
+      }
 
       this.logGateway('debug', {
         layer: 'gateway',
@@ -2927,7 +3083,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         matchId,
       });
 
-      return { event: 'state', data: state };
+      return { event: 'state-synced', data: { ok: true } };
     } catch (error) {
       return this.rejectFromError('get_state_rejected', error, {
         socketId: socket.id,

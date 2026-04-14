@@ -36,6 +36,8 @@ type UseMatchTableTransitionResult = {
   roundIntroKey: number;
   roundResolvedKey: number;
   isResolvingRound: boolean;
+  resolvedRoundFinished: boolean;
+  resolvedRoundResult: string | null;
   isLiveTableFrame: boolean;
   displayedMyPlayedCard: string | null;
   displayedOpponentPlayedCard: string | null;
@@ -45,14 +47,20 @@ type UseMatchTableTransitionResult = {
     owner: 'mine' | 'opponent' | null;
     card: string | null;
   }) => void;
+  triggerRoundResolution: (params: {
+    resolutionKey: string;
+    myCard: string | null;
+    opponentCard: string | null;
+    roundResult?: string | null;
+  }) => void;
   stopRoundResolution: () => void;
 };
 
 const CARD_REVEAL_DELAY_MS = 220;
 const PENDING_CARD_TIMEOUT_MS = 2000;
-const RESOLUTION_CLEANUP_DELAY_MS = 2000;
-const ROUND_TRANSITION_DELAY_MS = 320;
-const OPPONENT_OPENING_ROUND_DELAY_MS = 640;
+const RESOLUTION_HOLD_MS = 1300;
+const NEXT_ROUND_CLEAN_FRAME_MS = 260;
+const HAND_END_CLEAN_FRAME_MS = 260;
 
 export function useMatchTableTransition(
   params: UseMatchTableTransitionParams,
@@ -71,6 +79,7 @@ export function useMatchTableTransition(
   const previousMyPlayedCardRef = useRef<string | null>(null);
   const isResolvingRoundRef = useRef(false);
   const previousResolvedRoundCountRef = useRef(0);
+  const lastResolvedRoundKeyRef = useRef<string | null>(null);
   const tablePhaseRef = useRef(tablePhase);
   const nextDecisionTypeRef = useRef<string | null>(nextDecisionType);
   const currentTurnSeatIdRef = useRef<string | null>(currentTurnSeatId);
@@ -98,6 +107,8 @@ export function useMatchTableTransition(
   const [roundIntroKey, setRoundIntroKey] = useState(0);
   const [roundResolvedKey, setRoundResolvedKey] = useState(0);
   const [isResolvingRound, setIsResolvingRound] = useState(false);
+  const [resolvedRoundFinished, setResolvedRoundFinished] = useState(false);
+  const [resolvedRoundResult, setResolvedRoundResult] = useState<string | null>(null);
   const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({
     mine: null,
     opponent: null,
@@ -129,6 +140,14 @@ export function useMatchTableTransition(
     }
   }, [latestRoundFinished, playedRoundsCount]);
 
+  // Limpa o estado de resolução visual quando isResolvingRound volta a false
+  useEffect(() => {
+    if (!isResolvingRound) {
+      setResolvedRoundFinished(false);
+      setResolvedRoundResult(null);
+    }
+  }, [isResolvingRound]);
+
   const cancelOpponentReveal = useCallback(() => {
     if (opponentRevealTimeoutRef.current) {
       clearTimeout(opponentRevealTimeoutRef.current);
@@ -154,13 +173,17 @@ export function useMatchTableTransition(
     pendingCardIdRef.current = null;
   }, []);
 
-  const resetForFreshRoundFrame = useCallback(() => {
-    console.log('[transition][resetForFreshRoundFrame]', {
-      previousMy: previousMyPlayedCardRef.current,
-      previousOpponent: previousOpponentPlayedCardRef.current,
-      isResolvingRound: isResolvingRoundRef.current,
-    });
+  const clearDisplayedTable = useCallback(() => {
+    setDisplayedMyPlayedCard(null);
+    setDisplayedOpponentPlayedCard(null);
+    setClosingTableCards({ mine: null, opponent: null });
+    previousMyPlayedCardRef.current = null;
+    previousOpponentPlayedCardRef.current = null;
+    opponentCardAcceptedViaEventRef.current = null;
+    myCardAcceptedViaEventRef.current = null;
+  }, []);
 
+  const resetForFreshRoundFrame = useCallback(() => {
     cancelOpponentReveal();
     clearRoundTransition();
 
@@ -169,27 +192,19 @@ export function useMatchTableTransition(
       closingTimeoutRef.current = null;
     }
 
-    setDisplayedMyPlayedCard(null);
-    setDisplayedOpponentPlayedCard(null);
-    setClosingTableCards({ mine: null, opponent: null });
+    clearTransientLaunchState();
+    clearDisplayedTable();
     setIsResolvingRound(false);
+    setResolvedRoundFinished(false);
+    setResolvedRoundResult(null);
     setRoundIntroKey((current) => current + 1);
-    previousMyPlayedCardRef.current = null;
-    previousOpponentPlayedCardRef.current = null;
-    opponentCardAcceptedViaEventRef.current = null;
-    myCardAcceptedViaEventRef.current = null;
-  }, [cancelOpponentReveal, clearRoundTransition]);
+  }, [cancelOpponentReveal, clearDisplayedTable, clearRoundTransition, clearTransientLaunchState]);
 
   const revealOpponentCard = useCallback(
     (card: string, immediate: boolean) => {
       cancelOpponentReveal();
 
       const reveal = () => {
-        console.log('[transition][revealOpponentCard]', {
-          card,
-          immediate,
-        });
-
         setDisplayedOpponentPlayedCard(card);
         setOpponentRevealKey((current) => current + 1);
         previousOpponentPlayedCardRef.current = card;
@@ -205,61 +220,54 @@ export function useMatchTableTransition(
     [cancelOpponentReveal],
   );
 
+  const queueNextRoundPromotion = useCallback((nextState: Partial<PendingPromotionState>) => {
+    pendingPromotionRef.current = {
+      myCard:
+        nextState.myCard !== undefined ? nextState.myCard : pendingPromotionRef.current.myCard,
+      opponentCard:
+        nextState.opponentCard !== undefined
+          ? nextState.opponentCard
+          : pendingPromotionRef.current.opponentCard,
+    };
+  }, []);
+
   const flushPendingPromotion = useCallback(() => {
     const nextPromotion = pendingPromotionRef.current;
     const hasPendingPromotion =
       nextPromotion.myCard !== null || nextPromotion.opponentCard !== null;
 
-    console.log('[transition][flushPendingPromotion]', {
-      nextPromotion,
-      hasPendingPromotion,
-      tablePhase: tablePhaseRef.current,
-      nextDecisionType: nextDecisionTypeRef.current,
-      currentTurnSeatId: currentTurnSeatIdRef.current,
-    });
+    const handEnded =
+      tablePhaseRef.current === 'hand_finished' ||
+      tablePhaseRef.current === 'match_finished' ||
+      nextDecisionTypeRef.current === 'start-next-hand' ||
+      nextDecisionTypeRef.current === 'match-finished';
 
     if (!hasPendingPromotion) {
-      const shouldAwaitNextRoundOpening =
-        tablePhaseRef.current === 'playing' &&
-        nextDecisionTypeRef.current === 'play-card' &&
-        currentTurnSeatIdRef.current !== null;
+      awaitingNextRoundOpeningRef.current = false;
+      suppressResolvedRoundReplayRef.current = !handEnded;
 
-      if (shouldAwaitNextRoundOpening) {
-        suppressResolvedRoundReplayRef.current = true;
-        awaitingNextRoundOpeningRef.current = true;
+      const cleanupDelay = handEnded ? HAND_END_CLEAN_FRAME_MS : NEXT_ROUND_CLEAN_FRAME_MS;
+
+      roundTransitionTimeoutRef.current = setTimeout(() => {
         resetForFreshRoundFrame();
-      } else {
-        if (closingTimeoutRef.current) {
-          clearTimeout(closingTimeoutRef.current);
-          closingTimeoutRef.current = null;
-        }
+        roundTransitionTimeoutRef.current = null;
 
-        awaitingNextRoundOpeningRef.current = false;
-        setIsResolvingRound(false);
-      }
+        if (!handEnded) {
+          awaitingNextRoundOpeningRef.current = true;
+        }
+      }, cleanupDelay);
 
       pendingPromotionRef.current = { myCard: null, opponentCard: null };
       return;
     }
 
-    const shouldSlowOpponentOpening =
-      nextPromotion.myCard === null && nextPromotion.opponentCard !== null;
-    const transitionDelay = shouldSlowOpponentOpening
-      ? OPPONENT_OPENING_ROUND_DELAY_MS
-      : ROUND_TRANSITION_DELAY_MS;
-
     suppressResolvedRoundReplayRef.current = false;
     awaitingNextRoundOpeningRef.current = false;
-    resetForFreshRoundFrame();
 
     roundTransitionTimeoutRef.current = setTimeout(() => {
-      const promotionToApply = pendingPromotionRef.current;
+      resetForFreshRoundFrame();
 
-      console.log('[transition][applyPendingPromotion]', {
-        promotionToApply,
-        transitionDelay,
-        shouldSlowOpponentOpening,
-      });
+      const promotionToApply = pendingPromotionRef.current;
 
       if (promotionToApply.myCard) {
         setDisplayedMyPlayedCard(promotionToApply.myCard);
@@ -274,24 +282,8 @@ export function useMatchTableTransition(
 
       pendingPromotionRef.current = { myCard: null, opponentCard: null };
       roundTransitionTimeoutRef.current = null;
-    }, transitionDelay);
+    }, NEXT_ROUND_CLEAN_FRAME_MS);
   }, [resetForFreshRoundFrame, revealOpponentCard]);
-
-  const queueNextRoundPromotion = useCallback((nextState: Partial<PendingPromotionState>) => {
-    pendingPromotionRef.current = {
-      myCard:
-        nextState.myCard !== undefined ? nextState.myCard : pendingPromotionRef.current.myCard,
-      opponentCard:
-        nextState.opponentCard !== undefined
-          ? nextState.opponentCard
-          : pendingPromotionRef.current.opponentCard,
-    };
-
-    console.log('[transition][queueNextRoundPromotion]', {
-      nextPromotion: pendingPromotionRef.current,
-      isResolvingRound: isResolvingRoundRef.current,
-    });
-  }, []);
 
   const renderIncomingCard = useCallback(
     (owner: PlayedCardOwner, card: string, immediateOpponentReveal: boolean) => {
@@ -321,20 +313,17 @@ export function useMatchTableTransition(
       closingTimeoutRef.current = null;
     }
 
-    setDisplayedMyPlayedCard(null);
-    setDisplayedOpponentPlayedCard(null);
-    setClosingTableCards({ mine: null, opponent: null });
+    clearDisplayedTable();
     setIsResolvingRound(false);
+    setResolvedRoundFinished(false);
+    setResolvedRoundResult(null);
     setRoundIntroKey((current) => current + 1);
-    previousMyPlayedCardRef.current = null;
-    previousOpponentPlayedCardRef.current = null;
     previousResolvedRoundCountRef.current = 0;
-    opponentCardAcceptedViaEventRef.current = null;
-    myCardAcceptedViaEventRef.current = null;
+    lastResolvedRoundKeyRef.current = null;
     suppressResolvedRoundReplayRef.current = false;
     awaitingNextRoundOpeningRef.current = false;
     pendingPromotionRef.current = { myCard: null, opponentCard: null };
-  }, [cancelOpponentReveal, clearRoundTransition, clearTransientLaunchState]);
+  }, [cancelOpponentReveal, clearDisplayedTable, clearRoundTransition, clearTransientLaunchState]);
 
   const beginOwnCardLaunch = useCallback(
     (launchParams: { cardKey: string; serverCard: string }) => {
@@ -392,15 +381,6 @@ export function useMatchTableTransition(
         return;
       }
 
-      console.log('[transition][registerIncomingPlayedCard]', {
-        owner,
-        card,
-        tablePhase: tablePhaseRef.current,
-        isResolvingRound: isResolvingRoundRef.current,
-        previousMy: previousMyPlayedCardRef.current,
-        previousOpponent: previousOpponentPlayedCardRef.current,
-      });
-
       const canAcceptIncomingCard =
         tablePhaseRef.current !== 'missing_context' && tablePhaseRef.current !== 'match_finished';
 
@@ -421,8 +401,77 @@ export function useMatchTableTransition(
     [clearTransientLaunchState, queueNextRoundPromotion, renderIncomingCard],
   );
 
+  const triggerRoundResolution = useCallback(
+    ({
+      resolutionKey,
+      myCard: resolvedMyCard,
+      opponentCard: resolvedOpponentCard,
+      roundResult,
+    }: {
+      resolutionKey: string;
+      myCard: string | null;
+      opponentCard: string | null;
+      roundResult?: string | null;
+    }) => {
+      if (!resolutionKey) {
+        return;
+      }
+
+      if (lastResolvedRoundKeyRef.current === resolutionKey) {
+        return;
+      }
+
+      lastResolvedRoundKeyRef.current = resolutionKey;
+      previousResolvedRoundCountRef.current = playedRoundsCount;
+      cancelOpponentReveal();
+      clearRoundTransition();
+
+      if (resolvedMyCard) {
+        setDisplayedMyPlayedCard(resolvedMyCard);
+        previousMyPlayedCardRef.current = resolvedMyCard;
+        myCardAcceptedViaEventRef.current = resolvedMyCard;
+      }
+
+      if (resolvedOpponentCard) {
+        setDisplayedOpponentPlayedCard(resolvedOpponentCard);
+        previousOpponentPlayedCardRef.current = resolvedOpponentCard;
+        opponentCardAcceptedViaEventRef.current = resolvedOpponentCard;
+      }
+
+      setClosingTableCards({
+        mine: resolvedMyCard,
+        opponent: resolvedOpponentCard,
+      });
+      setIsResolvingRound(true);
+      setResolvedRoundFinished(true);
+      setResolvedRoundResult(roundResult ?? null);
+      setRoundResolvedKey((current) => current + 1);
+      pendingPromotionRef.current = { myCard: null, opponentCard: null };
+
+      if (closingTimeoutRef.current) {
+        clearTimeout(closingTimeoutRef.current);
+      }
+
+      closingTimeoutRef.current = setTimeout(() => {
+        if (isResolvingRoundRef.current) {
+          flushPendingPromotion();
+        }
+
+        closingTimeoutRef.current = null;
+      }, RESOLUTION_HOLD_MS);
+    },
+    [cancelOpponentReveal, clearRoundTransition, flushPendingPromotion, playedRoundsCount],
+  );
+
   const stopRoundResolution = useCallback(() => {
-    flushPendingPromotion();
+    if (closingTimeoutRef.current) {
+      clearTimeout(closingTimeoutRef.current);
+      closingTimeoutRef.current = null;
+    }
+
+    if (isResolvingRoundRef.current) {
+      flushPendingPromotion();
+    }
   }, [flushPendingPromotion]);
 
   useEffect(() => {
@@ -430,74 +479,48 @@ export function useMatchTableTransition(
       return;
     }
 
-    if (previousResolvedRoundCountRef.current === playedRoundsCount) {
+    if (awaitingNextRoundOpeningRef.current) {
       return;
     }
 
-    previousResolvedRoundCountRef.current = playedRoundsCount;
-    cancelOpponentReveal();
-    clearRoundTransition();
+    const alreadyResolvedCurrentRound =
+      previousResolvedRoundCountRef.current === playedRoundsCount ||
+      Boolean(lastResolvedRoundKeyRef.current);
 
-    const resolvedMyPlayedCard = displayedMyPlayedCard ?? myPlayedCard;
-    const resolvedOpponentPlayedCard = displayedOpponentPlayedCard ?? opponentPlayedCard;
+    if (alreadyResolvedCurrentRound) {
+      return;
+    }
 
-    console.log('[transition][roundResolved]', {
+    const fallbackResolutionKey = [
+      'snapshot',
       playedRoundsCount,
-      latestRoundFinished,
-      resolvedMyPlayedCard,
-      resolvedOpponentPlayedCard,
-      displayedMyPlayedCard,
-      displayedOpponentPlayedCard,
-      myPlayedCard,
-      opponentPlayedCard,
-      tablePhase,
-      nextDecisionType,
-      currentTurnSeatId,
+      myPlayedCard ?? 'null',
+      opponentPlayedCard ?? 'null',
+    ].join('|');
+
+    triggerRoundResolution({
+      resolutionKey: fallbackResolutionKey,
+      myCard: displayedMyPlayedCard ?? myPlayedCard,
+      opponentCard: displayedOpponentPlayedCard ?? opponentPlayedCard,
+      // O fallback de snapshot não tem roundResult explícito do evento;
+      // o shell vai derivar do latestRound se necessário.
+      roundResult: null,
     });
-
-    if (resolvedMyPlayedCard) {
-      setDisplayedMyPlayedCard(resolvedMyPlayedCard);
-      previousMyPlayedCardRef.current = resolvedMyPlayedCard;
-      myCardAcceptedViaEventRef.current = resolvedMyPlayedCard;
-    }
-
-    if (resolvedOpponentPlayedCard) {
-      setDisplayedOpponentPlayedCard(resolvedOpponentPlayedCard);
-      previousOpponentPlayedCardRef.current = resolvedOpponentPlayedCard;
-      opponentCardAcceptedViaEventRef.current = resolvedOpponentPlayedCard;
-    }
-
-    setClosingTableCards({
-      mine: resolvedMyPlayedCard,
-      opponent: resolvedOpponentPlayedCard,
-    });
-    setIsResolvingRound(true);
-    setRoundResolvedKey((current) => current + 1);
-    pendingPromotionRef.current = { myCard: null, opponentCard: null };
-
-    if (closingTimeoutRef.current) {
-      clearTimeout(closingTimeoutRef.current);
-    }
-
-    closingTimeoutRef.current = setTimeout(() => {
-      if (isResolvingRoundRef.current) {
-        stopRoundResolution();
-      }
-    }, RESOLUTION_CLEANUP_DELAY_MS);
   }, [
-    cancelOpponentReveal,
-    clearRoundTransition,
-    currentTurnSeatId,
     displayedMyPlayedCard,
     displayedOpponentPlayedCard,
     latestRoundFinished,
     myPlayedCard,
-    nextDecisionType,
     opponentPlayedCard,
     playedRoundsCount,
-    stopRoundResolution,
-    tablePhase,
+    triggerRoundResolution,
   ]);
+
+  useEffect(() => {
+    if (!latestRoundFinished && playedRoundsCount !== previousResolvedRoundCountRef.current) {
+      lastResolvedRoundKeyRef.current = null;
+    }
+  }, [latestRoundFinished, playedRoundsCount]);
 
   useEffect(() => {
     const shouldClearDisplayedMyCard =
@@ -510,25 +533,10 @@ export function useMatchTableTransition(
       return;
     }
 
-    console.log('[transition][clearDisplayedMyPlayedCard]', {
-      displayedMyPlayedCard,
-      myPlayedCard,
-      opponentPlayedCard,
-      playedRoundsCount,
-      latestRoundFinished,
-    });
-
     setDisplayedMyPlayedCard(null);
     previousMyPlayedCardRef.current = null;
     myCardAcceptedViaEventRef.current = null;
-  }, [
-    displayedMyPlayedCard,
-    latestRoundFinished,
-    myPlayedCard,
-    opponentPlayedCard,
-    playedRoundsCount,
-    tablePhase,
-  ]);
+  }, [displayedMyPlayedCard, myPlayedCard, tablePhase]);
 
   useEffect(() => {
     const shouldClearDisplayedOpponentCard =
@@ -541,27 +549,11 @@ export function useMatchTableTransition(
       return;
     }
 
-    console.log('[transition][clearDisplayedOpponentPlayedCard]', {
-      displayedOpponentPlayedCard,
-      opponentPlayedCard,
-      myPlayedCard,
-      playedRoundsCount,
-      latestRoundFinished,
-    });
-
     cancelOpponentReveal();
     setDisplayedOpponentPlayedCard(null);
     previousOpponentPlayedCardRef.current = null;
     opponentCardAcceptedViaEventRef.current = null;
-  }, [
-    cancelOpponentReveal,
-    displayedOpponentPlayedCard,
-    latestRoundFinished,
-    myPlayedCard,
-    opponentPlayedCard,
-    playedRoundsCount,
-    tablePhase,
-  ]);
+  }, [cancelOpponentReveal, displayedOpponentPlayedCard, opponentPlayedCard, tablePhase]);
 
   useEffect(() => {
     const shouldClearBothDisplayedCards =
@@ -575,15 +567,6 @@ export function useMatchTableTransition(
       return;
     }
 
-    console.log('[transition][clearDisplayedRoundFrame]', {
-      displayedMyPlayedCard,
-      displayedOpponentPlayedCard,
-      myPlayedCard,
-      opponentPlayedCard,
-      playedRoundsCount,
-      latestRoundFinished,
-    });
-
     cancelOpponentReveal();
     setDisplayedMyPlayedCard(null);
     setDisplayedOpponentPlayedCard(null);
@@ -595,10 +578,8 @@ export function useMatchTableTransition(
     cancelOpponentReveal,
     displayedMyPlayedCard,
     displayedOpponentPlayedCard,
-    latestRoundFinished,
     myPlayedCard,
     opponentPlayedCard,
-    playedRoundsCount,
     tablePhase,
   ]);
 
@@ -607,7 +588,10 @@ export function useMatchTableTransition(
       return;
     }
 
-    if (suppressResolvedRoundReplayRef.current && latestRoundFinished) {
+    if (
+      awaitingNextRoundOpeningRef.current ||
+      (suppressResolvedRoundReplayRef.current && latestRoundFinished)
+    ) {
       return;
     }
 
@@ -635,7 +619,10 @@ export function useMatchTableTransition(
       return;
     }
 
-    if (suppressResolvedRoundReplayRef.current && latestRoundFinished) {
+    if (
+      awaitingNextRoundOpeningRef.current ||
+      (suppressResolvedRoundReplayRef.current && latestRoundFinished)
+    ) {
       return;
     }
 
@@ -658,7 +645,12 @@ export function useMatchTableTransition(
   }, [latestRoundFinished, opponentPlayedCard, queueNextRoundPromotion, revealOpponentCard]);
 
   useEffect(() => {
-    if (tablePhase === 'waiting' || tablePhase === 'missing_context') {
+    if (
+      tablePhase === 'hand_finished' ||
+      tablePhase === 'match_finished' ||
+      tablePhase === 'waiting' ||
+      tablePhase === 'missing_context'
+    ) {
       const tableIsEmpty =
         previousMyPlayedCardRef.current === null &&
         previousOpponentPlayedCardRef.current === null &&
@@ -694,12 +686,15 @@ export function useMatchTableTransition(
       roundIntroKey,
       roundResolvedKey,
       isResolvingRound,
+      resolvedRoundFinished,
+      resolvedRoundResult,
       isLiveTableFrame: tablePhase === 'playing' || tablePhase === 'hand_finished',
       displayedMyPlayedCard,
       displayedOpponentPlayedCard,
       beginHandTransition,
       beginOwnCardLaunch,
       registerIncomingPlayedCard,
+      triggerRoundResolution,
       stopRoundResolution,
     }),
     [
@@ -713,10 +708,13 @@ export function useMatchTableTransition(
       opponentRevealKey,
       pendingPlayedCard,
       registerIncomingPlayedCard,
+      resolvedRoundFinished,
+      resolvedRoundResult,
       roundIntroKey,
       roundResolvedKey,
       stopRoundResolution,
       tablePhase,
+      triggerRoundResolution,
     ],
   );
 }

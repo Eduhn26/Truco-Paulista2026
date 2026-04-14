@@ -7,6 +7,7 @@ import {
   normalizePlayerAssignedPayload,
   normalizeRankingPayload,
   normalizeRoomStatePayload,
+  normalizeRoundTransitionPayload,
   normalizeServerErrorPayload,
   type CardPayload,
   type GameSocketEvents,
@@ -77,6 +78,10 @@ export class GameSocketClient {
 
     socket.on('card-played', (payload: unknown) => {
       events.onCardPlayed?.(normalizeCardPlayedPayload(payload));
+    });
+
+    socket.on('round-transition', (payload: unknown) => {
+      events.onRoundTransition?.(normalizeRoundTransitionPayload(payload));
     });
 
     return socket;

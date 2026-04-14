@@ -10,6 +10,7 @@ import type {
   PlayerAssignedPayload,
   Rank,
   RoomStatePayload,
+  RoundTransitionPayload,
   ServerErrorPayload,
 } from '../../services/socket/socketTypes';
 
@@ -26,6 +27,23 @@ type UseMatchRealtimeSessionParams = {
     currentTurnSeatId?: string | null;
     isBot?: boolean;
   }) => void;
+  onRoundTransition: (payload: {
+    matchId?: string;
+    phase: 'round-resolved' | 'next-round-opened';
+    roundWinner?: string | null;
+    finishedRoundsCount: number;
+    totalRoundsCount: number;
+    handContinues: boolean;
+    openingSeatId?: string | null;
+    currentTurnSeatId?: string | null;
+    triggeredBy?: {
+      seatId: string;
+      teamId: 'T1' | 'T2';
+      playerId: 'P1' | 'P2';
+      isBot: boolean;
+    };
+  }) => void;
+  onServerError?: (payload: ServerErrorPayload) => void;
 };
 
 type UseMatchRealtimeSessionResult = {
@@ -124,10 +142,30 @@ function describeCardPlayedPayload(payload: CardPlayedPayload): string {
   ].join(' | ');
 }
 
+function describeRoundTransitionPayload(payload: RoundTransitionPayload): string {
+  return [
+    'Received round-transition',
+    `phase=${payload.phase}`,
+    `winner=${payload.roundWinner ?? 'null'}`,
+    `finishedRounds=${String(payload.finishedRoundsCount)}`,
+    `totalRounds=${String(payload.totalRoundsCount)}`,
+    `handContinues=${String(payload.handContinues)}`,
+    `openingSeatId=${payload.openingSeatId ?? 'null'}`,
+    `turn=${payload.currentTurnSeatId ?? 'null'}`,
+  ].join(' | ');
+}
+
 export function useMatchRealtimeSession(
   params: UseMatchRealtimeSessionParams,
 ): UseMatchRealtimeSessionResult {
-  const { session, effectiveMatchId, onHandStarted, onCardPlayed } = params;
+  const {
+    session,
+    effectiveMatchId,
+    onHandStarted,
+    onCardPlayed,
+    onRoundTransition,
+    onServerError,
+  } = params;
 
   const initialSnapshot = useMemo(() => loadMatchSnapshot(effectiveMatchId), [effectiveMatchId]);
 
@@ -138,6 +176,8 @@ export function useMatchRealtimeSession(
   const intentionalDisconnectRef = useRef(false);
   const onHandStartedRef = useRef(onHandStarted);
   const onCardPlayedRef = useRef(onCardPlayed);
+  const onRoundTransitionRef = useRef(onRoundTransition);
+  const onServerErrorRef = useRef(onServerError);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(
@@ -172,6 +212,14 @@ export function useMatchRealtimeSession(
   useEffect(() => {
     onCardPlayedRef.current = onCardPlayed;
   }, [onCardPlayed]);
+
+  useEffect(() => {
+    onRoundTransitionRef.current = onRoundTransition;
+  }, [onRoundTransition]);
+
+  useEffect(() => {
+    onServerErrorRef.current = onServerError;
+  }, [onServerError]);
 
   useEffect(() => {
     roomStateRef.current = roomState;
@@ -263,6 +311,7 @@ export function useMatchRealtimeSession(
           appendLog(
             payload.message ? `Server error: ${payload.message}` : 'Server emitted error event.',
           );
+          onServerErrorRef.current?.(payload);
         },
         onPlayerAssigned: (payload) => {
           if (connectionKeyRef.current !== connectionKey) {
@@ -398,7 +447,7 @@ export function useMatchRealtimeSession(
           }
 
           onHandStartedRef.current({
-            matchId: payload.matchId,
+            ...(payload.matchId ? { matchId: payload.matchId } : {}),
             viraRank: payload.viraRank ?? null,
           });
 
@@ -416,16 +465,41 @@ export function useMatchRealtimeSession(
           }
 
           onCardPlayedRef.current({
-            matchId: payload.matchId,
-            playerId: payload.playerId ?? null,
-            seatId: payload.seatId ?? null,
-            teamId: payload.teamId ?? null,
-            card: payload.card ?? null,
+            ...(payload.matchId ? { matchId: payload.matchId } : {}),
+            ...(payload.playerId ? { playerId: payload.playerId } : {}),
+            ...(payload.seatId ? { seatId: payload.seatId } : {}),
+            ...(payload.teamId ? { teamId: payload.teamId } : {}),
+            ...(payload.card ? { card: payload.card } : {}),
             currentTurnSeatId: payload.currentTurnSeatId ?? null,
             isBot: payload.isBot ?? false,
           });
 
           appendLog(describeCardPlayedPayload(payload));
+        },
+        onRoundTransition: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          onRoundTransitionRef.current({
+            ...(payload.matchId ? { matchId: payload.matchId } : {}),
+            phase: payload.phase,
+            roundWinner: payload.roundWinner ?? null,
+            finishedRoundsCount: payload.finishedRoundsCount,
+            totalRoundsCount: payload.totalRoundsCount,
+            handContinues: payload.handContinues,
+            openingSeatId: payload.openingSeatId ?? null,
+            currentTurnSeatId: payload.currentTurnSeatId ?? null,
+            ...(payload.triggeredBy ? { triggeredBy: payload.triggeredBy } : {}),
+          });
+
+          appendLog(describeRoundTransitionPayload(payload));
         },
       },
     );

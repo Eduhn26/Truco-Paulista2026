@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../features/auth/authStore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMatchActionBridge } from '../features/match/useMatchActionBridge';
 import type { MatchAction } from '../features/match/matchActionTypes';
 import { MatchPageHeader } from '../features/match/matchPageHeader';
@@ -26,6 +26,10 @@ const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', 
 const HAND_INTRO_HOLD_MS = 650;
 const HAND_RESULT_HOLD_MS = 900;
 const NEXT_HAND_COMMIT_MS = 220;
+
+// Tempo máximo que o realtime tem para disparar a resolução antes
+// do fallback de snapshot assumir o controle.
+const REALTIME_RESOLUTION_GRACE_MS = 400;
 
 type TableSeatView = {
   seatId: string;
@@ -82,6 +86,31 @@ type PendingVisualState = {
   privateMatchState: MatchStatePayload | null;
 };
 
+type RoundTransitionPayload = {
+  matchId?: string;
+  phase: 'round-resolved' | 'next-round-opened';
+  roundWinner?: string | null;
+  finishedRoundsCount: number;
+  totalRoundsCount: number;
+  handContinues: boolean;
+  openingSeatId?: string | null;
+  currentTurnSeatId?: string | null;
+  triggeredBy?: {
+    seatId: string;
+    teamId: 'T1' | 'T2';
+    playerId: 'P1' | 'P2';
+    isBot: boolean;
+  };
+};
+
+// Estrutura para resolução pendente aguardando match-state
+type PendingRealtimeResolution = {
+  resolutionKey: string;
+  finishedRoundsCount: number;
+  myPlayerId: 'P1' | 'P2';
+  roundWinner: string | null;
+};
+
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -97,9 +126,68 @@ export function MatchPage() {
   const registerIncomingPlayedCardRef = useRef<
     (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void
   >(() => {});
+  const triggerRoundResolutionRef = useRef<
+    (params: {
+      resolutionKey: string;
+      myCard: string | null;
+      opponentCard: string | null;
+      roundResult?: string | null;
+    }) => void
+  >(() => {});
   const isDeferringVisualCommitRef = useRef(false);
   const lastHandStartedAtRef = useRef<number | null>(null);
   const handIntroTimeoutRef = useRef<number | null>(null);
+  const deferredNextHandTimeoutRef = useRef<number | null>(null);
+  const startHandPendingTimeoutRef = useRef<number | null>(null);
+
+  // Resolução pendente: guardamos aqui quando o round-resolved
+  // chegar antes do match-state ter as cartas.
+  const pendingRealtimeResolutionRef = useRef<PendingRealtimeResolution | null>(null);
+  const pendingRealtimeResolutionTimeoutRef = useRef<number | null>(null);
+
+  // Buffer de cards recebidos durante hand_intro.
+  const bufferedCardsDuringIntroRef = useRef<
+    Array<{ owner: 'mine' | 'opponent'; card: string }>
+  >([]);
+
+  const [isStartHandPending, setIsStartHandPending] = useState(false);
+  const latestVisualPublicHandRef = useRef<MatchStatePayload['currentHand'] | null>(null);
+
+  // Tenta completar uma resolução pendente usando o hand atualizado.
+  // Chamado sempre que o visualPublicMatchState muda.
+  const tryFlushPendingRealtimeResolution = useCallback(
+    (hand: MatchStatePayload['currentHand'] | null) => {
+      const pending = pendingRealtimeResolutionRef.current;
+      if (!pending || !hand) return;
+
+      const rounds = hand.rounds ?? [];
+      const finishedRoundIndex = Math.max(0, pending.finishedRoundsCount - 1);
+      const finishedRound = rounds[finishedRoundIndex] ?? null;
+
+      if (!finishedRound) return;
+
+      // Agora temos as cartas — podemos disparar a resolução visual
+      pendingRealtimeResolutionRef.current = null;
+
+      if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+        pendingRealtimeResolutionTimeoutRef.current = null;
+      }
+
+      const myCard =
+        pending.myPlayerId === 'P1' ? finishedRound.playerOneCard : finishedRound.playerTwoCard;
+      const opponentCard =
+        pending.myPlayerId === 'P1' ? finishedRound.playerTwoCard : finishedRound.playerOneCard;
+
+      triggerRoundResolutionRef.current({
+        resolutionKey: pending.resolutionKey,
+        myCard,
+        opponentCard,
+        roundResult: finishedRound.result ?? pending.roundWinner ?? null,
+      });
+    },
+    [],
+  );
 
   const handleRealtimeHandStarted = useCallback(
     (payload: { matchId?: string; viraRank?: Rank | null }) => {
@@ -108,7 +196,11 @@ export function MatchPage() {
       }
 
       lastHandStartedAtRef.current = Date.now();
+      setIsStartHandPending(false);
       setVisualBeat('hand_intro');
+
+      // Limpa o buffer de cartas ao iniciar nova mão
+      bufferedCardsDuringIntroRef.current = [];
     },
     [],
   );
@@ -120,39 +212,86 @@ export function MatchPage() {
         mySeat: mySeatRef.current,
       });
 
-      const isBlockingRealtimeCard =
-        isDeferringVisualCommitRef.current || visualBeat === 'hand_intro';
+      const card = payload.card ?? null;
 
-      console.log('[matchPage][event][card-played]', {
-        owner,
-        card: payload.card ?? null,
-        playerId: payload.playerId ?? null,
-        mySeat: mySeatRef.current,
-        isDeferringVisualCommit: isDeferringVisualCommitRef.current,
-        visualBeat,
-        isBlockingRealtimeCard,
-      });
-
-      // NOTE: The next-hand commit already has a dedicated delayed visual path.
-      // Realtime card events that arrive during that hold must not pierce the
-      // transition, or the bot move appears "glued" to the previous trick.
-      if (isBlockingRealtimeCard) {
-        console.log('[matchPage][event][card-played][deferred-skip]', {
-          owner,
-          card: payload.card ?? null,
-          playerId: payload.playerId ?? null,
-          visualBeat,
-        });
+      // Durante hand_intro, bufferiza o card em vez de descartar.
+      // O buffer é drenado quando o intro termina e o estado visual é commitado.
+      if (isDeferringVisualCommitRef.current || visualBeat === 'hand_intro') {
+        if (owner && card) {
+          bufferedCardsDuringIntroRef.current.push({ owner, card });
+        }
         return;
       }
 
       registerIncomingPlayedCardRef.current({
         owner,
-        card: payload.card ?? null,
+        card,
       });
     },
     [visualBeat],
   );
+
+  // handleRealtimeRoundTransition: fonte realtime de resolução.
+  // Se o match-state ainda não chegou, guarda a resolução como pendente
+  // e completa quando o estado estiver disponível.
+  const handleRealtimeRoundTransition = useCallback((payload: RoundTransitionPayload) => {
+    if (payload.phase !== 'round-resolved') {
+      return;
+    }
+
+    const mySeat = mySeatRef.current;
+    const myPlayerId = mapSeatToPlayerId(mySeat);
+
+    if (!myPlayerId) {
+      return;
+    }
+
+    const resolutionKey = [
+      payload.matchId ?? 'unknown-match',
+      payload.phase,
+      payload.finishedRoundsCount,
+      payload.roundWinner ?? 'null',
+    ].join('|');
+
+    // Tenta usar o hand já disponível no ref
+    const visualPublicHand = latestVisualPublicHandRef.current;
+    const rounds = visualPublicHand?.rounds ?? [];
+    const finishedRoundIndex = Math.max(0, payload.finishedRoundsCount - 1);
+    const finishedRound = rounds[finishedRoundIndex] ?? null;
+
+    if (finishedRound) {
+      // Hand já disponível — dispara imediatamente
+      const myCard =
+        myPlayerId === 'P1' ? finishedRound.playerOneCard : finishedRound.playerTwoCard;
+      const opponentCard =
+        myPlayerId === 'P1' ? finishedRound.playerTwoCard : finishedRound.playerOneCard;
+
+      triggerRoundResolutionRef.current({
+        resolutionKey,
+        myCard,
+        opponentCard,
+        roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+      });
+    } else {
+      // Hand ainda não chegou — guarda resolução pendente.
+      pendingRealtimeResolutionRef.current = {
+        resolutionKey,
+        finishedRoundsCount: payload.finishedRoundsCount,
+        myPlayerId,
+        roundWinner: payload.roundWinner ?? null,
+      };
+
+      if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+      }
+
+      pendingRealtimeResolutionTimeoutRef.current = window.setTimeout(() => {
+        pendingRealtimeResolutionTimeoutRef.current = null;
+        // Se ainda pendente após timeout, descarta — o fallback interno do hook assume
+        pendingRealtimeResolutionRef.current = null;
+      }, REALTIME_RESOLUTION_GRACE_MS);
+    }
+  }, []);
 
   const {
     initialSnapshot,
@@ -179,6 +318,10 @@ export function MatchPage() {
     effectiveMatchId,
     onHandStarted: handleRealtimeHandStarted,
     onCardPlayed: handleRealtimeCardPlayed,
+    onRoundTransition: handleRealtimeRoundTransition,
+    onServerError: () => {
+      setIsStartHandPending(false);
+    },
   });
 
   const [visualRoomState, setVisualRoomState] = useState<RoomStatePayload | null>(
@@ -191,22 +334,28 @@ export function MatchPage() {
     privateMatchState ?? initialSnapshot?.privateMatchState ?? null,
   );
 
-  const visualPublicMatchStateRef = useRef<MatchStatePayload | null>(visualPublicMatchState);
-  const visualPrivateMatchStateRef = useRef<MatchStatePayload | null>(visualPrivateMatchState);
-  const pendingVisualStateRef = useRef<PendingVisualState | null>(null);
-  const deferredNextHandTimeoutRef = useRef<number | null>(null);
-
   useEffect(() => {
-    visualPublicMatchStateRef.current = visualPublicMatchState;
-  }, [visualPublicMatchState]);
+    const hand = visualPublicMatchState?.currentHand ?? null;
+    latestVisualPublicHandRef.current = hand;
 
-  useEffect(() => {
-    visualPrivateMatchStateRef.current = visualPrivateMatchState;
-  }, [visualPrivateMatchState]);
+    // Sempre que o estado visual atualiza, tenta completar
+    // qualquer resolução realtime pendente.
+    tryFlushPendingRealtimeResolution(hand);
+  }, [visualPublicMatchState, tryFlushPendingRealtimeResolution]);
 
   useEffect(() => {
     mySeatRef.current = playerAssigned?.seatId ?? initialSnapshot?.playerAssigned?.seatId ?? null;
   }, [initialSnapshot?.playerAssigned?.seatId, playerAssigned]);
+
+  // Drena o buffer de cards após commitar o estado visual
+  const drainBufferedCards = useCallback(() => {
+    const buffered = bufferedCardsDuringIntroRef.current;
+    bufferedCardsDuringIntroRef.current = [];
+
+    for (const { owner, card } of buffered) {
+      registerIncomingPlayedCardRef.current({ owner, card });
+    }
+  }, []);
 
   useEffect(() => {
     const displayedHandFinished = isResolvedHandFinished({
@@ -232,7 +381,7 @@ export function MatchPage() {
       isDeferringVisualCommitRef.current = true;
       setVisualBeat('hand_result_hold');
 
-      pendingVisualStateRef.current = {
+      const pendingState: PendingVisualState = {
         roomState: roomState ?? null,
         publicMatchState: publicMatchState ?? null,
         privateMatchState: privateMatchState ?? null,
@@ -243,22 +392,18 @@ export function MatchPage() {
       }
 
       deferredNextHandTimeoutRef.current = window.setTimeout(() => {
-        const pendingState = pendingVisualStateRef.current;
-        pendingVisualStateRef.current = null;
         deferredNextHandTimeoutRef.current = null;
 
         beginHandTransitionRef.current();
 
-        setVisualRoomState(pendingState?.roomState ?? null);
-        setVisualPublicMatchState(pendingState?.publicMatchState ?? null);
-        setVisualPrivateMatchState(pendingState?.privateMatchState ?? null);
+        setVisualRoomState(pendingState.roomState);
+        setVisualPublicMatchState(pendingState.publicMatchState);
+        setVisualPrivateMatchState(pendingState.privateMatchState);
         setVisualBeat('live');
-
-        // NOTE: Keep the gate until the deferred state has been committed.
-        // The authoritative match state will drive the next visible cards after
-        // this point, so releasing the gate here avoids the event path racing
-        // ahead of the committed visual frame.
         isDeferringVisualCommitRef.current = false;
+
+        // Drena cards bufferizados após commitar novo hand
+        drainBufferedCards();
       }, HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS);
 
       return;
@@ -272,25 +417,26 @@ export function MatchPage() {
       isDeferringVisualCommitRef.current = true;
       setVisualBeat('hand_intro');
 
-      pendingVisualStateRef.current = {
+      const pendingState: PendingVisualState = {
         roomState: roomState ?? null,
         publicMatchState: publicMatchState ?? null,
         privateMatchState: privateMatchState ?? null,
       };
 
       handIntroTimeoutRef.current = window.setTimeout(() => {
-        const pendingState = pendingVisualStateRef.current;
-        pendingVisualStateRef.current = null;
         handIntroTimeoutRef.current = null;
         lastHandStartedAtRef.current = null;
 
         beginHandTransitionRef.current();
 
-        setVisualRoomState(pendingState?.roomState ?? null);
-        setVisualPublicMatchState(pendingState?.publicMatchState ?? null);
-        setVisualPrivateMatchState(pendingState?.privateMatchState ?? null);
+        setVisualRoomState(pendingState.roomState);
+        setVisualPublicMatchState(pendingState.publicMatchState);
+        setVisualPrivateMatchState(pendingState.privateMatchState);
         setVisualBeat('live');
         isDeferringVisualCommitRef.current = false;
+
+        // Drena cards bufferizados após commitar novo hand
+        drainBufferedCards();
       }, HAND_INTRO_HOLD_MS);
 
       return;
@@ -299,13 +445,11 @@ export function MatchPage() {
     if (deferredNextHandTimeoutRef.current !== null) {
       window.clearTimeout(deferredNextHandTimeoutRef.current);
       deferredNextHandTimeoutRef.current = null;
-      pendingVisualStateRef.current = null;
     }
 
     if (handIntroTimeoutRef.current !== null) {
       window.clearTimeout(handIntroTimeoutRef.current);
       handIntroTimeoutRef.current = null;
-      pendingVisualStateRef.current = null;
       lastHandStartedAtRef.current = null;
     }
 
@@ -315,6 +459,7 @@ export function MatchPage() {
     setVisualPrivateMatchState(privateMatchState ?? initialSnapshot?.privateMatchState ?? null);
     setVisualBeat(incomingFreshPlayableHand ? 'live' : 'idle');
   }, [
+    drainBufferedCards,
     initialSnapshot?.privateMatchState,
     initialSnapshot?.publicMatchState,
     initialSnapshot?.roomState,
@@ -336,6 +481,17 @@ export function MatchPage() {
       if (handIntroTimeoutRef.current !== null) {
         window.clearTimeout(handIntroTimeoutRef.current);
       }
+
+      if (startHandPendingTimeoutRef.current !== null) {
+        window.clearTimeout(startHandPendingTimeoutRef.current);
+      }
+
+      if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+      }
+
+      pendingRealtimeResolutionRef.current = null;
+      bufferedCardsDuringIntroRef.current = [];
     };
   }, []);
 
@@ -432,7 +588,9 @@ export function MatchPage() {
       myCards,
       myPlayedCard,
       opponentPlayedCard,
-      scoreLabel: `T1 ${visualPublicMatchState?.score.playerOne ?? 0} × T2 ${visualPublicMatchState?.score.playerTwo ?? 0}`,
+      scoreLabel: `T1 ${visualPublicMatchState?.score.playerOne ?? 0} × T2 ${
+        visualPublicMatchState?.score.playerTwo ?? 0
+      }`,
       currentTurnSeatId: contractPresentation.currentTurnSeatId,
       nextDecisionType,
       canStartHand: contractPresentation.canStartHand,
@@ -470,58 +628,6 @@ export function MatchPage() {
     visualRoomState,
   ]);
 
-  useEffect(() => {
-    console.log('[matchPage][viewModel][opponentPlayedCard]', {
-      opponentPlayedCard: viewModel.opponentPlayedCard,
-      myPlayedCard: viewModel.myPlayedCard,
-      latestRoundFinished: Boolean(viewModel.latestRound?.finished),
-      playedRoundsCount: viewModel.playedRoundsCount,
-      tablePhase: viewModel.tablePhase,
-      currentTurnSeatId: viewModel.currentTurnSeatId,
-      mySeat: viewModel.mySeat,
-      visualBeat,
-    });
-  }, [
-    viewModel.currentTurnSeatId,
-    viewModel.latestRound?.finished,
-    viewModel.myPlayedCard,
-    viewModel.mySeat,
-    viewModel.opponentPlayedCard,
-    viewModel.playedRoundsCount,
-    viewModel.tablePhase,
-    visualBeat,
-  ]);
-
-  useEffect(() => {
-    console.log('[matchPage][visualStates]', {
-      roomTurn: visualRoomState?.currentTurnSeatId ?? null,
-      publicState: visualPublicMatchState?.state ?? null,
-      privateState: visualPrivateMatchState?.state ?? null,
-      publicNext: visualPublicMatchState?.currentHand?.nextDecisionType ?? null,
-      privateNext: visualPrivateMatchState?.currentHand?.nextDecisionType ?? null,
-      publicLatestRound:
-        visualPublicMatchState?.currentHand?.rounds[
-          visualPublicMatchState.currentHand.rounds.length - 1
-        ] ?? null,
-      privateLatestRound:
-        visualPrivateMatchState?.currentHand?.rounds[
-          visualPrivateMatchState.currentHand.rounds.length - 1
-        ] ?? null,
-      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
-      visualBeat,
-    });
-  }, [visualBeat, visualPrivateMatchState, visualPublicMatchState, visualRoomState]);
-
-  useEffect(() => {
-    mySeatRef.current = viewModel.mySeat;
-  }, [viewModel.mySeat]);
-
-  useEffect(() => {
-    if (viewModel.myCards.length > 0 && !viewModel.handFinished) {
-      setCachedMyCards(viewModel.myCards);
-    }
-  }, [viewModel.myCards, viewModel.handFinished]);
-
   const liveTableTransition = useMatchTableTransition({
     tablePhase: viewModel.tablePhase,
     myPlayedCard: viewModel.myPlayedCard,
@@ -533,32 +639,14 @@ export function MatchPage() {
   });
 
   useEffect(() => {
-    console.log('[matchPage][transition-output]', {
-      displayedOpponentPlayedCard: liveTableTransition.displayedOpponentPlayedCard,
-      displayedMyPlayedCard: liveTableTransition.displayedMyPlayedCard,
-      closingTableCards: liveTableTransition.closingTableCards,
-      isResolvingRound: liveTableTransition.isResolvingRound,
-      pendingPlayedCard: liveTableTransition.pendingPlayedCard,
-      opponentRevealKey: liveTableTransition.opponentRevealKey,
-      visualBeat,
-    });
-  }, [
-    liveTableTransition.closingTableCards,
-    liveTableTransition.displayedMyPlayedCard,
-    liveTableTransition.displayedOpponentPlayedCard,
-    liveTableTransition.isResolvingRound,
-    liveTableTransition.opponentRevealKey,
-    liveTableTransition.pendingPlayedCard,
-    visualBeat,
-  ]);
-
-  useEffect(() => {
     beginHandTransitionRef.current = liveTableTransition.beginHandTransition;
     registerIncomingPlayedCardRef.current = liveTableTransition.registerIncomingPlayedCard;
-  }, [liveTableTransition.beginHandTransition, liveTableTransition.registerIncomingPlayedCard]);
-
-  const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
-  const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
+    triggerRoundResolutionRef.current = liveTableTransition.triggerRoundResolution;
+  }, [
+    liveTableTransition.beginHandTransition,
+    liveTableTransition.registerIncomingPlayedCard,
+    liveTableTransition.triggerRoundResolution,
+  ]);
 
   useEffect(() => {
     if (viewModel.currentPrivateHand?.viraRank) {
@@ -570,6 +658,12 @@ export function MatchPage() {
       setViraRank(viewModel.currentPublicHand.viraRank);
     }
   }, [viewModel.currentPrivateHand?.viraRank, viewModel.currentPublicHand?.viraRank]);
+
+  useEffect(() => {
+    if (viewModel.myCards.length > 0 && !viewModel.handFinished) {
+      setCachedMyCards(viewModel.myCards);
+    }
+  }, [viewModel.handFinished, viewModel.myCards]);
 
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
     useMatchActionBridge({
@@ -595,12 +689,47 @@ export function MatchPage() {
       beginOwnCardLaunch: liveTableTransition.beginOwnCardLaunch,
     });
 
+  useEffect(() => {
+    const handIsLive =
+      viewModel.tablePhase === 'playing' || viewModel.nextDecisionType === 'play-card';
+
+    if (!isStartHandPending || !handIsLive) {
+      return;
+    }
+
+    setIsStartHandPending(false);
+
+    if (startHandPendingTimeoutRef.current !== null) {
+      window.clearTimeout(startHandPendingTimeoutRef.current);
+      startHandPendingTimeoutRef.current = null;
+    }
+  }, [isStartHandPending, viewModel.nextDecisionType, viewModel.tablePhase]);
+
+  const handleStartHandWithGate = useCallback(() => {
+    if (isStartHandPending || !viewModel.canStartHand) {
+      return;
+    }
+
+    setIsStartHandPending(true);
+
+    if (startHandPendingTimeoutRef.current !== null) {
+      window.clearTimeout(startHandPendingTimeoutRef.current);
+    }
+
+    startHandPendingTimeoutRef.current = window.setTimeout(() => {
+      setIsStartHandPending(false);
+      startHandPendingTimeoutRef.current = null;
+    }, HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200);
+
+    handleStartHand();
+  }, [handleStartHand, isStartHandPending, viewModel.canStartHand]);
+
   const playCardWithSound = useCallback(
     (card: CardPayload) => {
       play('play-card', 0.4);
       handlePlayCard(card);
     },
-    [play, handlePlayCard],
+    [handlePlayCard, play],
   );
 
   const handleMatchActionWithSound = useCallback(
@@ -611,7 +740,7 @@ export function MatchPage() {
 
       handleMatchAction(action);
     },
-    [play, handleMatchAction],
+    [handleMatchAction, play],
   );
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
@@ -622,6 +751,9 @@ export function MatchPage() {
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
   const effectiveMyCards = viewModel.handFinished ? cachedMyCards : viewModel.myCards;
+
+  const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
+  const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
 
   if (!hasMinimumSession) {
     return (
@@ -680,10 +812,10 @@ export function MatchPage() {
             mySeat={viewModel.mySeat}
             viraRank={viraRank}
             viraRankOptions={VIRA_RANK_OPTIONS}
-            canStartHand={viewModel.canStartHand}
+            canStartHand={viewModel.canStartHand && !isStartHandPending}
             onRefreshState={handleRefreshState}
             onChangeViraRank={setViraRank}
-            onStartHand={handleStartHand}
+            onStartHand={handleStartHandWithGate}
           />
 
           {!hasHydratedMatchState && (
@@ -709,8 +841,10 @@ export function MatchPage() {
                 latestRound={viewModel.latestRound}
                 latestRoundMyPlayedCard={viewModel.myPlayedCard}
                 latestRoundOpponentPlayedCard={viewModel.opponentPlayedCard}
+                displayedResolvedRoundFinished={liveTableTransition.resolvedRoundFinished}
+                displayedResolvedRoundResult={liveTableTransition.resolvedRoundResult}
                 tablePhase={viewModel.tablePhase}
-                canStartHand={viewModel.canStartHand}
+                canStartHand={viewModel.canStartHand && !isStartHandPending}
                 scoreLabel={viewModel.scoreLabel}
                 opponentSeatView={viewModel.opponentSeatView}
                 mySeatView={viewModel.mySeatView}
@@ -723,7 +857,7 @@ export function MatchPage() {
                 myRevealKey={
                   liveTableTransition.pendingPlayedCard?.owner === 'mine'
                     ? liveTableTransition.pendingPlayedCard.id
-                    : 0
+                    : (displayedMyPlayedCard?.length ?? 0)
                 }
                 myCardLaunching={Boolean(
                   liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
@@ -760,7 +894,7 @@ export function MatchPage() {
                 privateState={visualPrivateMatchState?.state || '-'}
                 mySeat={viewModel.mySeat}
                 currentTurnSeatId={viewModel.currentTurnSeatId}
-                canStartHand={viewModel.canStartHand}
+                canStartHand={viewModel.canStartHand && !isStartHandPending}
                 canPlayCard={viewModel.canPlayCard}
                 betState={viewModel.betState}
                 specialState={viewModel.specialState}

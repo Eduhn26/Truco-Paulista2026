@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, type ReactNode } from 'react';
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
@@ -6,9 +5,11 @@ import { MatchPlayerHandDock } from './matchPlayerHandDock';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 import { useConfetti } from '../../hooks/useConfetti';
 import { useGameSound } from '../../hooks/useGameSound';
+import { AnimatePresence, motion } from 'framer-motion';
 
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 type HandStatusVariant = 'neutral' | 'success' | 'warning';
+
 type TableSeatView = {
   seatId: string;
   ready: boolean;
@@ -16,6 +17,7 @@ type TableSeatView = {
   isCurrentTurn: boolean;
   isMine: boolean;
 };
+
 type RoundView = NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
 
 type MatchTableShellProps = {
@@ -33,6 +35,8 @@ type MatchTableShellProps = {
   latestRound: RoundView;
   latestRoundMyPlayedCard: string | null;
   latestRoundOpponentPlayedCard: string | null;
+  displayedResolvedRoundFinished: boolean;
+  displayedResolvedRoundResult: string | null;
   tablePhase: TablePhase;
   canStartHand: boolean;
   scoreLabel: string;
@@ -641,6 +645,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     currentValue,
     specialState,
     latestRound,
+    displayedResolvedRoundFinished,
+    displayedResolvedRoundResult,
     tablePhase,
     canStartHand,
     scoreLabel,
@@ -699,11 +705,20 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const myCard = parseCard(resolvedMyCardString);
   const opponentCard = parseCard(resolvedOpponentCardString);
 
+  // NOTE: The visual resolution state must come only from the frozen display state.
+  // Falling back to latestRound reintroduces the exact race we are trying to remove:
+  // cards from one round rendered with the semantic result of the next round.
+  const resolvedRoundFinished = displayedResolvedRoundFinished;
+  const resolvedRoundResult = displayedResolvedRoundResult;
+
+  const hasAnyClosingCard =
+    closingTableCards.mine !== null || closingTableCards.opponent !== null;
+
+  const hasAnyDisplayedCard =
+    displayedMyPlayedCard !== null || displayedOpponentPlayedCard !== null;
+
   const isShowingResolvedRoundCards = Boolean(
-    latestRound?.finished &&
-      isResolvingRound &&
-      closingTableCards.mine !== null &&
-      closingTableCards.opponent !== null,
+    resolvedRoundFinished && isResolvingRound && (hasAnyClosingCard || hasAnyDisplayedCard),
   );
 
   const shouldFadeMyCard = Boolean(
@@ -711,14 +726,15 @@ export function MatchTableShell(props: MatchTableShellProps) {
       resolvedMyCardString === closingTableCards.mine &&
       isResolvingRound,
   );
+
   const shouldFadeOpponentCard = Boolean(
     closingTableCards.opponent !== null &&
       resolvedOpponentCardString === closingTableCards.opponent &&
       isResolvingRound,
   );
 
-  const myCardWon = Boolean(isShowingResolvedRoundCards && latestRound?.result === 'P1');
-  const opponentCardWon = Boolean(isShowingResolvedRoundCards && latestRound?.result === 'P2');
+  const myCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P1');
+  const opponentCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P2');
 
   useEffect(() => {
     console.log('[shell][render-source]', {
@@ -730,14 +746,22 @@ export function MatchTableShell(props: MatchTableShellProps) {
       resolvedOpponentCardString,
       latestRoundFinished: Boolean(latestRound?.finished),
       latestRoundResult: latestRound?.result ?? null,
+      displayedResolvedRoundFinished,
+      displayedResolvedRoundResult,
+      resolvedRoundFinished,
+      resolvedRoundResult,
     });
   }, [
     closingTableCards,
     displayedMyPlayedCard,
     displayedOpponentPlayedCard,
+    displayedResolvedRoundFinished,
+    displayedResolvedRoundResult,
     isResolvingRound,
     latestRound?.finished,
     latestRound?.result,
+    resolvedRoundFinished,
+    resolvedRoundResult,
     resolvedMyCardString,
     resolvedOpponentCardString,
   ]);
@@ -747,7 +771,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
       return;
     }
 
-    if (latestRound?.result === 'P1') {
+    if (resolvedRoundResult === 'P1') {
       play('round-win', 0.6);
 
       if (isMatchFinished) {
@@ -755,7 +779,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         fire();
       }
     }
-  }, [fire, isMatchFinished, isShowingResolvedRoundCards, latestRound?.result, play]);
+  }, [fire, isMatchFinished, isShowingResolvedRoundCards, play, resolvedRoundResult]);
 
   return (
     <div
@@ -919,31 +943,31 @@ export function MatchTableShell(props: MatchTableShellProps) {
             <motion.div
               animate={{
                 boxShadow:
-                  latestRound?.result === 'TIE'
+                  resolvedRoundResult === 'TIE'
                     ? '0 0 40px rgba(148,163,184,0.45)'
-                    : latestRound?.result === 'P1'
+                    : resolvedRoundResult === 'P1'
                       ? '0 0 60px rgba(201,168,76,0.65)'
                       : '0 0 60px rgba(220,38,38,0.55)',
               }}
               className={`
                 rounded-[22px] border-2 px-8 py-4 text-[22px] font-black uppercase tracking-[0.12em] shadow-2xl backdrop-blur-xl
                 ${
-                  latestRound?.result === 'TIE'
+                  resolvedRoundResult === 'TIE'
                     ? 'border-slate-500 bg-slate-900/90 text-white'
-                    : latestRound?.result === 'P1'
+                    : resolvedRoundResult === 'P1'
                       ? 'border-amber-300 text-black'
                       : 'border-red-500 bg-red-950/90 text-white'
                 }
               `}
               style={
-                latestRound?.result === 'P1'
+                resolvedRoundResult === 'P1'
                   ? { background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }
                   : {}
               }
             >
-              {latestRound?.result === 'TIE'
+              {resolvedRoundResult === 'TIE'
                 ? '🤝 Empate'
-                : latestRound?.result === 'P1'
+                : resolvedRoundResult === 'P1'
                   ? '🏆 Você venceu!'
                   : '❌ Derrota'}
             </motion.div>
