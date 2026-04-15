@@ -26,9 +26,8 @@ const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', 
 const HAND_INTRO_HOLD_MS = 650;
 const HAND_RESULT_HOLD_MS = 900;
 const NEXT_HAND_COMMIT_MS = 220;
-
-// NOTE: Maximum time we allow realtime round resolution to wait for the
-// authoritative match-state before the local fallback gives up.
+const BET_FEEDBACK_HOLD_MS = 1800;
+const BET_FEEDBACK_MIN_REQUESTED_MS = 1200;
 const REALTIME_RESOLUTION_GRACE_MS = 400;
 
 type TableSeatView = {
@@ -42,6 +41,26 @@ type TableSeatView = {
 type MatchStatusTone = 'neutral' | 'success' | 'warning';
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 type VisualBeat = 'idle' | 'hand_intro' | 'hand_result_hold' | 'live';
+
+type BetFeedbackTone = 'neutral' | 'success' | 'warning';
+type BetFeedbackKind = 'requested' | 'accepted' | 'declined';
+
+type BetFeedbackState = {
+  id: number;
+  kind: BetFeedbackKind;
+  title: string;
+  detail: string;
+  tone: BetFeedbackTone;
+};
+
+type MatchStateHandPayload = NonNullable<MatchStatePayload['currentHand']>;
+
+type PendingBetCycle = {
+  requestedBy: 'P1' | 'P2';
+  pendingValue: number;
+  previousValue: number;
+  requestShown: boolean;
+};
 
 type MatchViewModel = {
   resolvedMatchId: string;
@@ -67,15 +86,15 @@ type MatchViewModel = {
   specialDecisionBy: string | null;
   winner: string | null;
   awardedPoints: number | null;
-  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
+  availableActions: MatchStateHandPayload['availableActions'];
   availableActionsSource: 'private' | 'public' | 'fallback';
   handFinished: boolean;
   matchFinished: boolean;
   tablePhase: TablePhase;
   handStatusLabel: string;
   handStatusTone: MatchStatusTone;
-  latestRound: NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
-  rounds: NonNullable<MatchStatePayload['currentHand']>['rounds'];
+  latestRound: MatchStateHandPayload['rounds'][number] | null;
+  rounds: MatchStateHandPayload['rounds'];
   playedRoundsCount: number;
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
@@ -104,8 +123,6 @@ type RoundTransitionPayload = {
   };
 };
 
-// NOTE: We keep this pending state while realtime already told us a round
-// resolved, but the authoritative hand snapshot with the cards has not arrived yet.
 type PendingRealtimeResolution = {
   resolutionKey: string;
   finishedRoundsCount: number;
@@ -118,10 +135,11 @@ type TrucoDebugBadgeProps = {
   privateMatchState: MatchStatePayload | null;
 };
 
-function TrucoDebugBadge({
-  publicMatchState,
-  privateMatchState,
-}: TrucoDebugBadgeProps) {
+type BetFeedbackBannerProps = {
+  feedback: BetFeedbackState | null;
+};
+
+function TrucoDebugBadge({ publicMatchState, privateMatchState }: TrucoDebugBadgeProps) {
   const publicHand = publicMatchState?.currentHand ?? null;
   const privateHand = privateMatchState?.currentHand ?? null;
   const publicCanRequest = publicHand?.availableActions?.canRequestTruco ?? false;
@@ -159,6 +177,49 @@ function TrucoDebugBadge({
   );
 }
 
+function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
+  if (!feedback) {
+    return null;
+  }
+
+  const toneClasses =
+    feedback.tone === 'success'
+      ? {
+          border: 'border-emerald-400/35',
+          chip: 'text-emerald-300',
+          bg: 'linear-gradient(180deg, rgba(6, 40, 28, 0.96), rgba(6, 20, 16, 0.92))',
+        }
+      : feedback.tone === 'warning'
+        ? {
+            border: 'border-amber-400/35',
+            chip: 'text-amber-300',
+            bg: 'linear-gradient(180deg, rgba(54, 36, 5, 0.96), rgba(18, 14, 8, 0.92))',
+          }
+        : {
+            border: 'border-sky-400/35',
+            chip: 'text-sky-300',
+            bg: 'linear-gradient(180deg, rgba(8, 28, 48, 0.96), rgba(8, 14, 24, 0.92))',
+          };
+
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-4 z-50 -translate-x-1/2 px-3">
+      <div
+        className={`min-w-[320px] max-w-[520px] rounded-2xl ${toneClasses.border} px-5 py-3 backdrop-blur-xl`}
+        style={{
+          background: toneClasses.bg,
+          boxShadow: '0 18px 50px rgba(0,0,0,0.44)',
+        }}
+      >
+        <div className={`text-[10px] font-black uppercase tracking-[0.24em] ${toneClasses.chip}`}>
+          Truco
+        </div>
+        <div className="mt-1 text-base font-black text-white">{feedback.title}</div>
+        <div className="mt-1 text-sm text-slate-200">{feedback.detail}</div>
+      </div>
+    </div>
+  );
+}
+
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -168,6 +229,7 @@ export function MatchPage() {
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [showSecondary, setShowSecondary] = useState(false);
   const [visualBeat, setVisualBeat] = useState<VisualBeat>('idle');
+  const [betFeedback, setBetFeedback] = useState<BetFeedbackState | null>(null);
   const { play } = useGameSound();
   const [cachedMyCards, setCachedMyCards] = useState<CardPayload[]>([]);
   const beginHandTransitionRef = useRef<() => void>(() => {});
@@ -187,21 +249,93 @@ export function MatchPage() {
   const handIntroTimeoutRef = useRef<number | null>(null);
   const deferredNextHandTimeoutRef = useRef<number | null>(null);
   const startHandPendingTimeoutRef = useRef<number | null>(null);
-
-  // NOTE: Pending round resolution waits here until the authoritative match-state
-  // arrives with the finished round cards.
+  const betFeedbackTimeoutRef = useRef<number | null>(null);
   const pendingRealtimeResolutionRef = useRef<PendingRealtimeResolution | null>(null);
   const pendingRealtimeResolutionTimeoutRef = useRef<number | null>(null);
-
-  // NOTE: Cards received during hand intro are buffered so the opening animation
-  // does not drop real server events.
   const bufferedCardsDuringIntroRef = useRef<Array<{ owner: 'mine' | 'opponent'; card: string }>>(
     [],
   );
+  const betFeedbackQueueRef = useRef<BetFeedbackState[]>([]);
+  const lastRequestedFeedbackAtRef = useRef<number | null>(null);
+  const pendingBetCycleRef = useRef<PendingBetCycle | null>(null);
 
   const [isStartHandPending, setIsStartHandPending] = useState(false);
   const startHandLockRef = useRef(false);
   const latestVisualPublicHandRef = useRef<MatchStatePayload['currentHand'] | null>(null);
+
+  const drainNextBetFeedback = useCallback(() => {
+    if (betFeedbackQueueRef.current.length === 0) {
+      setBetFeedback(null);
+      return;
+    }
+
+    const nextFeedback = betFeedbackQueueRef.current.shift() ?? null;
+
+    if (!nextFeedback) {
+      setBetFeedback(null);
+      return;
+    }
+
+    setBetFeedback(nextFeedback);
+
+    if (nextFeedback.kind === 'requested') {
+      lastRequestedFeedbackAtRef.current = Date.now();
+    }
+
+    if (betFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(betFeedbackTimeoutRef.current);
+    }
+
+    betFeedbackTimeoutRef.current = window.setTimeout(() => {
+      betFeedbackTimeoutRef.current = null;
+      setBetFeedback(null);
+      drainNextBetFeedback();
+    }, BET_FEEDBACK_HOLD_MS);
+  }, []);
+
+  const enqueueBetFeedback = useCallback(
+    (nextFeedback: Omit<BetFeedbackState, 'id'>) => {
+      const payload: BetFeedbackState = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        ...nextFeedback,
+      };
+
+      const activeRequestedAge =
+        betFeedback?.kind === 'requested' && lastRequestedFeedbackAtRef.current !== null
+          ? Date.now() - lastRequestedFeedbackAtRef.current
+          : null;
+
+      const shouldRespectRequestedMinimum =
+        betFeedback?.kind === 'requested' &&
+        payload.kind !== 'requested' &&
+        activeRequestedAge !== null &&
+        activeRequestedAge < BET_FEEDBACK_MIN_REQUESTED_MS;
+
+      if (shouldRespectRequestedMinimum) {
+        const remaining = BET_FEEDBACK_MIN_REQUESTED_MS - activeRequestedAge;
+
+        if (betFeedbackTimeoutRef.current !== null) {
+          window.clearTimeout(betFeedbackTimeoutRef.current);
+        }
+
+        betFeedbackTimeoutRef.current = window.setTimeout(() => {
+          betFeedbackTimeoutRef.current = null;
+          betFeedbackQueueRef.current.push(payload);
+          setBetFeedback(null);
+          drainNextBetFeedback();
+        }, remaining);
+
+        return;
+      }
+
+      betFeedbackQueueRef.current.push(payload);
+
+      if (!betFeedback) {
+        drainNextBetFeedback();
+      }
+    },
+    [betFeedback, drainNextBetFeedback],
+  );
 
   const tryFlushPendingRealtimeResolution = useCallback(
     (hand: MatchStatePayload['currentHand'] | null) => {
@@ -241,17 +375,21 @@ export function MatchPage() {
     [],
   );
 
-  const handleRealtimeHandStarted = useCallback((payload: { matchId?: string; viraRank?: Rank | null }) => {
-    if (payload.viraRank) {
-      setViraRank(payload.viraRank);
-    }
+  const handleRealtimeHandStarted = useCallback(
+    (payload: { matchId?: string; viraRank?: Rank | null }) => {
+      if (payload.viraRank) {
+        setViraRank(payload.viraRank);
+      }
 
-    lastHandStartedAtRef.current = Date.now();
-    startHandLockRef.current = true;
-    setIsStartHandPending(false);
-    setVisualBeat('hand_intro');
-    bufferedCardsDuringIntroRef.current = [];
-  }, []);
+      lastHandStartedAtRef.current = Date.now();
+      startHandLockRef.current = true;
+      setIsStartHandPending(false);
+      setVisualBeat('hand_intro');
+      bufferedCardsDuringIntroRef.current = [];
+      pendingBetCycleRef.current = null;
+    },
+    [],
+  );
 
   const handleRealtimeCardPlayed = useCallback(
     (payload: { matchId?: string; playerId?: string | null; card?: string | null }) => {
@@ -366,8 +504,8 @@ export function MatchPage() {
 
       const authoritativeHandInProgress = Boolean(
         publicMatchState?.state === 'in_progress' &&
-          publicMatchState.currentHand &&
-          !publicMatchState.currentHand.finished,
+        publicMatchState.currentHand &&
+        !publicMatchState.currentHand.finished,
       );
 
       if (!authoritativeHandInProgress) {
@@ -536,8 +674,14 @@ export function MatchPage() {
         window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
       }
 
+      if (betFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(betFeedbackTimeoutRef.current);
+      }
+
       pendingRealtimeResolutionRef.current = null;
       bufferedCardsDuringIntroRef.current = [];
+      betFeedbackQueueRef.current = [];
+      pendingBetCycleRef.current = null;
     };
   }, []);
 
@@ -576,10 +720,12 @@ export function MatchPage() {
     const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
     const myCards = getViewerCards(currentPrivateHand);
 
-    const resolvedAvailableActions =
+    const rawAvailableActions =
       currentPrivateHand?.availableActions ??
       currentPublicHand?.availableActions ??
       emptyAvailableActions();
+
+    const resolvedAvailableActions = rawAvailableActions;
 
     const resolvedAvailableActionsSource: MatchViewModel['availableActionsSource'] =
       currentPrivateHand?.availableActions
@@ -617,13 +763,13 @@ export function MatchPage() {
     const isMyTurn = Boolean(mySeat && visualRoomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-        !handFinished &&
-        nextDecisionType === 'play-card' &&
-        viewerCanActNow &&
-        isMyTurn &&
-        resolvedAvailableActions.canAttemptPlayCard &&
-        myCards.length > 0 &&
-        !pendingBotAction,
+      !handFinished &&
+      nextDecisionType === 'play-card' &&
+      viewerCanActNow &&
+      isMyTurn &&
+      resolvedAvailableActions.canAttemptPlayCard &&
+      myCards.length > 0 &&
+      !pendingBotAction,
     );
 
     const contractPresentation = buildMatchContractPresentation({
@@ -757,14 +903,176 @@ export function MatchPage() {
       availableActions: viewModel.availableActions,
       privateCanRequestTruco:
         viewModel.currentPrivateHand?.availableActions?.canRequestTruco ?? null,
-      publicCanRequestTruco:
-        viewModel.currentPublicHand?.availableActions?.canRequestTruco ?? null,
+      publicCanRequestTruco: viewModel.currentPublicHand?.availableActions?.canRequestTruco ?? null,
+      effectiveCanRequestTruco: viewModel.availableActions.canRequestTruco,
     });
   }, [
     viewModel.availableActions,
     viewModel.availableActionsSource,
     viewModel.currentPrivateHand,
     viewModel.currentPublicHand,
+  ]);
+
+  useEffect(() => {
+    const privateHand = viewModel.currentPrivateHand;
+    const publicHand = viewModel.currentPublicHand;
+    const effectiveHand = privateHand ?? publicHand;
+    const myPlayerId = mapSeatToPlayerId(viewModel.mySeat);
+    const opponentIsBot = viewModel.opponentSeatView?.isBot ?? false;
+
+    const awaitingResponseSource =
+      privateHand?.betState === 'awaiting_response'
+        ? privateHand
+        : publicHand?.betState === 'awaiting_response'
+          ? publicHand
+          : null;
+
+    if (!effectiveHand && !awaitingResponseSource) {
+      return;
+    }
+
+    if (
+      awaitingResponseSource &&
+      awaitingResponseSource.pendingValue !== null &&
+      (awaitingResponseSource.requestedBy === 'P1' || awaitingResponseSource.requestedBy === 'P2')
+    ) {
+      const requestedBy = awaitingResponseSource.requestedBy;
+      const pendingValue = awaitingResponseSource.pendingValue;
+      const existingCycle = pendingBetCycleRef.current;
+
+      if (existingCycle === null) {
+        pendingBetCycleRef.current = {
+          requestedBy,
+          pendingValue,
+          previousValue: awaitingResponseSource.currentValue,
+          requestShown: false,
+        };
+      } else {
+        pendingBetCycleRef.current = {
+          ...existingCycle,
+          requestedBy,
+          pendingValue,
+          previousValue: existingCycle.previousValue,
+        };
+      }
+
+      const activeCycle = pendingBetCycleRef.current;
+
+      if (
+        activeCycle &&
+        myPlayerId !== null &&
+        activeCycle.requestedBy === myPlayerId &&
+        !activeCycle.requestShown
+      ) {
+        activeCycle.requestShown = true;
+
+        const detail = opponentIsBot
+          ? 'Aguardando resposta do bot.'
+          : 'Aguardando resposta do adversário.';
+
+        appendLog(
+          [
+            'Bet flow',
+            'result=requested',
+            'title=Truco pedido',
+            `detail=${detail}`,
+            `value=${activeCycle.previousValue}`,
+            'betState=awaiting_response',
+            'awardedPoints=null',
+          ].join(' | '),
+        );
+
+        enqueueBetFeedback({
+          kind: 'requested',
+          title: 'Truco pedido',
+          detail,
+          tone: 'neutral',
+        });
+
+        play('truco-call', 0.55);
+      }
+
+      return;
+    }
+
+    const pendingCycle = pendingBetCycleRef.current;
+
+    if (!pendingCycle || !effectiveHand) {
+      return;
+    }
+
+    const requesterIsMine = Boolean(myPlayerId && pendingCycle.requestedBy === myPlayerId);
+    const responderLabel = opponentIsBot ? 'Bot' : requesterIsMine ? 'Adversário' : 'Você';
+
+    const acceptedValue = effectiveHand.currentValue >= pendingCycle.pendingValue;
+
+    if (!effectiveHand.finished && acceptedValue) {
+      const title = requesterIsMine ? `${responderLabel} aceitou o truco` : 'Truco aceito';
+      const detail = `A mão agora vale ${effectiveHand.currentValue} pontos.`;
+
+      appendLog(
+        [
+          'Bet flow',
+          'result=accepted',
+          `title=${title}`,
+          `detail=${detail}`,
+          `value=${effectiveHand.currentValue}`,
+          `betState=${effectiveHand.betState}`,
+          `awardedPoints=${effectiveHand.awardedPoints ?? 'null'}`,
+        ].join(' | '),
+      );
+
+      enqueueBetFeedback({
+        kind: 'accepted',
+        title,
+        detail,
+        tone: 'success',
+      });
+
+      play('truco-call', 0.35);
+      pendingBetCycleRef.current = null;
+      return;
+    }
+
+    if (effectiveHand.finished && effectiveHand.awardedPoints === pendingCycle.previousValue) {
+      const title = requesterIsMine ? `${responderLabel} correu` : 'Você correu';
+      const detail = requesterIsMine
+        ? `Você venceu a mão por ${effectiveHand.awardedPoints} ponto${
+            effectiveHand.awardedPoints === 1 ? '' : 's'
+          }.`
+        : `A mão foi encerrada e o adversário levou ${effectiveHand.awardedPoints} ponto${
+            effectiveHand.awardedPoints === 1 ? '' : 's'
+          }.`;
+
+      appendLog(
+        [
+          'Bet flow',
+          'result=declined',
+          `title=${title}`,
+          `detail=${detail}`,
+          `value=${effectiveHand.currentValue}`,
+          `betState=${effectiveHand.betState}`,
+          `awardedPoints=${effectiveHand.awardedPoints ?? 'null'}`,
+        ].join(' | '),
+      );
+
+      enqueueBetFeedback({
+        kind: 'declined',
+        title,
+        detail,
+        tone: 'warning',
+      });
+
+      pendingBetCycleRef.current = null;
+    }
+  }, [
+    appendLog,
+    enqueueBetFeedback,
+    play,
+    viewModel.currentPrivateHand,
+    viewModel.currentPublicHand,
+    viewModel.mySeat,
+    viewModel.opponentSeatView,
   ]);
 
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
@@ -810,8 +1118,8 @@ export function MatchPage() {
   useEffect(() => {
     const authoritativeHandInProgress = Boolean(
       publicMatchState?.state === 'in_progress' &&
-        publicMatchState.currentHand &&
-        !publicMatchState.currentHand.finished,
+      publicMatchState.currentHand &&
+      !publicMatchState.currentHand.finished,
     );
 
     if (authoritativeHandInProgress) {
@@ -857,10 +1165,13 @@ export function MatchPage() {
       window.clearTimeout(startHandPendingTimeoutRef.current);
     }
 
-    startHandPendingTimeoutRef.current = window.setTimeout(() => {
-      setIsStartHandPending(false);
-      startHandPendingTimeoutRef.current = null;
-    }, HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200);
+    startHandPendingTimeoutRef.current = window.setTimeout(
+      () => {
+        setIsStartHandPending(false);
+        startHandPendingTimeoutRef.current = null;
+      },
+      HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200,
+    );
 
     handleStartHand();
   }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand]);
@@ -873,15 +1184,40 @@ export function MatchPage() {
     [handlePlayCard, play],
   );
 
+  const primePendingBetCycleFromCurrentHand = useCallback(() => {
+    const currentHand = viewModel.currentPrivateHand ?? viewModel.currentPublicHand;
+    const myPlayerId = mapSeatToPlayerId(viewModel.mySeat);
+
+    if (!currentHand || !myPlayerId) {
+      return;
+    }
+
+    if (currentHand.finished) {
+      return;
+    }
+
+    if (currentHand.betState !== 'idle') {
+      return;
+    }
+
+    pendingBetCycleRef.current = {
+      requestedBy: myPlayerId,
+      pendingValue: currentHand.currentValue === 1 ? 3 : currentHand.currentValue,
+      previousValue: currentHand.currentValue,
+      requestShown: false,
+    };
+  }, [viewModel.currentPrivateHand, viewModel.currentPublicHand, viewModel.mySeat]);
+
   const handleMatchActionWithSound = useCallback(
     (action: MatchAction) => {
       if (action === 'request-truco') {
+        primePendingBetCycleFromCurrentHand();
         play('truco-call', 0.7);
       }
 
       handleMatchAction(action);
     },
-    [handleMatchAction, play],
+    [handleMatchAction, play, primePendingBetCycleFromCurrentHand],
   );
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
@@ -1006,7 +1342,7 @@ export function MatchPage() {
                 }
                 myCardLaunching={Boolean(
                   liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
-                    !viewModel.myPlayedCard,
+                  !viewModel.myPlayedCard,
                 )}
                 roundIntroKey={liveTableTransition.roundIntroKey}
                 roundResolvedKey={liveTableTransition.roundResolvedKey}
@@ -1026,6 +1362,8 @@ export function MatchPage() {
                 playedRoundsCount={viewModel.playedRoundsCount}
                 isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
               />
+
+              <BetFeedbackBanner feedback={betFeedback} />
 
               <TrucoDebugBadge
                 publicMatchState={visualPublicMatchState}
@@ -1083,9 +1421,7 @@ function getViewerCards(
     .filter((card): card is CardPayload => card !== null);
 }
 
-function emptyAvailableActions(): NonNullable<
-  MatchStatePayload['currentHand']
->['availableActions'] {
+function emptyAvailableActions(): MatchStateHandPayload['availableActions'] {
   return {
     canRequestTruco: false,
     canRaiseToSix: false,

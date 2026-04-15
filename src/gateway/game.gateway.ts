@@ -1295,13 +1295,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
     const teamUserIds = this.roomManager.getTeamUserIds(matchId);
 
-    const winnerUserIds = winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2;
-    const loserUserIds = winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1;
+    const winnerUserIds = (winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2).filter(Boolean);
+    const loserUserIds = (winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1).filter(Boolean);
 
-    await this.updateRatingUseCase.execute({
-      winnerUserIds,
-      loserUserIds,
-    });
+    // NOTE: In human vs bot matches one side can legitimately have no human userIds.
+    // We skip rating updates in that case instead of breaking match finalization.
+    if (winnerUserIds.length > 0 && loserUserIds.length > 0) {
+      await this.updateRatingUseCase.execute({
+        winnerUserIds,
+        loserUserIds,
+      });
+
+      const ranking = await this.getRankingUseCase.execute({ limit: 20 });
+      this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
+    }
 
     this.logGateway('log', {
       layer: 'gateway',
@@ -1310,9 +1317,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       matchId,
       teamId: winnerTeamId,
     });
-
-    const ranking = await this.getRankingUseCase.execute({ limit: 20 });
-    this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
   }
 
   private async processBotTurns(matchId: string): Promise<boolean> {
@@ -3122,7 +3126,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.acceptMaoDeOnzeUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      // NOTE: After accepting mao de onze, the hand returns to normal play flow.
+      // The frontend only re-enables card interaction when room-state carries a
+      // coherent currentTurnSeatId for the resumed play phase. Without restoring
+      // and emitting the turn pointer here, the table can remain visually stuck
+      // in a non-playable state even though match-state already says play-card.
+      const resumedRoomState = this.roomManager.setCurrentTurnSeat(matchId, session.seatId);
+      this.server.to(matchId).emit('room-state', resumedRoomState);
+
+      const state = await this.emitSyncedMatchState(matchId);
+      await this.finalizeMatchIfFinished(matchId, state);
+
+      if (state.state === 'in_progress' && state.currentHand?.nextDecisionType === 'play-card') {
+        await this.processBotTurns(matchId);
+      }
 
       this.logGateway('log', {
         layer: 'gateway',

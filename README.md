@@ -27,9 +27,9 @@
 
 ---
 
-Estudo prático de engenharia de software construído em fases incrementais. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis.
+Estudo prático de engenharia de software construído em 20 fases incrementais. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis.
 
-O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva e regras especiais tornam o exercício de DDD não trivial.
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial.
 
 ---
 
@@ -43,7 +43,7 @@ O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regr
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React · Vite · TypeScript · Tailwind CSS |
 | **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
-| **Testes** | Jest · ts-jest — 35 suites · 174 testes · 0 falhas |
+| **Testes** | Jest · ts-jest — 32 suites · 174 testes · 0 falhas |
 | **Deploy** | Render · Docker multi-stage · GitHub Actions |
 
 ---
@@ -55,11 +55,11 @@ Gateway → Application → Domain
 Infrastructure implementa Application Ports
 ```
 
-O Domínio não conhece NestJS, Prisma, Socket.IO, OAuth ou FastAPI. Isso não é aspiracional — é uma invariante estrutural verificável nos testes.
+O Domínio não conhece NestJS, Prisma, Socket.IO, OAuth ou FastAPI. Isso não é aspiracional — é uma invariante estrutural verificável nos testes. As regras do Truco (`truco-rules.ts`, `hand.ts`, `match.ts`) são testáveis sem servidor, banco ou mocks de framework.
 
 Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `HeuristicBotAdapter` e `PythonBotAdapter` vivem na Infrastructure. O Gateway nunca conhece o adapter concreto.
 
-→ Decisões arquiteturais detalhadas em [`docs/architecture.md`](docs/architecture.md)
+→ [`docs/architecture.md`](docs/architecture.md)
 
 ---
 
@@ -87,38 +87,39 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 17 | Adequação às regras reais do Truco Paulista + contrato frontend-ready | ✅ |
 | 18 | Frontend contract hardening + MatchPage structural cleanup | ✅ |
 | 19 | Frontend environment / OAuth / runtime hardening + product consistency | ✅ |
+| 20 | Frontend gameplay surface closure + truco core visible hardening | ✅ |
 
 ---
 
-## Fase 19 — O que mudou
+## Fase 20 — O que mudou
 
-A Fase 19 tornou o frontend seguro para uso autenticado real e próximo de publicação confiável. O foco foi ambiente, runtime e consistência — não polish visual final.
+A Fase 20 fechou o **core visível da partida** sob pressão de gameplay real. A tela passou de shell funcional para superfície de jogo observável de ponta a ponta.
 
-**Hardening de ambiente e OAuth:**
-- Boundary entre local e produção endurecida no handling de `backendUrl`
-- OAuth start flow persiste o backend explicitamente antes do redirect
-- Callback parou de depender de origin guessing frágil
+**Match surface:**
+- Hierarquia visual mais forte entre header, HUD, mesa, hand dock e action surface
+- Player hand presentation e interaction framing mais legíveis e intencionais
 
-**Proteção de rotas e estados de entrada:**
-- Lobby e match ganharam proteção explícita de rota e validação de sessão
-- Estados intermediários (sessão ausente, hidratação, contexto de partida) passaram a ser comunicados honestamente em vez de parecer quebrados
+**Fluxo autoritativo de partida:**
+- Hand-start e next-hand progression restaurados e estabilizados
+- Round transitions sobrevivem a cenários reais sem quebrar estado
+- Realtime cards não somem cedo demais durante cleanup de resolução
 
-**Extração de orquestração:**
-- Socket lifecycle do lobby extraído para `useLobbyRealtimeSession`
-- Socket lifecycle do match extraído para `useMatchRealtimeSession`
-- Bridge de ações extraído para `useMatchActionBridge`
-- `MatchPage` passou de concentradora de transporte para orquestradora de rendering
+**Truco como core visível:**
+- Pedido de truco legível no fluxo de jogo
+- Bot exibe feedback visual de aceite/recusa
+- Valor da mão atualiza corretamente após aceite
+- Bet cycle completo — request · accept · decline — semanticamente coerente
+- Fluxo validado em rodadas reais
 
-**Correções de contrato:**
-- Renderização da mão privada alinhada ao contrato real tipado do backend (`viewerPlayerId` · `playerOneHand` · `playerTwoHand`)
-- Display de naipes alinhado à semântica real do payload de cartas
+**Mão de 11:**
+- Aceite retorna corretamente ao estado jogável
+- Recusa tem consequência correta de pontuação
+- `room-state` / current turn restaurado corretamente após aceite
 
-**Bundle e build:**
-- Code splitting por rota introduzido para todas as páginas
-- Split secundário para `MatchLiveStatePanel` e `MatchRoundsHistoryPanel`
-- Warning de chunk `> 500 kB` eliminado
+**Bots:**
+- Base mínima confiável para resposta de aposta no loop visível do truco
 
-→ Detalhes completos em [`docs/phases/phase-19.md`](docs/phases/phase-19.md)
+→ [`docs/phases/phase-20.md`](docs/phases/phase-20.md)
 
 ---
 
@@ -165,7 +166,8 @@ curl http://localhost:8000/health/live
 | [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
 | [`docs/api.md`](docs/api.md) | Eventos WebSocket Client↔Server |
 | [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
-| [`docs/phases/phase-19.md`](docs/phases/phase-19.md) | Frontend environment / runtime hardening |
+| [`docs/phases/phase-20.md`](docs/phases/phase-20.md) | Gameplay surface closure + truco core hardening |
+| [`docs/frontend-deploy.md`](docs/frontend-deploy.md) | Contrato de env e frontend deploy |
 | [`python-bot-service/README.md`](python-bot-service/README.md) | Contrato HTTP, exemplos, health |
 
 ---
