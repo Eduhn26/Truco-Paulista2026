@@ -21,6 +21,7 @@ export type HandSnapshot = {
   betState: HandBetState;
   pendingValue: HandValue | null;
   requestedBy: PlayerId | null;
+  raiseAuthority: PlayerId | null;
   specialState: HandSpecialState;
   specialDecisionPending: boolean;
   specialDecisionBy: PlayerId | null;
@@ -33,6 +34,7 @@ type HandStateConfig = {
   betState?: HandBetState;
   pendingValue?: HandValue | null;
   requestedBy?: PlayerId | null;
+  raiseAuthority?: PlayerId | null;
   specialState?: HandSpecialState;
   specialDecisionPending?: boolean;
   specialDecisionBy?: PlayerId | null;
@@ -49,6 +51,7 @@ export class Hand {
   private betState: HandBetState;
   private pendingValue: HandValue | null;
   private requestedBy: PlayerId | null;
+  private raiseAuthority: PlayerId | null;
   private specialState: HandSpecialState;
   private specialDecisionPending: boolean;
   private specialDecisionBy: PlayerId | null;
@@ -68,6 +71,7 @@ export class Hand {
     this.betState = state.betState ?? 'idle';
     this.pendingValue = state.pendingValue ?? null;
     this.requestedBy = state.requestedBy ?? null;
+    this.raiseAuthority = state.raiseAuthority ?? null;
     this.specialState = state.specialState ?? 'normal';
     this.specialDecisionPending = state.specialDecisionPending ?? false;
     this.specialDecisionBy = state.specialDecisionBy ?? null;
@@ -93,11 +97,10 @@ export class Hand {
         betState: snapshot.betState ?? 'idle',
         pendingValue: snapshot.pendingValue ?? null,
         requestedBy: snapshot.requestedBy ?? null,
+        raiseAuthority: snapshot.raiseAuthority ?? null,
         specialState: snapshot.specialState ?? 'normal',
         specialDecisionPending: snapshot.specialDecisionPending ?? false,
         specialDecisionBy: snapshot.specialDecisionBy ?? null,
-        winner: snapshot.winner ?? null,
-        awardedPoints: snapshot.awardedPoints ?? null,
       },
     );
 
@@ -107,7 +110,10 @@ export class Hand {
       hand.rounds.length,
       ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]),
     );
+
     hand.finished = snapshot.finished;
+    hand.winner = snapshot.winner ?? null;
+    hand.awardedPoints = snapshot.awardedPoints ?? null;
     hand.assertStateInvariants();
 
     return hand;
@@ -168,6 +174,7 @@ export class Hand {
     this.betState = 'idle';
     this.pendingValue = null;
     this.requestedBy = null;
+    this.raiseAuthority = player;
     this.assertStateInvariants();
   }
 
@@ -189,8 +196,12 @@ export class Hand {
       throw new InvalidMoveError('Only the mao de onze team can accept the special hand.');
     }
 
+    // NOTE: Once mao de onze is accepted, the special decision lifecycle is over.
+    // The hand returns to normal flow with the new value applied.
     this.currentValue = 3;
+    this.specialState = 'normal';
     this.specialDecisionPending = false;
+    this.specialDecisionBy = null;
     this.assertStateInvariants();
   }
 
@@ -248,6 +259,10 @@ export class Hand {
     return this.requestedBy;
   }
 
+  getRaiseAuthority(): PlayerId | null {
+    return this.raiseAuthority;
+  }
+
   getSpecialState(): HandSpecialState {
     return this.specialState;
   }
@@ -279,6 +294,7 @@ export class Hand {
       betState: this.betState,
       pendingValue: this.pendingValue,
       requestedBy: this.requestedBy,
+      raiseAuthority: this.raiseAuthority,
       specialState: this.specialState,
       specialDecisionPending: this.specialDecisionPending,
       specialDecisionBy: this.specialDecisionBy,
@@ -310,9 +326,14 @@ export class Hand {
       );
     }
 
+    if (this.currentValue > 1 && this.raiseAuthority !== player) {
+      throw new InvalidMoveError('Only the raise authority team can escalate the current bet.');
+    }
+
     this.betState = 'awaiting_response';
     this.pendingValue = targetValue;
     this.requestedBy = player;
+    this.raiseAuthority = null;
     this.assertStateInvariants();
   }
 
@@ -354,12 +375,18 @@ export class Hand {
     }
   }
 
-  private getOpponent(player: PlayerId): PlayerId {
-    return player === 'P1' ? 'P2' : 'P1';
+  private getCurrentRound(): Round {
+    const currentRound = this.rounds[this.rounds.length - 1];
+
+    if (!currentRound) {
+      throw new InvalidMoveError('Hand has no active round.');
+    }
+
+    return currentRound;
   }
 
-  private getCurrentRound(): Round {
-    return this.rounds[this.rounds.length - 1]!;
+  private getOpponent(player: PlayerId): PlayerId {
+    return player === 'P1' ? 'P2' : 'P1';
   }
 
   private evaluateFinished(): void {
@@ -367,13 +394,6 @@ export class Hand {
 
     if (winner) {
       this.finishWithWinner(winner, this.currentValue);
-      return;
-    }
-
-    if (this.rounds.length === 3 && this.getCurrentRound().isFinished()) {
-      this.finished = true;
-      this.winner = null;
-      this.awardedPoints = null;
     }
   }
 
@@ -384,7 +404,13 @@ export class Hand {
     this.betState = 'idle';
     this.pendingValue = null;
     this.requestedBy = null;
+    this.raiseAuthority = null;
+
+    // NOTE: Any special-hand decision is fully resolved once the hand finishes.
     this.specialDecisionPending = false;
+    this.specialDecisionBy = null;
+    this.specialState = 'normal';
+
     this.assertStateInvariants();
   }
 
@@ -485,6 +511,10 @@ export class Hand {
       }
     }
 
+    if (this.betState === 'awaiting_response' && this.raiseAuthority !== null) {
+      throw new InvalidMoveError('Pending bet state cannot keep a raise authority owner.');
+    }
+
     if (this.betState === 'awaiting_response') {
       if (this.pendingValue === null) {
         throw new InvalidMoveError('Pending bet state requires a pending bet value.');
@@ -493,57 +523,36 @@ export class Hand {
       if (this.requestedBy === null) {
         throw new InvalidMoveError('Pending bet state requires a requesting player.');
       }
-
-      if (this.pendingValue <= this.currentValue) {
-        throw new InvalidMoveError('Pending bet value must be greater than current hand value.');
-      }
-
-      const expectedNextValue = this.getNextBetValue(this.currentValue);
-
-      if (expectedNextValue !== this.pendingValue) {
-        throw new InvalidMoveError('Pending bet value must match the next valid escalation step.');
-      }
     }
 
-    if (this.specialState === 'normal' || this.specialState === 'mao_de_ferro') {
+    if (
+      this.specialState === 'mao_de_ferro' &&
+      (this.specialDecisionPending || this.specialDecisionBy !== null)
+    ) {
+      throw new InvalidMoveError('Mao de ferro cannot have a pending special decision.');
+    }
+
+    if (this.specialState === 'normal') {
       if (this.specialDecisionPending) {
-        throw new InvalidMoveError('Only mao de onze can keep a pending special decision.');
+        throw new InvalidMoveError('Normal hand cannot have a pending special decision.');
       }
 
       if (this.specialDecisionBy !== null) {
-        throw new InvalidMoveError('Only mao de onze can define a special decision owner.');
+        throw new InvalidMoveError('Normal hand cannot have a special decision owner.');
       }
     }
 
     if (this.specialState === 'mao_de_onze') {
-      if (this.specialDecisionBy === null) {
-        throw new InvalidMoveError('Mao de onze requires a deciding team.');
+      if (!this.specialDecisionPending && this.specialDecisionBy !== null) {
+        throw new InvalidMoveError(
+          'Resolved mao de onze hand cannot keep a special decision owner.',
+        );
       }
 
-      if (this.specialDecisionPending) {
-        if (this.currentValue !== 1) {
-          throw new InvalidMoveError('Pending mao de onze must still be worth 1 point.');
-        }
-
-        if (this.betState !== 'idle') {
-          throw new InvalidMoveError(
-            'Mao de onze pending decision cannot have an active bet state.',
-          );
-        }
-      }
-
-      if (!this.specialDecisionPending && this.currentValue !== 3 && !this.finished) {
-        throw new InvalidMoveError('Accepted mao de onze must be worth 3 points.');
-      }
-    }
-
-    if (this.specialState === 'mao_de_ferro') {
-      if (this.currentValue !== 1 && !this.finished) {
-        throw new InvalidMoveError('Mao de ferro must keep the hand value at 1 point.');
-      }
-
-      if (this.betState !== 'idle') {
-        throw new InvalidMoveError('Mao de ferro cannot have an active bet state.');
+      if (this.specialDecisionPending && this.specialDecisionBy === null) {
+        throw new InvalidMoveError(
+          'Pending mao de onze decision requires a responsible player.',
+        );
       }
     }
 
@@ -557,8 +566,8 @@ export class Hand {
       }
     }
 
-    if (this.finished && this.winner === null && this.awardedPoints !== null) {
-      throw new InvalidMoveError('Finished tied hand cannot have awarded points.');
+    if (this.finished && this.winner === null) {
+      throw new InvalidMoveError('Finished hand must have a winner.');
     }
 
     if (this.finished && this.winner !== null && this.awardedPoints === null) {

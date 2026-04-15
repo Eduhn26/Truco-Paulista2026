@@ -4,6 +4,14 @@ import type { PlayerId } from '@game/domain/value-objects/player-id';
 import type { Rank } from '@game/domain/value-objects/rank';
 import type { RoundResult } from '@game/domain/value-objects/round-result';
 
+export type NextDecisionType =
+  | 'idle'
+  | 'play-card'
+  | 'respond-bet'
+  | 'resolve-mao-de-onze'
+  | 'start-next-hand'
+  | 'match-finished';
+
 export type ViewMatchStateResponseDto = {
   matchId: string;
   state: MatchState;
@@ -24,6 +32,11 @@ export type ViewMatchStateResponseDto = {
     specialDecisionBy: PlayerId | null;
     winner: PlayerId | null;
     awardedPoints: HandValue | null;
+    currentRoundIndex: number;
+    lastRoundResult: RoundResult | null;
+    nextDecisionType: NextDecisionType;
+    viewerCanActNow: boolean;
+    pendingBotAction: boolean;
     availableActions: {
       canRequestTruco: boolean;
       canRaiseToSix: boolean;

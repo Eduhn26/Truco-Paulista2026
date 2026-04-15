@@ -7,6 +7,14 @@ export type PlayerId = 'P1' | 'P2' | string;
 export type HandValue = 1 | 3 | 6 | 9 | 12 | number;
 export type HandBetState = 'idle' | 'awaiting_response' | string;
 export type HandSpecialState = 'normal' | 'mao_de_onze' | 'mao_de_ferro' | string;
+export type NextDecisionType =
+  | 'idle'
+  | 'play-card'
+  | 'respond-bet'
+  | 'resolve-mao-de-onze'
+  | 'start-next-hand'
+  | 'match-finished'
+  | string;
 
 export type CardPayload = {
   rank: Rank;
@@ -71,6 +79,11 @@ export type MatchStateHandPayload = {
   specialDecisionBy: PlayerId | null;
   winner: PlayerId | null;
   awardedPoints: HandValue | null;
+  currentRoundIndex: number;
+  lastRoundResult: RoundResult | null;
+  nextDecisionType: NextDecisionType;
+  viewerCanActNow: boolean;
+  pendingBotAction: boolean;
   availableActions: MatchAvailableActionsPayload;
   playerOneHand: string[];
   playerTwoHand: string[];
@@ -112,6 +125,25 @@ export type CardPlayedPayload = {
   isBot?: boolean;
 };
 
+export type RoundTransitionPhase = 'round-resolved' | 'next-round-opened';
+
+export type RoundTransitionPayload = {
+  matchId: string;
+  phase: RoundTransitionPhase;
+  roundWinner: RoundResult | null;
+  finishedRoundsCount: number;
+  totalRoundsCount: number;
+  handContinues: boolean;
+  openingSeatId: SeatId | null;
+  currentTurnSeatId: SeatId | null;
+  triggeredBy?: {
+    seatId: string;
+    teamId: 'T1' | 'T2';
+    playerId: 'P1' | 'P2';
+    isBot: boolean;
+  };
+};
+
 export type GameSocketEvents = {
   onConnect?: (socketId: string) => void;
   onDisconnect?: (reason: string) => void;
@@ -123,7 +155,38 @@ export type GameSocketEvents = {
   onRanking?: (payload: RankingPayload) => void;
   onHandStarted?: (payload: HandStartedPayload) => void;
   onCardPlayed?: (payload: CardPlayedPayload) => void;
+  onRoundTransition?: (payload: RoundTransitionPayload) => void;
 };
+
+export type SuitDisplay = { symbol: string; colorClass: string };
+
+const SUIT_DISPLAY_MAP: Record<string, SuitDisplay> = {
+  C: { symbol: '♣', colorClass: 'text-slate-900' },
+  O: { symbol: '♦', colorClass: 'text-red-700' },
+  D: { symbol: '♦', colorClass: 'text-red-700' },
+  P: { symbol: '♥', colorClass: 'text-red-700' },
+  H: { symbol: '♥', colorClass: 'text-red-700' },
+  E: { symbol: '♠', colorClass: 'text-slate-900' },
+  S: { symbol: '♠', colorClass: 'text-slate-900' },
+};
+
+const FALLBACK_SUIT_DISPLAY: SuitDisplay = { symbol: '?', colorClass: 'text-slate-500' };
+
+export function getSuitDisplay(suit: string): SuitDisplay {
+  return SUIT_DISPLAY_MAP[suit] ?? FALLBACK_SUIT_DISPLAY;
+}
+
+export function suitSymbol(suit: string): string {
+  return getSuitDisplay(suit).symbol;
+}
+
+export function suitColorClass(suit: string): string {
+  return getSuitDisplay(suit).colorClass;
+}
+
+export function isSuitRed(suit: string): boolean {
+  return suit === 'P' || suit === 'H' || suit === 'O' || suit === 'D';
+}
 
 function asObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -131,6 +194,14 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
 function asBoolean(value: unknown, fallback = false): boolean {
@@ -169,8 +240,8 @@ function normalizeMatchStateRoundPayload(value: unknown): MatchStateRoundPayload
   const input = asObject(value);
 
   return {
-    playerOneCard: typeof input.playerOneCard === 'string' ? input.playerOneCard : null,
-    playerTwoCard: typeof input.playerTwoCard === 'string' ? input.playerTwoCard : null,
+    playerOneCard: asNullableString(input.playerOneCard),
+    playerTwoCard: asNullableString(input.playerTwoCard),
     result: typeof input.result === 'string' ? input.result : null,
     finished: asBoolean(input.finished),
   };
@@ -187,9 +258,7 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
     viraRank: asString(input.viraRank),
     finished: asBoolean(input.finished),
     viewerPlayerId:
-      input.viewerPlayerId === 'P1' || input.viewerPlayerId === 'P2'
-        ? input.viewerPlayerId
-        : null,
+      input.viewerPlayerId === 'P1' || input.viewerPlayerId === 'P2' ? input.viewerPlayerId : null,
     currentValue: asNumber(input.currentValue, 1),
     betState: asString(input.betState, 'idle'),
     pendingValue: asNullableHandValue(input.pendingValue),
@@ -214,12 +283,15 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
           ? input.winner
           : null,
     awardedPoints: asNullableHandValue(input.awardedPoints),
+    currentRoundIndex: asNumber(input.currentRoundIndex, 0),
+    lastRoundResult: typeof input.lastRoundResult === 'string' ? input.lastRoundResult : null,
+    nextDecisionType: asString(input.nextDecisionType, 'idle'),
+    viewerCanActNow: asBoolean(input.viewerCanActNow),
+    pendingBotAction: asBoolean(input.pendingBotAction),
     availableActions: normalizeMatchAvailableActionsPayload(input.availableActions),
     playerOneHand: asCardStringArray(input.playerOneHand),
     playerTwoHand: asCardStringArray(input.playerTwoHand),
-    rounds: Array.isArray(input.rounds)
-      ? input.rounds.map(normalizeMatchStateRoundPayload)
-      : [],
+    rounds: Array.isArray(input.rounds) ? input.rounds.map(normalizeMatchStateRoundPayload) : [],
   };
 }
 
@@ -233,38 +305,44 @@ export function normalizeServerErrorPayload(payload: unknown): ServerErrorPayloa
 
 export function normalizePlayerAssignedPayload(payload: unknown): PlayerAssignedPayload {
   const input = asObject(payload);
+  const teamId = asOptionalString(input.teamId);
+  const playerId = asOptionalString(input.playerId);
+  const playerToken = asOptionalString(input.playerToken);
+  const profileId = asOptionalString(input.profileId);
 
   return {
     matchId: asString(input.matchId),
     seatId: asString(input.seatId),
-    teamId: asString(input.teamId),
-    playerId: asString(input.playerId),
-    playerToken: asString(input.playerToken),
-    profileId: asString(input.profileId),
+    ...(teamId !== undefined ? { teamId } : {}),
+    ...(playerId !== undefined ? { playerId } : {}),
+    ...(playerToken !== undefined ? { playerToken } : {}),
+    ...(profileId !== undefined ? { profileId } : {}),
   };
 }
 
 export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
   const input = asObject(payload);
 
+  const mode = asOptionalString(input.mode);
+
   return {
     matchId: asString(input.matchId),
-    mode: asString(input.mode),
+    ...(mode !== undefined ? { mode } : {}),
     players: Array.isArray(input.players)
       ? input.players.map((player) => {
           const item = asObject(player);
+          const isBot = typeof item.isBot === 'boolean' ? item.isBot : undefined;
 
           return {
             seatId: asString(item.seatId),
             teamId: asString(item.teamId),
             ready: asBoolean(item.ready),
-            isBot: asBoolean(item.isBot),
+            ...(isBot !== undefined ? { isBot } : {}),
           };
         })
       : [],
     canStart: asBoolean(input.canStart),
-    currentTurnSeatId:
-      typeof input.currentTurnSeatId === 'string' ? input.currentTurnSeatId : null,
+    currentTurnSeatId: asNullableString(input.currentTurnSeatId),
   };
 }
 
@@ -290,12 +368,16 @@ export function normalizeRankingPayload(payload: unknown): RankingPayload {
     ranking: Array.isArray(input.ranking)
       ? input.ranking.map((entry) => {
           const item = asObject(entry);
+          const profileId = asOptionalString(item.profileId);
+          const userId = asOptionalString(item.userId);
+          const displayName = asOptionalString(item.displayName);
+          const rating = typeof item.rating === 'number' ? item.rating : 0;
 
           return {
-            profileId: asString(item.profileId),
-            userId: asString(item.userId),
-            displayName: asString(item.displayName),
-            rating: typeof item.rating === 'number' ? item.rating : 0,
+            ...(profileId !== undefined ? { profileId } : {}),
+            ...(userId !== undefined ? { userId } : {}),
+            ...(displayName !== undefined ? { displayName } : {}),
+            rating,
           };
         })
       : [],
@@ -304,27 +386,84 @@ export function normalizeRankingPayload(payload: unknown): RankingPayload {
 
 export function normalizeHandStartedPayload(payload: unknown): HandStartedPayload {
   const input = asObject(payload);
+  const viraRank = asOptionalString(input.viraRank);
+  const currentTurnSeatId = asNullableString(input.currentTurnSeatId);
 
   return {
     matchId: asString(input.matchId),
-    viraRank: asString(input.viraRank),
-    currentTurnSeatId:
-      typeof input.currentTurnSeatId === 'string' ? input.currentTurnSeatId : null,
+    ...(viraRank !== undefined ? { viraRank } : {}),
+    ...(currentTurnSeatId !== null ? { currentTurnSeatId } : { currentTurnSeatId: null }),
   };
 }
 
 export function normalizeCardPlayedPayload(payload: unknown): CardPlayedPayload {
   const input = asObject(payload);
+  const playerId = asOptionalString(input.playerId);
+  const seatId = asOptionalString(input.seatId);
+  const teamId = asOptionalString(input.teamId);
+  const card = asOptionalString(input.card);
+  const currentTurnSeatId = asNullableString(input.currentTurnSeatId);
+  const isBot = typeof input.isBot === 'boolean' ? input.isBot : undefined;
 
   return {
     matchId: asString(input.matchId),
-    playerId: asString(input.playerId),
-    seatId: asString(input.seatId),
-    teamId: asString(input.teamId),
-    card: asString(input.card),
-    currentTurnSeatId:
-      typeof input.currentTurnSeatId === 'string' ? input.currentTurnSeatId : null,
-    isBot: asBoolean(input.isBot),
+    ...(playerId !== undefined ? { playerId } : {}),
+    ...(seatId !== undefined ? { seatId } : {}),
+    ...(teamId !== undefined ? { teamId } : {}),
+    ...(card !== undefined ? { card } : {}),
+    ...(currentTurnSeatId !== null ? { currentTurnSeatId } : { currentTurnSeatId: null }),
+    ...(isBot !== undefined ? { isBot } : {}),
+  };
+}
+
+export function normalizeRoundTransitionPayload(payload: unknown): RoundTransitionPayload {
+  const input = asObject(payload);
+  const triggeredBy = asObject(input.triggeredBy);
+
+  const seatId = asOptionalString(triggeredBy.seatId);
+  const teamId =
+    triggeredBy.teamId === 'T1' || triggeredBy.teamId === 'T2' ? triggeredBy.teamId : undefined;
+  const playerId =
+    triggeredBy.playerId === 'P1' || triggeredBy.playerId === 'P2'
+      ? triggeredBy.playerId
+      : undefined;
+  const isBot = typeof triggeredBy.isBot === 'boolean' ? triggeredBy.isBot : undefined;
+
+  const normalizedTriggeredBy:
+    | {
+        seatId: string;
+        teamId: 'T1' | 'T2';
+        playerId: 'P1' | 'P2';
+        isBot: boolean;
+      }
+    | undefined =
+    seatId !== undefined &&
+    teamId !== undefined &&
+    playerId !== undefined &&
+    isBot !== undefined
+      ? {
+          seatId,
+          teamId,
+          playerId,
+          isBot,
+        }
+      : undefined;
+
+  const phase =
+    input.phase === 'round-resolved' || input.phase === 'next-round-opened'
+      ? input.phase
+      : 'round-resolved';
+
+  return {
+    matchId: asString(input.matchId),
+    phase,
+    roundWinner: typeof input.roundWinner === 'string' ? input.roundWinner : null,
+    finishedRoundsCount: asNumber(input.finishedRoundsCount, 0),
+    totalRoundsCount: asNumber(input.totalRoundsCount, 0),
+    handContinues: asBoolean(input.handContinues),
+    openingSeatId: asNullableString(input.openingSeatId),
+    currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+    ...(normalizedTriggeredBy !== undefined ? { triggeredBy: normalizedTriggeredBy } : {}),
   };
 }
 

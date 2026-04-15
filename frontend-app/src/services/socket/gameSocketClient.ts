@@ -7,6 +7,7 @@ import {
   normalizePlayerAssignedPayload,
   normalizeRankingPayload,
   normalizeRoomStatePayload,
+  normalizeRoundTransitionPayload,
   normalizeServerErrorPayload,
   type CardPayload,
   type GameSocketEvents,
@@ -24,55 +25,66 @@ export class GameSocketClient {
   connect(options: ConnectOptions, events: GameSocketEvents): Socket {
     this.disconnect();
 
-    this.socket = io(options.backendUrl, {
+    const socket = io(options.backendUrl, {
       transports: ['websocket'],
       auth: {
         authToken: options.authToken,
         token: options.authToken,
       },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 750,
+      reconnectionDelayMax: 2500,
+      timeout: 10000,
     });
 
-    this.socket.on('connect', () => {
-      events.onConnect?.(this.socket?.id ?? '');
+    this.socket = socket;
+
+    socket.on('connect', () => {
+      events.onConnect?.(socket.id ?? '');
     });
 
-    this.socket.on('disconnect', (reason) => {
+    socket.on('disconnect', (reason) => {
       events.onDisconnect?.(reason);
     });
 
-    this.socket.on('error', (payload: unknown) => {
+    socket.on('error', (payload: unknown) => {
       events.onError?.(normalizeServerErrorPayload(payload));
     });
 
-    this.socket.on('player-assigned', (payload: unknown) => {
+    socket.on('player-assigned', (payload: unknown) => {
       events.onPlayerAssigned?.(normalizePlayerAssignedPayload(payload));
     });
 
-    this.socket.on('room-state', (payload: unknown) => {
+    socket.on('room-state', (payload: unknown) => {
       events.onRoomState?.(normalizeRoomStatePayload(payload));
     });
 
-    this.socket.on('match-state', (payload: unknown) => {
+    socket.on('match-state', (payload: unknown) => {
       events.onMatchState?.(normalizeMatchStatePayload(payload));
     });
 
-    this.socket.on('match-state:private', (payload: unknown) => {
+    socket.on('match-state:private', (payload: unknown) => {
       events.onPrivateMatchState?.(normalizeMatchStatePayload(payload));
     });
 
-    this.socket.on('ranking', (payload: unknown) => {
+    socket.on('ranking', (payload: unknown) => {
       events.onRanking?.(normalizeRankingPayload(payload));
     });
 
-    this.socket.on('hand-started', (payload: unknown) => {
+    socket.on('hand-started', (payload: unknown) => {
       events.onHandStarted?.(normalizeHandStartedPayload(payload));
     });
 
-    this.socket.on('card-played', (payload: unknown) => {
+    socket.on('card-played', (payload: unknown) => {
       events.onCardPlayed?.(normalizeCardPlayedPayload(payload));
     });
 
-    return this.socket;
+    socket.on('round-transition', (payload: unknown) => {
+      events.onRoundTransition?.(normalizeRoundTransitionPayload(payload));
+    });
+
+    return socket;
   }
 
   disconnect(): void {
@@ -80,6 +92,7 @@ export class GameSocketClient {
       return;
     }
 
+    this.socket.removeAllListeners();
     this.socket.disconnect();
     this.socket = null;
   }

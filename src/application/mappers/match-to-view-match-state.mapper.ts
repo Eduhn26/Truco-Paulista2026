@@ -1,8 +1,16 @@
-import type { HandSnapshot, HandValue } from '@game/domain/entities/hand';
-import type { Match } from '@game/domain/entities/match';
-import { Round } from '@game/domain/entities/round';
-import type { PlayerId } from '@game/domain/value-objects/player-id';
-import type { ViewMatchStateResponseDto } from '@game/application/dtos/responses/view-match-state.response.dto';
+import type { Match } from '../../domain/entities/match';
+import { Round } from '../../domain/entities/round';
+import type {
+  HandBetState,
+  HandSnapshot,
+  HandSpecialState,
+  HandValue,
+} from '../../domain/entities/hand';
+import type { PlayerId } from '../../domain/value-objects/player-id';
+import type { RoundResult } from '../../domain/value-objects/round-result';
+import type { ViewMatchStateResponseDto } from '../dtos/responses/view-match-state.response.dto';
+
+type CurrentHandView = NonNullable<ViewMatchStateResponseDto['currentHand']>;
 
 function maskHand(cards: string[]): string[] {
   return cards.map(() => 'HIDDEN');
@@ -11,7 +19,7 @@ function maskHand(cards: string[]): string[] {
 function canRaiseToTarget(
   snapshot: HandSnapshot,
   viewerPlayerId: PlayerId | undefined,
-  targetValue: HandValue,
+  currentValueRequired: HandValue,
 ): boolean {
   if (!viewerPlayerId) {
     return false;
@@ -25,42 +33,108 @@ function canRaiseToTarget(
     return false;
   }
 
-  return snapshot.currentValue === targetValue;
+  if (snapshot.currentValue !== currentValueRequired) {
+    return false;
+  }
+
+  // NOTE: After a raise is accepted, only the accepting side owns the next
+  // escalation window. The projection must follow the authoritative ownership
+  // exported by the hand snapshot instead of exposing escalation controls to
+  // both players.
+  if (snapshot.currentValue > 1 && snapshot.raiseAuthority !== viewerPlayerId) {
+    return false;
+  }
+
+  return true;
+}
+
+function canRespondToBet(snapshot: HandSnapshot, viewerPlayerId: PlayerId | undefined): boolean {
+  if (!viewerPlayerId) {
+    return false;
+  }
+
+  return snapshot.betState === 'awaiting_response' && snapshot.requestedBy !== viewerPlayerId;
+}
+
+function canResolveMaoDeOnze(
+  snapshot: HandSnapshot,
+  viewerPlayerId: PlayerId | undefined,
+): boolean {
+  if (!viewerPlayerId) {
+    return false;
+  }
+
+  return (
+    snapshot.specialState === 'mao_de_onze' &&
+    snapshot.specialDecisionPending &&
+    snapshot.specialDecisionBy === viewerPlayerId
+  );
 }
 
 function buildAvailableActions(
   snapshot: HandSnapshot,
   viewerPlayerId: PlayerId | undefined,
-): NonNullable<ViewMatchStateResponseDto['currentHand']>['availableActions'] {
-  const canRespondToBet =
-    Boolean(viewerPlayerId) &&
-    !snapshot.finished &&
-    snapshot.betState === 'awaiting_response' &&
-    snapshot.requestedBy !== null &&
-    snapshot.requestedBy !== viewerPlayerId;
+): CurrentHandView['availableActions'] {
+  const canRespondBet = canRespondToBet(snapshot, viewerPlayerId);
+  const canResolveSpecial = canResolveMaoDeOnze(snapshot, viewerPlayerId);
 
-  const canResolveMaoDeOnze =
+  const canAttemptPlayCard =
     Boolean(viewerPlayerId) &&
     !snapshot.finished &&
-    snapshot.specialState === 'mao_de_onze' &&
-    snapshot.specialDecisionPending &&
-    snapshot.specialDecisionBy === viewerPlayerId;
+    snapshot.betState === 'idle' &&
+    !snapshot.specialDecisionPending;
 
   return {
     canRequestTruco: canRaiseToTarget(snapshot, viewerPlayerId, 1),
     canRaiseToSix: canRaiseToTarget(snapshot, viewerPlayerId, 3),
     canRaiseToNine: canRaiseToTarget(snapshot, viewerPlayerId, 6),
     canRaiseToTwelve: canRaiseToTarget(snapshot, viewerPlayerId, 9),
-    canAcceptBet: canRespondToBet,
-    canDeclineBet: canRespondToBet,
-    canAcceptMaoDeOnze: canResolveMaoDeOnze,
-    canDeclineMaoDeOnze: canResolveMaoDeOnze,
-    canAttemptPlayCard:
-      Boolean(viewerPlayerId) &&
-      !snapshot.finished &&
-      snapshot.betState === 'idle' &&
-      !snapshot.specialDecisionPending,
+    canAcceptBet: canRespondBet,
+    canDeclineBet: canRespondBet,
+    canAcceptMaoDeOnze: canResolveSpecial,
+    canDeclineMaoDeOnze: canResolveSpecial,
+    canAttemptPlayCard,
   };
+}
+
+function resolveNextDecisionType(snapshot: HandSnapshot): CurrentHandView['nextDecisionType'] {
+  if (snapshot.finished) {
+    return 'start-next-hand';
+  }
+
+  if (snapshot.specialState === 'mao_de_onze' && snapshot.specialDecisionPending) {
+    return 'resolve-mao-de-onze';
+  }
+
+  if (snapshot.betState === 'awaiting_response') {
+    return 'respond-bet';
+  }
+
+  return 'play-card';
+}
+
+function resolveCurrentRoundIndex(snapshot: HandSnapshot): number {
+  const firstUnfinishedRoundIndex = snapshot.rounds.findIndex((round) => !round.finished);
+
+  if (firstUnfinishedRoundIndex >= 0) {
+    return firstUnfinishedRoundIndex;
+  }
+
+  return Math.max(0, snapshot.rounds.length - 1);
+}
+
+function resolveLastRoundResult(snapshot: HandSnapshot): RoundResult | null {
+  for (let index = snapshot.rounds.length - 1; index >= 0; index -= 1) {
+    const round = snapshot.rounds[index];
+
+    if (!round?.finished) {
+      continue;
+    }
+
+    return Round.fromSnapshot(round).getResult();
+  }
+
+  return null;
 }
 
 export function mapMatchToViewMatchState(
@@ -102,6 +176,8 @@ export function mapMatchToViewMatchState(
         ? playerTwoHand
         : maskHand(playerTwoHand);
 
+  const availableActions = buildAvailableActions(snapshot, viewerPlayerId);
+
   return {
     matchId,
     state: match.getState(),
@@ -113,16 +189,8 @@ export function mapMatchToViewMatchState(
       viraRank: snapshot.viraRank,
       finished: snapshot.finished,
       viewerPlayerId: viewerPlayerId ?? null,
-      currentValue: snapshot.currentValue,
-      betState: snapshot.betState,
-      pendingValue: snapshot.pendingValue,
-      requestedBy: snapshot.requestedBy,
-      specialState: snapshot.specialState,
-      specialDecisionPending: snapshot.specialDecisionPending,
-      specialDecisionBy: snapshot.specialDecisionBy,
-      winner: snapshot.winner,
-      awardedPoints: snapshot.awardedPoints,
-      availableActions: buildAvailableActions(snapshot, viewerPlayerId),
+      currentRoundIndex: resolveCurrentRoundIndex(snapshot),
+      lastRoundResult: resolveLastRoundResult(snapshot),
       playerOneHand: visiblePlayerOneHand,
       playerTwoHand: visiblePlayerTwoHand,
       rounds: snapshot.rounds.map((round) => ({
@@ -131,6 +199,23 @@ export function mapMatchToViewMatchState(
         result: round.finished ? Round.fromSnapshot(round).getResult() : null,
         finished: round.finished,
       })),
+      currentValue: snapshot.currentValue,
+      betState: snapshot.betState as HandBetState,
+      pendingValue: snapshot.pendingValue,
+      requestedBy: snapshot.requestedBy,
+      specialState: snapshot.specialState as HandSpecialState,
+      specialDecisionPending: snapshot.specialDecisionPending,
+      specialDecisionBy: snapshot.specialDecisionBy,
+      winner: snapshot.winner,
+      awardedPoints: snapshot.awardedPoints,
+      availableActions,
+      nextDecisionType: resolveNextDecisionType(snapshot),
+      viewerCanActNow:
+        !snapshot.finished &&
+        (canRespondToBet(snapshot, viewerPlayerId) ||
+          canResolveMaoDeOnze(snapshot, viewerPlayerId) ||
+          availableActions.canAttemptPlayCard),
+      pendingBotAction: false,
     },
   };
 }

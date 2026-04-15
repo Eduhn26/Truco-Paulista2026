@@ -86,7 +86,7 @@ function PanelMetric({
 }) {
   const toneClass =
     tone === 'success'
-      ? 'text-emerald-300'
+      ? 'text-amber-300'
       : tone === 'danger'
         ? 'text-rose-300'
         : 'text-slate-100';

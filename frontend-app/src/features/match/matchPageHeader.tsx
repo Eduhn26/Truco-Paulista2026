@@ -1,36 +1,5 @@
 import { Link } from 'react-router-dom';
-
 import type { Rank } from '../../services/socket/socketTypes';
-
-function MetricCard({
-  label,
-  value,
-  mono = false,
-  tone = 'default',
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  tone?: 'default' | 'success' | 'danger';
-}) {
-  const toneClass =
-    tone === 'success'
-      ? 'text-emerald-300'
-      : tone === 'danger'
-        ? 'text-rose-300'
-        : 'text-slate-100';
-
-  return (
-    <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
-      <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">
-        {label}
-      </div>
-      <div className={`mt-3 break-all text-sm font-bold ${mono ? 'font-mono' : ''} ${toneClass}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
 
 export function MatchPageHeader({
   connectionStatus,
@@ -53,75 +22,157 @@ export function MatchPageHeader({
   onChangeViraRank: (value: Rank) => void;
   onStartHand: () => void;
 }) {
+  const isOnline = connectionStatus === 'online';
+
   return (
-    <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.18),transparent_42%)] px-8 py-8 lg:px-10 lg:py-10">
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr] xl:items-end">
-        <div>
-          <div className="inline-flex rounded-full border border-emerald-400/20 bg-emerald-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.24em] text-emerald-300">
-            Live match
-          </div>
-
-          <h1 className="mt-5 max-w-4xl text-4xl font-black tracking-tight text-white lg:text-5xl">
-            Mesa pronta para jogar, ler turno e seguir o ritmo da mão.
-          </h1>
-
-          <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">
-            Reestruturada para ler o payload autoritativo primeiro, reduzir derivação ambígua e
-            tratar melhor a transição entre rodada, fim de mão e próxima mão.
-          </p>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard
-            label="Connection"
-            value={connectionStatus}
-            tone={connectionStatus === 'online' ? 'success' : 'danger'}
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+      style={{
+        background: 'rgba(5,8,16,0.9)',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        backdropFilter: 'blur(12px)',
+      }}
+    >
+      {/* Left: Status indicators */}
+      <div className="flex items-center gap-2.5">
+        {/* Online/Offline dot */}
+        <div
+          className="flex items-center gap-1.5 rounded-full px-3 py-1.5"
+          style={{
+            background: isOnline ? 'rgba(22,101,52,0.2)' : 'rgba(153,27,27,0.2)',
+            border: isOnline ? '1px solid rgba(34,197,94,0.25)' : '1px solid rgba(239,68,68,0.25)',
+          }}
+        >
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ background: isOnline ? '#22c55e' : '#ef4444' }}
           />
-          <MetricCard label="Match ID" value={resolvedMatchId || '-'} mono />
-          <MetricCard label="My seat" value={mySeat || '-'} />
+          <span
+            className="text-[9px] font-black uppercase tracking-widest"
+            style={{ color: isOnline ? '#4ade80' : '#f87171' }}
+          >
+            {connectionStatus}
+          </span>
         </div>
+
+        {/* Seat */}
+        {mySeat && (
+          <div
+            className="rounded-full px-3 py-1.5 text-[9px] font-black uppercase tracking-widest"
+            style={{
+              background: 'rgba(201,168,76,0.12)',
+              border: '1px solid rgba(201,168,76,0.25)',
+              color: '#c9a84c',
+            }}
+          >
+            {mySeat}
+          </div>
+        )}
+
+        {/* Match ID (abbreviated) */}
+        {resolvedMatchId && (
+          <span
+            className="hidden rounded-full px-2.5 py-1 font-mono text-[8px] sm:block"
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.3)',
+            }}
+            title={resolvedMatchId}
+          >
+            #{resolvedMatchId.slice(-8)}
+          </span>
+        )}
       </div>
 
-      <div className="mt-8 flex flex-wrap gap-3">
-        <Link
-          to="/lobby"
-          className="rounded-3xl bg-emerald-500 px-5 py-4 text-sm font-black text-slate-950 transition hover:bg-emerald-400"
+      {/* Center: Truco Paulista logo text */}
+      <div className="hidden flex-1 justify-center md:flex">
+        <span
+          className="text-[11px] font-black uppercase tracking-[0.3em]"
+          style={{ color: 'rgba(201,168,76,0.5)' }}
         >
-          Voltar para lobby
-        </Link>
+          Truco Paulista
+        </span>
+      </div>
 
+      {/* Right: Controls */}
+      <div className="ml-auto flex items-center gap-2">
         <button
           type="button"
           onClick={onRefreshState}
-          className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-bold text-slate-100 transition hover:bg-white/10"
+          className="rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200"
+          style={{
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: 'rgba(255,255,255,0.5)',
+          }}
+          onMouseEnter={(e) => {
+            (e.target as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)';
+            (e.target as HTMLButtonElement).style.color = 'rgba(255,255,255,0.8)';
+          }}
+          onMouseLeave={(e) => {
+            (e.target as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)';
+            (e.target as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)';
+          }}
         >
-          Get state
+          Sync
         </button>
 
         <select
           value={viraRank}
-          onChange={(event) => onChangeViraRank(event.target.value as Rank)}
-          className="rounded-3xl border border-white/10 bg-slate-950 px-5 py-4 text-sm font-bold text-slate-100 outline-none transition focus:border-emerald-400/40"
+          onChange={(e) => onChangeViraRank(e.target.value as Rank)}
+          className="cursor-pointer rounded-lg px-3 py-1.5 text-[9px] font-black uppercase tracking-widest outline-none transition-all"
+          style={{
+            background: '#0a0f16',
+            border: '1px solid rgba(201,168,76,0.2)',
+            color: '#c9a84c',
+          }}
         >
-          {viraRankOptions.map((option) => (
-            <option key={option} value={option}>
-              Vira {option}
+          {viraRankOptions.map((opt) => (
+            <option key={opt} value={opt} style={{ background: '#0a0f16', color: '#d1d5db' }}>
+              Vira {opt}
             </option>
           ))}
         </select>
 
+        {/* Nova Mão CTA */}
         <button
           type="button"
           onClick={onStartHand}
           disabled={!canStartHand}
-          className={`rounded-3xl border px-5 py-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50 ${
+          aria-disabled={!canStartHand}
+          className="rounded-lg px-5 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all duration-200"
+          style={
             canStartHand
-              ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20'
-              : 'border-white/10 bg-white/5 text-slate-100 hover:bg-white/10'
-          }`}
+              ? {
+                  background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
+                  border: '1px solid rgba(201,168,76,0.5)',
+                  color: '#1a0a00',
+                  boxShadow: '0 0 18px rgba(201,168,76,0.3), 0 4px 12px rgba(0,0,0,0.3)',
+                }
+              : {
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.2)',
+                  cursor: 'not-allowed',
+                }
+          }
         >
-          Start next hand
+          Nova mão
         </button>
+
+        <Link
+          to="/lobby"
+          className="rounded-lg px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200"
+          style={{
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: 'rgba(255,255,255,0.5)',
+            textDecoration: 'none',
+          }}
+        >
+          ← Lobby
+        </Link>
       </div>
     </div>
   );

@@ -196,7 +196,7 @@ describe('ViewMatchStateUseCase (Application)', () => {
     });
   });
 
-  it('returns raise-to-six as available after accepted truco', async () => {
+  it('does not expose raise-to-six to the requesting side after accepted truco', async () => {
     const repo = new InMemoryMatchRepository();
     const match = new Match(12);
 
@@ -211,6 +211,34 @@ describe('ViewMatchStateUseCase (Application)', () => {
     const state = await viewState.execute({
       matchId,
       viewerPlayerId: 'P1',
+    });
+
+    expect(state.currentHand).not.toBeNull();
+    expect(state.currentHand!.currentValue).toBe(3);
+    expect(state.currentHand!.availableActions).toMatchObject({
+      canRequestTruco: false,
+      canRaiseToSix: false,
+      canRaiseToNine: false,
+      canRaiseToTwelve: false,
+      canAttemptPlayCard: true,
+    });
+  });
+
+  it('exposes raise-to-six to the accepting side after accepted truco', async () => {
+    const repo = new InMemoryMatchRepository();
+    const match = new Match(12);
+
+    match.start('4');
+    match.requestTruco('P1');
+    match.acceptBet('P2');
+
+    const matchId = await repo.create(match);
+    await repo.save(matchId, match);
+
+    const viewState = new ViewMatchStateUseCase(repo);
+    const state = await viewState.execute({
+      matchId,
+      viewerPlayerId: 'P2',
     });
 
     expect(state.currentHand).not.toBeNull();
