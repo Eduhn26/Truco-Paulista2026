@@ -46,7 +46,7 @@ export class Match {
     return this.currentHand;
   }
 
-  start(viraRank: Rank): void {
+  start(viraRank?: Rank): void {
     if (this.state === 'finished') {
       throw new InvalidMoveError('Match is already finished.');
     }
@@ -55,11 +55,10 @@ export class Match {
       return;
     }
 
-    // NOTE: We intentionally preserve the finished hand snapshot between hands.
-    // The previous hand is only replaced when the next one explicitly starts.
-    // This keeps the transport/frontend contract able to expose
-    // nextDecisionType = 'start-next-hand' instead of collapsing into null.
-    this.currentHand = Hand.start(viraRank, this.buildInitialHandState());
+    this.currentHand =
+      viraRank !== undefined
+        ? Hand.start(viraRank, this.buildInitialHandState())
+        : Hand.startRandom(this.buildInitialHandState());
     this.state = 'in_progress';
   }
 
@@ -182,9 +181,10 @@ export class Match {
 
     const matchWinner = this.score.hasWinner(this.pointsToWin);
 
-    // NOTE: We keep the finished hand attached to the match until the next
-    // explicit start(). This allows the transport/frontend contract to expose
-    // "start-next-hand" instead of collapsing the match into a null-hand state.
+    // NOTE: Keep the finished hand attached until the next explicit start().
+    // This preserves the authoritative "hand finished" state for transport/UI,
+    // allowing the gateway/frontend to observe start-next-hand instead of
+    // collapsing immediately to waiting + null hand.
     if (matchWinner) {
       this.state = 'finished';
       return;

@@ -12,6 +12,7 @@ type MatchPlayerHandPanelProps = {
   onPlayCard: (card: CardPayload) => void;
   isMyTurn?: boolean;
   viraRank?: Rank;
+  isDecisionFocus?: boolean;
 };
 
 type FanMetrics = {
@@ -82,10 +83,13 @@ export function MatchPlayerHandPanel({
   launchingCardKey,
   onPlayCard,
   viraRank = '4',
+  isDecisionFocus = false,
 }: MatchPlayerHandPanelProps) {
   const cardCount = myCards.length;
   const bestCardIndex = getBestCardIndex(myCards, viraRank);
   const hasPlayableHand = cardCount > 0 && canPlayCard && tablePhase === 'playing';
+  const hasDecisionFocusHand = cardCount > 0 && isDecisionFocus;
+  const canInspectCards = canPlayCard || isDecisionFocus;
 
   if (cardCount === 0 && tablePhase === 'waiting') {
     return (
@@ -130,7 +134,7 @@ export function MatchPlayerHandPanel({
       <div
         className="pointer-events-none absolute inset-x-10 bottom-1 h-10 rounded-[999px] transition-opacity duration-300"
         style={{
-          opacity: hasPlayableHand ? 1 : 0.22,
+          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.22,
           background:
             'radial-gradient(circle at center, rgba(201,168,76,0.1), rgba(201,168,76,0) 68%)',
           filter: 'blur(12px)',
@@ -140,10 +144,12 @@ export function MatchPlayerHandPanel({
       <div
         className="pointer-events-none absolute inset-x-[24%] bottom-3 h-14 rounded-[999px]"
         style={{
-          opacity: hasPlayableHand ? 1 : 0.35,
-          background: hasPlayableHand
-            ? 'radial-gradient(circle, rgba(255,235,170,0.16) 0%, rgba(201,168,76,0.08) 34%, transparent 74%)'
-            : 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 74%)',
+          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.35,
+          background: hasDecisionFocusHand
+            ? 'radial-gradient(circle, rgba(255,235,170,0.22) 0%, rgba(201,168,76,0.14) 38%, transparent 78%)'
+            : hasPlayableHand
+              ? 'radial-gradient(circle, rgba(255,235,170,0.16) 0%, rgba(201,168,76,0.08) 34%, transparent 74%)'
+              : 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 74%)',
           filter: 'blur(14px)',
         }}
       />
@@ -159,6 +165,7 @@ export function MatchPlayerHandPanel({
           const fan = getFanMetrics(cardCount, index);
           const isBestCard = index === bestCardIndex && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
+          const isDecisionHeroCard = isDecisionFocus && centerDistance <= 0.5;
           
           return (
             <motion.button
@@ -179,7 +186,13 @@ export function MatchPlayerHandPanel({
                 y: isLaunching ? -180 : fan.y,
                 x: isLaunching ? fan.x + 82 : fan.x,
                 rotate: isLaunching ? fan.rotate - 7 : fan.rotate,
-                scale: isLaunching ? 0.8 : isBestCard ? 1.02 : 1,
+                scale: isLaunching
+                  ? 0.8
+                  : isDecisionHeroCard
+                    ? 1.04
+                    : isBestCard
+                      ? 1.02
+                      : 1,
               }}
               transition={{
                 type: 'spring',
@@ -188,11 +201,11 @@ export function MatchPlayerHandPanel({
                 delay: isLaunching ? 0 : index * 0.025,
               }}
               whileHover={
-                canPlayCard && !isLaunching
+                canInspectCards && !isLaunching
                   ? {
-                      y: fan.y - 28,
+                      y: fan.y - (isDecisionFocus ? 34 : 28),
                       rotate: fan.rotate * 0.12,
-                      scale: isBestCard ? 1.075 : 1.06,
+                      scale: isDecisionHeroCard ? 1.09 : isBestCard ? 1.075 : 1.06,
                       zIndex: 140,
                     }
                   : {}
@@ -212,9 +225,11 @@ export function MatchPlayerHandPanel({
                 className="pointer-events-none absolute inset-0 rounded-[16px]"
                 style={{
                   transform: 'scale(1.08)',
-                  background: isBestCard
-                    ? 'radial-gradient(circle, rgba(255,228,140,0.26) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
-                    : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 76%)',
+                  background: isDecisionHeroCard
+                    ? 'radial-gradient(circle, rgba(255,228,140,0.34) 0%, rgba(201,168,76,0.18) 36%, transparent 76%)'
+                    : isBestCard
+                      ? 'radial-gradient(circle, rgba(255,228,140,0.26) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
+                      : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 76%)',
                   filter: 'blur(12px)',
                   opacity: isLaunching ? 0 : 1,
                 }}
@@ -227,12 +242,16 @@ export function MatchPlayerHandPanel({
                   height: 118,
                   borderRadius: 14,
                   background: 'linear-gradient(145deg, #fffefb 0%, #faf6ee 52%, #f2ead6 100%)',
-                  boxShadow: isBestCard
-                    ? '0 0 22px rgba(201,168,76,0.3), 0 12px 26px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.98)'
-                    : '0 8px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.92)',
-                  border: isBestCard
-                    ? '2px solid rgba(201,168,76,0.46)'
-                    : '1px solid rgba(0,0,0,0.1)',
+                  boxShadow: isDecisionHeroCard
+                    ? '0 0 28px rgba(201,168,76,0.36), 0 14px 30px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.98)'
+                    : isBestCard
+                      ? '0 0 22px rgba(201,168,76,0.3), 0 12px 26px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.98)'
+                      : '0 8px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.92)',
+                  border: isDecisionHeroCard
+                    ? '2px solid rgba(255,223,128,0.62)'
+                    : isBestCard
+                      ? '2px solid rgba(201,168,76,0.46)'
+                      : '1px solid rgba(0,0,0,0.1)',
                   padding: '7px 7px',
                 }}
               >

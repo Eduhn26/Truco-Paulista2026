@@ -8,7 +8,6 @@ import type {
   CardPlayedPayload,
   MatchStatePayload,
   PlayerAssignedPayload,
-  Rank,
   RoomStatePayload,
   RoundTransitionPayload,
   ServerErrorPayload,
@@ -17,7 +16,11 @@ import type {
 type UseMatchRealtimeSessionParams = {
   session: FrontendSession | null;
   effectiveMatchId: string;
-  onHandStarted: (payload: { matchId?: string; viraRank?: Rank | null }) => void;
+  onHandStarted: (payload: {
+    matchId?: string;
+    viraRank?: string | null;
+    currentTurnSeatId?: string | null;
+  }) => void;
   onCardPlayed: (payload: {
     matchId?: string;
     playerId?: string | null;
@@ -56,7 +59,7 @@ type UseMatchRealtimeSessionResult = {
   eventLog: string[];
   appendLog: (line: string) => void;
   emitGetState: (matchId: string) => void;
-  emitStartHand: (matchId: string, viraRank: Rank) => void;
+  emitStartHand: (matchId: string) => void;
   emitPlayCard: (matchId: string, card: CardPayload) => void;
   emitRequestTruco: (matchId: string) => void;
   emitAcceptBet: (matchId: string) => void;
@@ -112,7 +115,10 @@ function persistLiveSnapshot(params: PersistSnapshotParams): void {
   });
 }
 
-function describeMatchStatePayload(scope: 'public' | 'private', payload: MatchStatePayload): string {
+function describeMatchStatePayload(
+  scope: 'public' | 'private',
+  payload: MatchStatePayload,
+): string {
   return [
     `Received ${scope} match-state`,
     `state=${payload.state}`,
@@ -529,7 +535,7 @@ export function useMatchRealtimeSession(
     eventLog,
     appendLog,
     emitGetState: (matchId) => clientRef.current?.emitGetState(matchId),
-    emitStartHand: (matchId, viraRank) => clientRef.current?.emitStartHand(matchId, viraRank),
+    emitStartHand: (matchId) => clientRef.current?.emitStartHand(matchId),
     emitPlayCard: (matchId, card) => clientRef.current?.emitPlayCard(matchId, card),
     emitRequestTruco: (matchId) => clientRef.current?.emitRequestTruco(matchId),
     emitAcceptBet: (matchId) => clientRef.current?.emitAcceptBet(matchId),

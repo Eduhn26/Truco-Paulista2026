@@ -17,6 +17,7 @@ type Props = {
   isOneVsOne: boolean;
   viraRank: Rank;
   isSubdued?: boolean;
+  isDecisionFocus?: boolean;
   actionSurface?: ReactNode;
 };
 
@@ -32,35 +33,38 @@ export function MatchPlayerHandDock({
   isOneVsOne,
   viraRank,
   isSubdued = false,
+  isDecisionFocus = false,
   actionSurface = null,
 }: Props) {
   const isInteractive = tablePhase === 'playing' && myCards.length > 0;
   const handCount = myCards.length;
+  const shouldElevateDecision = isDecisionFocus && handCount > 0;
 
   return (
     <motion.div
       layout
       className="relative mx-auto w-full max-w-4xl px-2 pb-0"
       initial={false}
-      // CHANGE: subdued state is now aggressive. Before: opacity 0.72, scale
-      // 0.985. After: opacity 0.44, scale 0.96, slight slide down. This is
-      // the fix for "the dock competes with the event overlay". When anything
-      // important is happening on the mesa, the dock visibly yields.
+      // NOTE: mão de 11 is a decision moment, not a passive blocker.
+      // During that state the dock must become the visual protagonist so the
+      // player can inspect the hand before deciding.
       animate={{
-        y: isSubdued ? 8 : isInteractive ? -1 : 0,
-        opacity: isSubdued ? 0.44 : 1,
-        scale: isSubdued ? 0.96 : 1,
+        y: shouldElevateDecision ? -8 : isSubdued ? 8 : isInteractive ? -1 : 0,
+        opacity: shouldElevateDecision ? 1 : isSubdued ? 0.44 : 1,
+        scale: shouldElevateDecision ? 1.02 : isSubdued ? 0.96 : 1,
       }}
       transition={{ type: 'spring', stiffness: 200, damping: 26 }}
     >
       <div
         className="pointer-events-none absolute inset-x-[14%] -top-4 h-12 rounded-full"
         style={{
-          background: isSubdued
-            ? 'radial-gradient(circle, rgba(255,255,255,0.01) 0%, transparent 78%)'
-            : isMyTurn
-              ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(201,168,76,0.04) 42%, transparent 78%)'
-              : 'radial-gradient(circle, rgba(255,255,255,0.035) 0%, transparent 78%)',
+          background: shouldElevateDecision
+            ? 'radial-gradient(circle, rgba(255,223,128,0.2) 0%, rgba(201,168,76,0.08) 42%, transparent 78%)'
+            : isSubdued
+              ? 'radial-gradient(circle, rgba(255,255,255,0.01) 0%, transparent 78%)'
+              : isMyTurn
+                ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(201,168,76,0.04) 42%, transparent 78%)'
+                : 'radial-gradient(circle, rgba(255,255,255,0.035) 0%, transparent 78%)',
           filter: 'blur(16px)',
         }}
       />
@@ -70,17 +74,23 @@ export function MatchPlayerHandDock({
         style={{
           borderRadius: 24,
           padding: '10px 10px 8px',
-          background: isSubdued
-            ? 'linear-gradient(180deg, rgba(5,10,18,0.48) 0%, rgba(3,6,12,0.62) 100%)'
+          background: shouldElevateDecision
+            ? 'linear-gradient(180deg, rgba(201,168,76,0.12) 0%, rgba(18,24,36,0.8) 24%, rgba(5,9,15,0.88) 100%)'
+            : isSubdued
+              ? 'linear-gradient(180deg, rgba(5,10,18,0.48) 0%, rgba(3,6,12,0.62) 100%)'
+              : isMyTurn
+                ? 'linear-gradient(180deg, rgba(201,168,76,0.06) 0%, rgba(7,12,20,0.52) 22%, rgba(4,8,14,0.72) 100%)'
+                : 'linear-gradient(180deg, rgba(10,16,24,0.54) 0%, rgba(5,9,15,0.72) 100%)',
+          border: shouldElevateDecision
+            ? '1px solid rgba(255,223,128,0.32)'
             : isMyTurn
-              ? 'linear-gradient(180deg, rgba(201,168,76,0.06) 0%, rgba(7,12,20,0.52) 22%, rgba(4,8,14,0.72) 100%)'
-              : 'linear-gradient(180deg, rgba(10,16,24,0.54) 0%, rgba(5,9,15,0.72) 100%)',
-          border: isMyTurn
-            ? '1px solid rgba(201,168,76,0.14)'
-            : '1px solid rgba(255,255,255,0.035)',
-          boxShadow: isMyTurn
-            ? '0 10px 24px rgba(0,0,0,0.18), 0 -6px 18px rgba(201,168,76,0.05), inset 0 1px 0 rgba(255,255,255,0.04)'
-            : '0 10px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.03)',
+              ? '1px solid rgba(201,168,76,0.14)'
+              : '1px solid rgba(255,255,255,0.035)',
+          boxShadow: shouldElevateDecision
+            ? '0 14px 34px rgba(0,0,0,0.24), 0 -8px 22px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.06)'
+            : isMyTurn
+              ? '0 10px 24px rgba(0,0,0,0.18), 0 -6px 18px rgba(201,168,76,0.05), inset 0 1px 0 rgba(255,255,255,0.04)'
+              : '0 10px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.03)',
           backdropFilter: 'blur(10px)',
           overflow: 'visible',
         }}
@@ -116,7 +126,18 @@ export function MatchPlayerHandDock({
               >
                 Sua mão
               </span>
-              {isMyTurn ? (
+              {shouldElevateDecision ? (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
+                  style={{
+                    background: 'rgba(255,223,128,0.14)',
+                    border: '1px solid rgba(255,223,128,0.34)',
+                    color: '#f6dfa0',
+                  }}
+                >
+                  Decida sua mão
+                </span>
+              ) : isMyTurn ? (
                 <span
                   className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
                   style={{
@@ -190,6 +211,7 @@ export function MatchPlayerHandDock({
             onPlayCard={onPlayCard}
             isMyTurn={isMyTurn}
             viraRank={viraRank}
+            isDecisionFocus={shouldElevateDecision}
           />
         </div>
       </div>

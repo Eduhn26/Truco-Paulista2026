@@ -58,10 +58,8 @@ export function MatchPageHeader({
   resolvedMatchId,
   mySeat,
   viraRank,
-  viraRankOptions,
   canStartHand,
   onRefreshState,
-  onChangeViraRank,
   onStartHand,
   scoreLabel,
   currentValue,
@@ -70,10 +68,8 @@ export function MatchPageHeader({
   resolvedMatchId: string;
   mySeat: string | null;
   viraRank: Rank;
-  viraRankOptions: Rank[];
   canStartHand: boolean;
   onRefreshState: () => void;
-  onChangeViraRank: (value: Rank) => void;
   onStartHand: () => void;
   scoreLabel?: string;
   currentValue?: number;
@@ -359,23 +355,6 @@ export function MatchPageHeader({
           >
             Sync
           </button>
-
-          <select
-            value={viraRank}
-            onChange={(event) => onChangeViraRank(event.target.value as Rank)}
-            className="cursor-pointer rounded-lg px-3 py-1 text-[8px] font-black uppercase tracking-[0.16em] outline-none transition-all"
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(230,195,100,0.20)',
-              color: '#c9a84c',
-            }}
-          >
-            {viraRankOptions.map((option) => (
-              <option key={option} value={option} style={{ background: '#0a0f16', color: '#d1d5db' }}>
-                Vira {option}
-              </option>
-            ))}
-          </select>
         </div>
       ) : null}
     </div>

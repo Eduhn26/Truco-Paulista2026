@@ -36,17 +36,18 @@ describe('StartHandUseCase', () => {
 
     const useCase = new StartHandUseCase(repo);
 
-    await useCase.execute({ matchId: 'match_1', viraRank: '4' });
+    await useCase.execute({ matchId: 'match_1' });
 
     const reloaded = await repo.getById('match_1');
     expect(reloaded?.getState()).toBe('in_progress');
+    expect(reloaded?.getCurrentHand()?.toSnapshot().viraRank).toMatch(/^(4|5|6|7|Q|J|K|A|2|3)$/);
   });
 
   it('throws when match does not exist', async () => {
     const repo = new FakeMatchRepository();
     const useCase = new StartHandUseCase(repo);
 
-    await expect(useCase.execute({ matchId: 'missing', viraRank: '4' })).rejects.toThrow(
+    await expect(useCase.execute({ matchId: 'missing' })).rejects.toThrow(
       'match not found',
     );
   });
@@ -55,7 +56,7 @@ describe('StartHandUseCase', () => {
     const repo = new FakeMatchRepository();
     const useCase = new StartHandUseCase(repo);
 
-    await expect(useCase.execute({ matchId: '   ', viraRank: '4' })).rejects.toThrow(
+    await expect(useCase.execute({ matchId: '   ' })).rejects.toThrow(
       'matchId is required',
     );
   });

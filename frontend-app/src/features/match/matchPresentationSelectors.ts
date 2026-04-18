@@ -205,7 +205,7 @@ function buildHandStatus(params: {
 
   if (publicMatchState?.state === 'finished') {
     return {
-      handStatusLabel: 'Partida encerrada. O placar final já foi definido.',
+      handStatusLabel: 'Partida encerrada. Revise o resultado final e escolha a próxima ação.',
       handStatusTone: 'success',
     };
   }
@@ -227,8 +227,14 @@ function buildHandStatus(params: {
   if (currentPublicHand.specialState === 'mao_de_onze' && currentPublicHand.specialDecisionPending) {
     const requestedBy = formatRequestedBy(currentPublicHand.specialDecisionBy ?? null);
 
+    const viewerMustDecide =
+      currentPublicHand.availableActions?.canAcceptMaoDeOnze ||
+      currentPublicHand.availableActions?.canDeclineMaoDeOnze;
+
     return {
-      handStatusLabel: `Mão de 11 em decisão para ${requestedBy}. Aguarde a confirmação antes de seguir.`,
+      handStatusLabel: viewerMustDecide
+        ? `Mão de 11. Analise suas cartas e decida se vai jogar ou correr contra ${requestedBy}.`
+        : `Mão de 11 em decisão para ${requestedBy}. Aguardando a confirmação especial.`,
       handStatusTone: 'warning',
     };
   }
