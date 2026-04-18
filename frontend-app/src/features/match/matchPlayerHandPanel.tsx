@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-
 import { getSuitDisplay, isSuitRed } from '../../services/socket/socketTypes';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 
@@ -23,12 +22,6 @@ type FanMetrics = {
 
 const RANK_ORDER: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 
-/*
- * NOTE:
- * Truco Paulista manilha is the next rank after the vira.
- * Suit strength for manilhas follows the classic Paulista order:
- * clubs < hearts < spades < diamonds.
- */
 const SUIT_STRENGTH = {
   C: 0,
   P: 1,
@@ -38,22 +31,18 @@ const SUIT_STRENGTH = {
 
 function getManilhaRank(viraRank: Rank): Rank {
   const viraIndex = RANK_ORDER.indexOf(viraRank);
-
   if (viraIndex === -1) {
     return '5';
   }
-
   return RANK_ORDER[(viraIndex + 1) % RANK_ORDER.length]!;
 }
 
 function getCardStrength(card: CardPayload, viraRank: Rank): number {
   const manilhaRank = getManilhaRank(viraRank);
   const rankIndex = RANK_ORDER.indexOf(card.rank);
-
   if (card.rank === manilhaRank) {
     return 100 + SUIT_STRENGTH[card.suit as keyof typeof SUIT_STRENGTH];
   }
-
   return rankIndex;
 }
 
@@ -61,13 +50,11 @@ function getFanMetrics(cardCount: number, index: number): FanMetrics {
   if (cardCount <= 1) {
     return { rotate: 0, x: 0, y: 0 };
   }
-
   const midpoint = (cardCount - 1) / 2;
   const offsetFromCenter = index - midpoint;
   const maxSpread = cardCount <= 3 ? 16 : 20;
   const horizontalStep = cardCount <= 3 ? 36 : 32;
   const verticalDepth = cardCount <= 3 ? 6 : 9;
-
   return {
     rotate: offsetFromCenter * maxSpread * 0.24,
     x: offsetFromCenter * horizontalStep,
@@ -78,16 +65,13 @@ function getFanMetrics(cardCount: number, index: number): FanMetrics {
 function getBestCardIndex(myCards: CardPayload[], viraRank: Rank): number {
   let bestCardIndex = -1;
   let bestStrength = -Infinity;
-
   myCards.forEach((card, index) => {
     const strength = getCardStrength(card, viraRank);
-
     if (strength > bestStrength) {
       bestStrength = strength;
       bestCardIndex = index;
     }
   });
-
   return bestCardIndex;
 }
 
@@ -141,7 +125,7 @@ export function MatchPlayerHandPanel({
           filter: 'blur(10px)',
         }}
       />
-
+      
       {/* NOTE: This ambient glow helps the hand feel premium without making the panel larger. */}
       <div
         className="pointer-events-none absolute inset-x-10 bottom-1 h-10 rounded-[999px] transition-opacity duration-300"
@@ -152,7 +136,7 @@ export function MatchPlayerHandPanel({
           filter: 'blur(12px)',
         }}
       />
-
+      
       <div
         className="pointer-events-none absolute inset-x-[24%] bottom-3 h-14 rounded-[999px]"
         style={{
@@ -163,7 +147,7 @@ export function MatchPlayerHandPanel({
           filter: 'blur(14px)',
         }}
       />
-
+      
       {/* NOTE: Card size stays the same. The improvement is in presentation, not scale. */}
       <div className="relative flex h-[118px] w-full items-end justify-center overflow-visible">
         {myCards.map((card, index) => {
@@ -175,7 +159,7 @@ export function MatchPlayerHandPanel({
           const fan = getFanMetrics(cardCount, index);
           const isBestCard = index === bestCardIndex && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
-
+          
           return (
             <motion.button
               key={cardKey}
@@ -235,9 +219,9 @@ export function MatchPlayerHandPanel({
                   opacity: isLaunching ? 0 : 1,
                 }}
               />
-
+              
               <div
-                className="relative flex flex-col justify-between overflow-hidden"
+                className="relative flex flex-col justify-between overflow-hidden playing-card"
                 style={{
                   width: 84,
                   height: 118,
@@ -263,7 +247,6 @@ export function MatchPlayerHandPanel({
                     pointerEvents: 'none',
                   }}
                 />
-
                 <div
                   style={{
                     position: 'absolute',
@@ -275,7 +258,7 @@ export function MatchPlayerHandPanel({
                     pointerEvents: 'none',
                   }}
                 />
-
+                
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <div
                     style={{
@@ -293,7 +276,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </div>
                 </div>
-
+                
                 <div
                   style={{
                     position: 'absolute',
@@ -320,7 +303,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </span>
                 </div>
-
+                
                 <div
                   style={{
                     position: 'relative',
@@ -345,7 +328,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </div>
                 </div>
-
+                
                 {/* NOTE: Keep the sheen elegant and internal, without external tags or tabs. */}
                 <div
                   className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 hover:opacity-100"

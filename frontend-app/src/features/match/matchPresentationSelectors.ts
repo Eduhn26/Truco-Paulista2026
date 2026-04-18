@@ -12,10 +12,20 @@ export type MatchStatusTone = 'neutral' | 'success' | 'warning';
 
 export type TablePhase = 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 
+// CHANGE: new ValeTier type drives the escalation colour/motion system used by
+// the header and the event stage. Single source of truth for "how risky is this hand".
+export type ValeTier = 'muted' | 'gold' | 'orange' | 'red' | 'red-pulse';
+
 export type MatchContractPresentation = {
   currentValue: number;
+  // CHANGE: expose the tier alongside the raw value so any consumer (header,
+  // table shell, overlays) can render with consistent escalation treatment.
+  valeTier: ValeTier;
   betState: MatchStateHandPayload['betState'];
   pendingValue: MatchStateHandPayload['pendingValue'];
+  // CHANGE: also expose tier for the pending (requested) value, used by the
+  // pressure overlay so the ask reads at the right escalation level.
+  pendingValeTier: ValeTier;
   requestedBy: PlayerId | null;
   specialState: MatchStateHandPayload['specialState'];
   specialDecisionPending: boolean;
@@ -56,6 +66,31 @@ const EMPTY_AVAILABLE_ACTIONS: MatchAvailableActionsPayload = {
   canDeclineMaoDeOnze: false,
   canAttemptPlayCard: false,
 };
+
+// CHANGE: canonical escalation table. 1 = no pressure; 3 = first ask; 6/9 =
+// serious raises; 12 = maximum, pulses in the UI. Keep this centralised so the
+// header pill, the pressure overlay and the climax stage all agree.
+export function resolveValeTier(value: number | null | undefined): ValeTier {
+  const resolved = value ?? 1;
+
+  if (resolved >= 12) {
+    return 'red-pulse';
+  }
+
+  if (resolved >= 9) {
+    return 'red';
+  }
+
+  if (resolved >= 6) {
+    return 'orange';
+  }
+
+  if (resolved >= 3) {
+    return 'gold';
+  }
+
+  return 'muted';
+}
 
 function resolveTablePhase(params: {
   publicMatchState: MatchStatePayload | null;
@@ -275,10 +310,17 @@ export function buildMatchContractPresentation(
     latestRound,
   });
 
+  const currentValue = currentPublicHand?.currentValue ?? 1;
+  const pendingValue = currentPublicHand?.pendingValue ?? null;
+
   return {
-    currentValue: currentPublicHand?.currentValue ?? 1,
+    currentValue,
+    // CHANGE: surface the resolved tiers so every consumer reads the same
+    // escalation state from one canonical place.
+    valeTier: resolveValeTier(currentValue),
     betState: currentPublicHand?.betState ?? 'idle',
-    pendingValue: currentPublicHand?.pendingValue ?? null,
+    pendingValue,
+    pendingValeTier: resolveValeTier(pendingValue ?? currentValue),
     requestedBy: currentPublicHand?.requestedBy ?? null,
     specialState: currentPublicHand?.specialState ?? 'normal',
     specialDecisionPending: currentPublicHand?.specialDecisionPending ?? false,

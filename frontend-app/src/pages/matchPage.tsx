@@ -23,12 +23,12 @@ const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
 const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 
-const HAND_INTRO_HOLD_MS = 650;
-const HAND_RESULT_HOLD_MS = 900;
-const NEXT_HAND_COMMIT_MS = 220;
-const BET_FEEDBACK_HOLD_MS = 1800;
-const BET_FEEDBACK_MIN_REQUESTED_MS = 1200;
-const REALTIME_RESOLUTION_GRACE_MS = 400;
+const HAND_INTRO_HOLD_MS = 720;
+const HAND_RESULT_HOLD_MS = 1180;
+const NEXT_HAND_COMMIT_MS = 320;
+const BET_FEEDBACK_HOLD_MS = 1500;
+const BET_FEEDBACK_MIN_REQUESTED_MS = 950;
+const REALTIME_RESOLUTION_GRACE_MS = 550;
 
 type TableSeatView = {
   seatId: string;
@@ -177,6 +177,19 @@ function TrucoDebugBadge({ publicMatchState, privateMatchState }: TrucoDebugBadg
   );
 }
 
+
+function shouldShowTrucoDebugBadge(): boolean {
+  if (!import.meta.env.DEV) {
+    return false;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return new URLSearchParams(window.location.search).get('debugTruco') === '1';
+}
+
 function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   if (!feedback) {
     return null;
@@ -185,36 +198,50 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   const toneClasses =
     feedback.tone === 'success'
       ? {
-          border: 'border-emerald-400/35',
-          chip: 'text-emerald-300',
-          bg: 'linear-gradient(180deg, rgba(6, 40, 28, 0.96), rgba(6, 20, 16, 0.92))',
+          chip: 'rgba(134, 239, 172, 0.9)',
+          border: '1px solid rgba(74,222,128,0.20)',
+          background:
+            'linear-gradient(180deg, rgba(5, 40, 26, 0.97), rgba(5, 18, 14, 0.94) 100%)',
+          glow: '0 0 28px rgba(34,197,94,0.12), 0 22px 52px rgba(0,0,0,0.42)',
         }
       : feedback.tone === 'warning'
         ? {
-            border: 'border-amber-400/35',
-            chip: 'text-amber-300',
-            bg: 'linear-gradient(180deg, rgba(54, 36, 5, 0.96), rgba(18, 14, 8, 0.92))',
+            chip: 'rgba(253, 224, 71, 0.92)',
+            border: '1px solid rgba(245,158,11,0.24)',
+            background:
+              'linear-gradient(180deg, rgba(64, 28, 6, 0.97), rgba(26, 12, 8, 0.94) 100%)',
+            glow: '0 0 28px rgba(245,158,11,0.12), 0 22px 52px rgba(0,0,0,0.42)',
           }
         : {
-            border: 'border-sky-400/35',
-            chip: 'text-sky-300',
-            bg: 'linear-gradient(180deg, rgba(8, 28, 48, 0.96), rgba(8, 14, 24, 0.92))',
+            chip: 'rgba(147, 197, 253, 0.92)',
+            border: '1px solid rgba(96,165,250,0.22)',
+            background:
+              'linear-gradient(180deg, rgba(6, 23, 44, 0.97), rgba(5, 12, 24, 0.94) 100%)',
+            glow: '0 0 28px rgba(59,130,246,0.10), 0 22px 52px rgba(0,0,0,0.42)',
           };
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-4 z-50 -translate-x-1/2 px-3">
+    <div className="pointer-events-none absolute left-1/2 top-[23%] z-[70] w-full max-w-[560px] -translate-x-1/2 px-4">
       <div
-        className={`min-w-[320px] max-w-[520px] rounded-2xl ${toneClasses.border} px-5 py-3 backdrop-blur-xl`}
+        className="rounded-[26px] px-6 py-4 text-center backdrop-blur-xl"
         style={{
-          background: toneClasses.bg,
-          boxShadow: '0 18px 50px rgba(0,0,0,0.44)',
+          background: toneClasses.background,
+          border: toneClasses.border,
+          boxShadow: toneClasses.glow,
         }}
       >
-        <div className={`text-[10px] font-black uppercase tracking-[0.24em] ${toneClasses.chip}`}>
+        <div
+          className="text-[10px] font-black uppercase tracking-[0.28em]"
+          style={{ color: toneClasses.chip }}
+        >
           Truco
         </div>
-        <div className="mt-1 text-base font-black text-white">{feedback.title}</div>
-        <div className="mt-1 text-sm text-slate-200">{feedback.detail}</div>
+        <div className="mt-2 text-[18px] font-black uppercase tracking-[0.08em] text-white">
+          {feedback.title}
+        </div>
+        <div className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-200">
+          {feedback.detail}
+        </div>
       </div>
     </div>
   );
@@ -232,6 +259,7 @@ export function MatchPage() {
   const [betFeedback, setBetFeedback] = useState<BetFeedbackState | null>(null);
   const { play } = useGameSound();
   const [cachedMyCards, setCachedMyCards] = useState<CardPayload[]>([]);
+  const shouldRenderTrucoDebugBadge = shouldShowTrucoDebugBadge();
   const beginHandTransitionRef = useRef<() => void>(() => {});
   const registerIncomingPlayedCardRef = useRef<
     (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void
@@ -984,7 +1012,7 @@ export function MatchPage() {
 
         enqueueBetFeedback({
           kind: 'requested',
-          title: 'Truco pedido',
+          title: 'TRUCO!',
           detail,
           tone: 'neutral',
         });
@@ -1007,8 +1035,8 @@ export function MatchPage() {
     const acceptedValue = effectiveHand.currentValue >= pendingCycle.pendingValue;
 
     if (!effectiveHand.finished && acceptedValue) {
-      const title = requesterIsMine ? `${responderLabel} aceitou o truco` : 'Truco aceito';
-      const detail = `A mão agora vale ${effectiveHand.currentValue} pontos.`;
+      const title = requesterIsMine ? `${responderLabel.toUpperCase()} ACEITOU` : 'ACEITO';
+      const detail = `Agora vale ${effectiveHand.currentValue} ponto${effectiveHand.currentValue === 1 ? '' : 's'}.`;
 
       appendLog(
         [
@@ -1035,14 +1063,12 @@ export function MatchPage() {
     }
 
     if (effectiveHand.finished && effectiveHand.awardedPoints === pendingCycle.previousValue) {
-      const title = requesterIsMine ? `${responderLabel} correu` : 'Você correu';
+      const title = requesterIsMine
+        ? `${responderLabel.toUpperCase()} CORREU`
+        : 'VOCÊ CORREU';
       const detail = requesterIsMine
-        ? `Você venceu a mão por ${effectiveHand.awardedPoints} ponto${
-            effectiveHand.awardedPoints === 1 ? '' : 's'
-          }.`
-        : `A mão foi encerrada e o adversário levou ${effectiveHand.awardedPoints} ponto${
-            effectiveHand.awardedPoints === 1 ? '' : 's'
-          }.`;
+        ? `Mão sua · +${effectiveHand.awardedPoints} ponto${effectiveHand.awardedPoints === 1 ? '' : 's'}.`
+        : `Mão deles · +${effectiveHand.awardedPoints} ponto${effectiveHand.awardedPoints === 1 ? '' : 's'}.`;
 
       appendLog(
         [
@@ -1074,6 +1100,9 @@ export function MatchPage() {
     viewModel.mySeat,
     viewModel.opponentSeatView,
   ]);
+
+  const suppressHandOutcomeModal =
+    betFeedback?.kind === 'requested' || betFeedback?.kind === 'declined';
 
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
     useMatchActionBridge({
@@ -1227,7 +1256,14 @@ export function MatchPage() {
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
-  const effectiveMyCards = viewModel.handFinished ? cachedMyCards : viewModel.myCards;
+ const shouldKeepCardsDuringResultBeat =
+  visualBeat === 'hand_result_hold' || viewModel.matchFinished;
+
+const effectiveMyCards = shouldKeepCardsDuringResultBeat
+  ? cachedMyCards
+  : viewModel.handFinished
+    ? []
+    : viewModel.myCards;
 
   const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
   const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
@@ -1295,6 +1331,8 @@ export function MatchPage() {
             onRefreshState={handleRefreshState}
             onChangeViraRank={setViraRank}
             onStartHand={handleStartHandWithGate}
+            scoreLabel={viewModel.scoreLabel}
+            currentValue={viewModel.currentValue}
           />
 
           {!hasHydratedMatchState ? (
@@ -1365,10 +1403,12 @@ export function MatchPage() {
 
               <BetFeedbackBanner feedback={betFeedback} />
 
-              <TrucoDebugBadge
-                publicMatchState={visualPublicMatchState}
-                privateMatchState={visualPrivateMatchState}
-              />
+              {shouldRenderTrucoDebugBadge ? (
+                <TrucoDebugBadge
+                  publicMatchState={visualPublicMatchState}
+                  privateMatchState={visualPrivateMatchState}
+                />
+              ) : null}
             </div>
 
             <div className="shrink-0 px-2 pb-2 pt-1 md:px-3 md:pb-3">
@@ -1519,3 +1559,6 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
+
+
+

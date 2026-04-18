@@ -11,8 +11,11 @@
   --gold-border: rgba(201, 168, 76, 0.3);
   --bg-deep: #050810;
   --bg-card: #0a121a;
-  --bg-felt: #0d1f0f;
-  --bg-felt-mid: #112614;
+
+  /* Navy felt tokens */
+  --bg-felt: #0c1828;
+  --bg-felt-mid: #132036;
+
   --bg-surface: rgba(10, 18, 26, 0.85);
   --accent-green: #1a4731;
   --accent-red: #8b1a1a;
@@ -23,6 +26,32 @@
   --border-gold: 1px solid rgba(201, 168, 76, 0.3);
   --border-gold-glow: 0 0 20px rgba(201, 168, 76, 0.3);
   --shadow-premium: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  /* Escalation tokens */
+  --tier-muted-bg: linear-gradient(135deg, #3a3424, #221f14);
+  --tier-muted-border: rgba(201, 168, 76, 0.18);
+  --tier-muted-text: rgba(232, 199, 106, 0.72);
+  --tier-muted-glow: 0 0 0 0 rgba(201, 168, 76, 0);
+
+  --tier-gold-bg: linear-gradient(135deg, #e8c76a 0%, #c9a84c 55%, #8a6a28 100%);
+  --tier-gold-border: rgba(255, 223, 128, 0.64);
+  --tier-gold-text: #1a0a00;
+  --tier-gold-glow: 0 0 28px rgba(201, 168, 76, 0.35);
+
+  --tier-orange-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #92400e 100%);
+  --tier-orange-border: rgba(251, 191, 36, 0.62);
+  --tier-orange-text: #1a0500;
+  --tier-orange-glow: 0 0 32px rgba(245, 158, 11, 0.42);
+
+  --tier-red-bg: linear-gradient(135deg, #ef4444 0%, #b91c1c 55%, #7f1d1d 100%);
+  --tier-red-border: rgba(252, 165, 165, 0.6);
+  --tier-red-text: #fff5f5;
+  --tier-red-glow: 0 0 36px rgba(220, 38, 38, 0.52);
+
+  --tier-pulse-bg: linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%);
+  --tier-pulse-border: rgba(254, 226, 226, 0.82);
+  --tier-pulse-text: #fff;
+  --tier-pulse-glow: 0 0 48px rgba(248, 113, 113, 0.64);
 }
 
 body {
@@ -38,41 +67,23 @@ body {
 
 .felt-table {
   position: relative;
-  background-color: #0d1e10;
+  background-color: #0c1828;
   background-image:
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"),
-    radial-gradient(ellipse at 50% 50%, rgba(201, 168, 76, 0.12) 0%, transparent 65%),
-    radial-gradient(ellipse at 50% 0%, #162b18 0%, #0d1e10 40%, #091509 100%);
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.030'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 50% 55%, #132036 0%, #0c1828 36%, #06101c 64%, #030810 100%);
   box-shadow:
-    inset 0 0 120px rgba(0, 0, 0, 0.6),
-    inset 0 0 60px rgba(0, 0, 0, 0.4);
-  /* Removed min-height !important and transform: scale workarounds.
-     Layout height is now controlled via flexbox and parent containers. */
+    inset 0 0 160px rgba(0, 0, 0, 0.55),
+    inset 0 0 60px rgba(0, 0, 0, 0.40);
 }
 
-.felt-table::before {
-  content: '';
-  position: absolute;
-  inset: 18px;
-  border-radius: 50% / 38%;
-  border: 2px solid rgba(201, 168, 76, 0.18);
-  pointer-events: none;
-  z-index: 1;
-}
-
+.felt-table::before,
 .felt-table::after {
-  content: '';
-  position: absolute;
-  inset: 28px;
-  border-radius: 50% / 42%;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  pointer-events: none;
-  z-index: 1;
+  content: none;
 }
 
 .gold-frame {
   border: var(--border-gold);
-  border-radius: 32px;
+  border-radius: 28px;
   box-shadow: var(--shadow-premium), inset 0 0 20px rgba(201, 168, 76, 0.05);
   background: var(--bg-surface);
   backdrop-filter: blur(12px);
@@ -100,14 +111,14 @@ body {
       45deg,
       transparent,
       transparent 3px,
-      rgba(255,255,255,0.03) 3px,
-      rgba(255,255,255,0.03) 6px
+      rgba(255,255,255,0.02) 3px,
+      rgba(255,255,255,0.02) 6px
     ),
-    linear-gradient(135deg, #1a3a5c 0%, #0d2340 40%, #162d52 100%);
+    linear-gradient(135deg, #132643 0%, #0b1a32 55%, #091528 100%);
   box-shadow:
-    0 8px 24px rgba(0,0,0,0.45),
-    0 20px 48px rgba(0,0,0,0.3);
-  border: 1px solid rgba(255,255,255,0.12);
+    0 8px 24px rgba(0,0,0,0.48),
+    0 20px 48px rgba(0,0,0,0.32);
+  border: 1px solid rgba(230,195,100,0.20);
 }
 
 .text-gradient-gold {
@@ -141,8 +152,6 @@ body {
   transform: translateY(-20px) scale(1.04);
 }
 
-/* Removed all media queries with transform: scale and min-height !important.
-   Responsiveness is now handled via flexbox, clamp(), and native vw/vh units. */
 @media (max-width: 768px) {
   .felt-table { overflow-x: auto; }
 }
@@ -151,3 +160,148 @@ main.relative.z-10 {
   overflow-x: hidden;
   width: 100%;
 }
+
+.font-display {
+  font-family: 'Georgia', 'Times New Roman', serif;
+}
+
+.bg-gradient-gold {
+  background: linear-gradient(135deg, #c9a84c, #8a6a28);
+}
+
+.bg-felt-pattern {
+  background: radial-gradient(circle at 50% 38%, #132036 0%, #0c1828 60%, #030810 100%);
+}
+
+.border-gold {
+  border-color: oklch(0.78 0.14 82);
+}
+
+.text-gold {
+  color: oklch(0.78 0.14 82);
+}
+
+.ring-gold {
+  --tw-ring-color: oklch(0.78 0.14 82);
+}
+
+@keyframes pulse-gold {
+  0%, 100% { opacity: 0.6; box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
+  50% { opacity: 1; box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
+}
+.animate-pulse-gold {
+  animation: pulse-gold 2s ease-in-out infinite;
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 20px rgba(201, 168, 76, 0.3);
+}
+
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scrollbar-premium::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-premium::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.scrollbar-premium::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #c9a84c, #8a6a28);
+  border-radius: 3px;
+}
+
+/* ============================================
+   ESCALATION + CLIMAX SYSTEM
+   ============================================ */
+
+/* CHANGE: tier-pulse still used by the VALE 12 pill in the header. */
+@keyframes tier-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 12px rgba(248, 113, 113, 0.48));
+  }
+  50% {
+    transform: scale(1.035);
+    filter: drop-shadow(0 0 24px rgba(248, 113, 113, 0.82));
+  }
+}
+.tier-pulse-anim { animation: tier-pulse 0.9s ease-in-out infinite; }
+
+/* Felt breath — subtle ambient motion in the felt */
+@keyframes felt-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 0.78; transform: scale(1.012); }
+}
+.felt-breathe-anim { animation: felt-breathe 4.6s ease-in-out infinite; }
+
+/* CHANGE: legacy .climax-fade-anim / .climax-slam-anim removed because the
+   new HandClimaxStage uses motion.div with proper enter/exit. These were
+   part of the "modal travado" bug (one-shot forwards animations without
+   reversibility). Keeping stubs here in case any other code still references
+   them, but they're now no-ops. */
+.climax-fade-anim { opacity: 1; }
+.climax-slam-anim { transform: translate(-50%, -50%); }
+.climax-flash-anim { opacity: 0; }
+
+/* Keep these keyframes available in case of legacy references. */
+@keyframes pressure-shake {
+  0%   { transform: translate(0, 0) rotate(0); }
+  20%  { transform: translate(-2px, 1px) rotate(-0.1deg); }
+  40%  { transform: translate(3px, -1px) rotate(0.1deg); }
+  60%  { transform: translate(-2px, -1px) rotate(-0.05deg); }
+  80%  { transform: translate(2px, 1px) rotate(0.05deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+.pressure-shake-anim { animation: pressure-shake 0.42s ease-in-out; }
+
+@keyframes round-beat {
+  0%   { box-shadow: 0 0 0 0    rgba(201, 168, 76, 0.70), 0 24px 42px rgba(0,0,0,0.34); }
+  60%  { box-shadow: 0 0 42px 14px rgba(201, 168, 76, 0.30), 0 24px 42px rgba(0,0,0,0.34); }
+  100% { box-shadow: 0 0 24px 4px rgba(201, 168, 76, 0.18), 0 24px 42px rgba(0,0,0,0.34); }
+}
+.round-beat-anim { animation: round-beat 0.95s ease-out; }
+
+@keyframes counter-roll {
+  0%   { transform: translateY(24px); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.counter-roll-anim { animation: counter-roll 0.42s ease-out forwards; }
+
+@keyframes initiative-sweep-to-bottom {
+  0%   { opacity: 0; transform: translateY(-40%); }
+  40%  { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(40%); }
+}
+.initiative-sweep-bottom-anim { animation: initiative-sweep-to-bottom 0.82s ease-out; }
+
+@keyframes initiative-sweep-to-top {
+  0%   { opacity: 0; transform: translateY(40%); }
+  40%  { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(-40%); }
+}
+.initiative-sweep-top-anim { animation: initiative-sweep-to-top 0.82s ease-out; }
+
+/* CHANGE: NEW — panel-pulse used for the left context column when an
+   important state transitions in (truco pedido, escalada, mão sua). */
+@keyframes panel-pulse {
+  0%, 100% { text-shadow: 0 2px 4px rgba(0,0,0,0.40); }
+  50%      { text-shadow: 0 2px 4px rgba(0,0,0,0.40), 0 0 18px currentColor; }
+}
+.panel-pulse-anim { animation: panel-pulse 1.8s ease-in-out infinite; }
+
+.tier-bg-muted     { background: var(--tier-muted-bg); }
+.tier-bg-gold      { background: var(--tier-gold-bg); }
+.tier-bg-orange    { background: var(--tier-orange-bg); }
+.tier-bg-red       { background: var(--tier-red-bg); }
+.tier-bg-pulse     { background: var(--tier-pulse-bg); }
+
+.tier-text-muted   { color: var(--tier-muted-text); }
+.tier-text-gold    { color: var(--tier-gold-text); }
+.tier-text-orange  { color: var(--tier-orange-text); }
+.tier-text-red     { color: var(--tier-red-text); }
+.tier-text-pulse   { color: var(--tier-pulse-text); }

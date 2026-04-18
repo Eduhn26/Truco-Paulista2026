@@ -529,8 +529,6 @@ export function useMatchTableTransition(
       return;
     }
 
-    // NOTE: Cards accepted via realtime or queued promotion remain authoritative.
-    // Snapshot lag must not clear them prematurely.
     if (
       myCardAcceptedViaEventRef.current !== null &&
       myCardAcceptedViaEventRef.current === displayedMyPlayedCard
@@ -554,8 +552,6 @@ export function useMatchTableTransition(
       return;
     }
 
-    // NOTE: Cards accepted via realtime or queued promotion remain authoritative.
-    // Snapshot lag must not clear them prematurely.
     if (
       opponentCardAcceptedViaEventRef.current !== null &&
       opponentCardAcceptedViaEventRef.current === displayedOpponentPlayedCard
@@ -729,11 +725,11 @@ export function useMatchTableTransition(
       displayedMyPlayedCard,
       displayedOpponentPlayedCard,
       isResolvingRound,
-      resolvedRoundResult,
       launchingCardKey,
       opponentRevealKey,
       pendingPlayedCard,
       registerIncomingPlayedCard,
+      resolvedRoundResult,
       roundIntroKey,
       roundResolvedKey,
       stopRoundResolution,
