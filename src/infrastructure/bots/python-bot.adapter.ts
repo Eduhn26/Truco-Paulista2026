@@ -3,7 +3,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type {
   BotDecision,
   BotDecisionContext,
+  BotDecisionMetadata,
   BotDecisionPort,
+  BotDecisionRationale,
+  BotDecisionStrategy,
 } from '@game/application/ports/bot-decision.port';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
 
@@ -44,17 +47,29 @@ type PythonBotDecisionRequest = {
   };
 };
 
+// Optional rationale payload coming from the python service. Shape mirrors BotDecisionRationale but
+// is validated defensively at the adapter boundary: unknown strategy labels trigger invalid_payload
+// (which in turn triggers the heuristic-fallback path). This keeps the TS-side union closed while
+// letting the python service opt-in to emitting rationale whenever it is ready.
+type PythonBotRationalePayload = {
+  handStrength?: number;
+  strategy?: string;
+};
+
 type PythonBotDecisionResponse =
   | {
       action: 'play-card';
       card: string;
+      rationale?: PythonBotRationalePayload;
     }
   | {
       action: 'accept-bet' | 'decline-bet' | 'raise-to-six' | 'raise-to-nine' | 'raise-to-twelve';
+      rationale?: PythonBotRationalePayload;
     }
   | {
       action: 'pass';
       reason: 'empty-hand' | 'missing-round' | 'unsupported-state';
+      rationale?: PythonBotRationalePayload;
     };
 
 type PythonBotFailureType = 'timeout' | 'http_error' | 'invalid_payload' | 'transport_error';
@@ -92,6 +107,27 @@ type PythonBotDebugContext = {
   url?: string;
 };
 
+// Closed whitelist of strategy labels accepted from the python service. Must stay in sync with
+// BotDecisionStrategy in the port. Kept local (not exported from the port) to make the adapter
+// solely responsible for normalizing inbound payloads.
+const ACCEPTED_REMOTE_STRATEGIES: ReadonlySet<BotDecisionStrategy> = new Set<BotDecisionStrategy>([
+  'opening-weakest',
+  'opening-middle',
+  'opening-strongest',
+  'response-winning-weakest',
+  'response-winning-strongest',
+  'response-losing-weakest',
+  'response-losing-middle',
+  'response-losing-strongest',
+  'bet-accept',
+  'bet-decline',
+  'bet-raise',
+  'bet-no-response',
+  'empty-hand',
+  'missing-round',
+  'unsupported-state',
+]);
+
 @Injectable()
 export class PythonBotAdapter implements BotDecisionPort {
   private readonly logger = new Logger(PythonBotAdapter.name);
@@ -103,11 +139,16 @@ export class PythonBotAdapter implements BotDecisionPort {
   ) {}
 
   decide(context: BotDecisionContext): BotDecision {
-    return this.heuristicBotAdapter.decide(context);
+    // Sync entry-point: delegates to the heuristic but rebrands provenance as 'heuristic-fallback'
+    // so telemetry distinguishes "heuristic was wired directly" from "python was wired but served
+    // via heuristic". The underlying rationale (strategy/handStrength) is preserved as-is.
+    const heuristicDecision = this.heuristicBotAdapter.decide(context);
+
+    return this.rebrandAsFallback(heuristicDecision);
   }
 
   async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision> {
-    const fallbackDecision = this.heuristicBotAdapter.decide(context);
+    const heuristicDecision = this.heuristicBotAdapter.decide(context);
 
     if (!this.config.enabled) {
       this.logDebug({
@@ -119,7 +160,7 @@ export class PythonBotAdapter implements BotDecisionPort {
         timeoutMs: this.config.timeoutMs,
       });
 
-      return fallbackDecision;
+      return this.rebrandAsFallback(heuristicDecision);
     }
 
     const controller = new AbortController();
@@ -147,7 +188,7 @@ export class PythonBotAdapter implements BotDecisionPort {
       });
 
       if (!response.ok) {
-        return this.fallbackFromFailure(context, fallbackDecision, {
+        return this.fallbackFromFailure(context, heuristicDecision, {
           layer: 'infrastructure',
           component: 'python_bot_adapter',
           event: 'python_bot_request_failed',
@@ -163,7 +204,7 @@ export class PythonBotAdapter implements BotDecisionPort {
       const rawResponse = (await response.json()) as unknown;
 
       if (!this.isValidRemoteResponse(rawResponse)) {
-        return this.fallbackFromFailure(context, fallbackDecision, {
+        return this.fallbackFromFailure(context, heuristicDecision, {
           layer: 'infrastructure',
           component: 'python_bot_adapter',
           event: 'python_bot_response_invalid',
@@ -190,7 +231,7 @@ export class PythonBotAdapter implements BotDecisionPort {
 
       return decision;
     } catch (error) {
-      return this.fallbackFromFailure(context, fallbackDecision, {
+      return this.fallbackFromFailure(context, heuristicDecision, {
         layer: 'infrastructure',
         component: 'python_bot_adapter',
         event: 'python_bot_request_failed',
@@ -243,10 +284,18 @@ export class PythonBotAdapter implements BotDecisionPort {
   }
 
   private mapResponse(response: PythonBotDecisionResponse): BotDecision {
+    const metadata: BotDecisionMetadata = {
+      source: 'python-remote',
+      ...(this.buildRationaleFromPayload(response.rationale) !== undefined
+        ? { rationale: this.buildRationaleFromPayload(response.rationale)! }
+        : {}),
+    };
+
     if (response.action === 'play-card') {
       return {
         action: 'play-card',
         card: response.card,
+        metadata,
       };
     }
 
@@ -254,12 +303,42 @@ export class PythonBotAdapter implements BotDecisionPort {
       return {
         action: 'pass',
         reason: response.reason,
+        metadata,
       };
     }
 
     return {
       action: response.action,
+      metadata,
     };
+  }
+
+  private buildRationaleFromPayload(
+    payload: PythonBotRationalePayload | undefined,
+  ): BotDecisionRationale | undefined {
+    if (!payload) {
+      return undefined;
+    }
+
+    const rationale: BotDecisionRationale = {};
+
+    if (typeof payload.handStrength === 'number' && Number.isFinite(payload.handStrength)) {
+      rationale.handStrength = payload.handStrength;
+    }
+
+    if (typeof payload.strategy === 'string') {
+      // Narrow via the whitelist — isValidRemoteResponse has already rejected unknown labels,
+      // but we guard again here to keep the type-narrowing local and explicit.
+      if (ACCEPTED_REMOTE_STRATEGIES.has(payload.strategy as BotDecisionStrategy)) {
+        rationale.strategy = payload.strategy as BotDecisionStrategy;
+      }
+    }
+
+    if (rationale.handStrength === undefined && rationale.strategy === undefined) {
+      return undefined;
+    }
+
+    return rationale;
   }
 
   private isValidRemoteResponse(value: unknown): value is PythonBotDecisionResponse {
@@ -267,10 +346,19 @@ export class PythonBotAdapter implements BotDecisionPort {
       return false;
     }
 
-    const candidate = value as Partial<PythonBotDecisionResponse>;
+    const candidate = value as Partial<PythonBotDecisionResponse> & {
+      rationale?: unknown;
+    };
+
+    if (!this.isValidRationalePayload(candidate.rationale)) {
+      return false;
+    }
 
     if (candidate.action === 'play-card') {
-      return typeof candidate.card === 'string' && candidate.card.trim().length > 0;
+      return (
+        typeof (candidate as { card?: unknown }).card === 'string' &&
+        ((candidate as { card: string }).card).trim().length > 0
+      );
     }
 
     if (
@@ -284,19 +372,80 @@ export class PythonBotAdapter implements BotDecisionPort {
     }
 
     if (candidate.action === 'pass') {
+      const reason = (candidate as { reason?: unknown }).reason;
+
       return (
-        candidate.reason === 'empty-hand' ||
-        candidate.reason === 'missing-round' ||
-        candidate.reason === 'unsupported-state'
+        reason === 'empty-hand' || reason === 'missing-round' || reason === 'unsupported-state'
       );
     }
 
     return false;
   }
 
+  private isValidRationalePayload(value: unknown): boolean {
+    if (value === undefined || value === null) {
+      return true;
+    }
+
+    if (typeof value !== 'object') {
+      return false;
+    }
+
+    const candidate = value as { handStrength?: unknown; strategy?: unknown };
+
+    if (candidate.handStrength !== undefined) {
+      if (typeof candidate.handStrength !== 'number' || !Number.isFinite(candidate.handStrength)) {
+        return false;
+      }
+    }
+
+    if (candidate.strategy !== undefined) {
+      if (typeof candidate.strategy !== 'string') {
+        return false;
+      }
+
+      // Reject unknown strategy labels instead of silently dropping them — this ensures drift
+      // between the python service and the TS contract surfaces as invalid_payload (fallback).
+      if (!ACCEPTED_REMOTE_STRATEGIES.has(candidate.strategy as BotDecisionStrategy)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private rebrandAsFallback(decision: BotDecision): BotDecision {
+    const previousRationale = decision.metadata?.rationale;
+    const metadata: BotDecisionMetadata = {
+      source: 'heuristic-fallback',
+      ...(previousRationale ? { rationale: previousRationale } : {}),
+    };
+
+    if (decision.action === 'play-card') {
+      return {
+        action: 'play-card',
+        card: decision.card,
+        metadata,
+      };
+    }
+
+    if (decision.action === 'pass') {
+      return {
+        action: 'pass',
+        reason: decision.reason,
+        metadata,
+      };
+    }
+
+    return {
+      action: decision.action,
+      metadata,
+    };
+  }
+
   private fallbackFromFailure(
     context: BotDecisionContext,
-    fallbackDecision: BotDecision,
+    heuristicDecision: BotDecision,
     failureContext: PythonBotFailureContext,
   ): BotDecision {
     this.logWarn(failureContext);
@@ -312,7 +461,7 @@ export class PythonBotAdapter implements BotDecisionPort {
       errorMessage: failureContext.errorMessage,
     });
 
-    return fallbackDecision;
+    return this.rebrandAsFallback(heuristicDecision);
   }
 
   private isAbortError(error: unknown): boolean {

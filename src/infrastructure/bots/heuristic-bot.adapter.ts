@@ -3,7 +3,9 @@ import { Injectable } from '@nestjs/common';
 import type {
   BotDecision,
   BotDecisionContext,
+  BotDecisionMetadata,
   BotDecisionPort,
+  BotDecisionStrategy,
   BotProfile,
   BotRoundView,
 } from '@game/application/ports/bot-decision.port';
@@ -43,6 +45,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return {
         action: 'pass',
         reason: 'empty-hand',
+        metadata: this.buildMetadata('empty-hand'),
       };
     }
 
@@ -50,6 +53,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return {
         action: 'pass',
         reason: 'missing-round',
+        metadata: this.buildMetadata('missing-round'),
       };
     }
 
@@ -59,20 +63,24 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
     const opponentCard = this.getOpponentCard(context.currentRound, context.player.playerId);
 
-    const selectedCard = opponentCard
+    const selection = opponentCard
       ? this.pickResponseCard(orderedHand, opponentCard, context.viraRank, context.profile)
       : this.pickOpeningCard(orderedHand, context.profile);
 
-    if (!selectedCard) {
+    if (!selection) {
       return {
         action: 'pass',
         reason: 'unsupported-state',
+        metadata: this.buildMetadata('unsupported-state'),
       };
     }
 
     return {
       action: 'play-card',
-      card: selectedCard,
+      card: selection.card,
+      // NOTE (22.A): handStrength is intentionally omitted on play-card paths to avoid running
+      // calculateHandStrength on every bot turn. It is only populated on bet-response decisions.
+      metadata: this.buildMetadata(selection.strategy),
     };
   }
 
@@ -104,24 +112,28 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (strongestRaise && handStrength >= thresholds.raise) {
       return {
         action: strongestRaise,
+        metadata: this.buildMetadata('bet-raise', handStrength),
       };
     }
 
     if (availableActions.canAcceptBet && handStrength >= thresholds.accept) {
       return {
         action: 'accept-bet',
+        metadata: this.buildMetadata('bet-accept', handStrength),
       };
     }
 
     if (availableActions.canDeclineBet) {
       return {
         action: 'decline-bet',
+        metadata: this.buildMetadata('bet-decline', handStrength),
       };
     }
 
     if (availableActions.canAcceptBet) {
       return {
         action: 'accept-bet',
+        metadata: this.buildMetadata('bet-no-response', handStrength),
       };
     }
 
@@ -203,12 +215,24 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return playerId === 'P1' ? currentRound.playerTwoCard : currentRound.playerOneCard;
   }
 
-  private pickOpeningCard(hand: string[], profile: BotProfile): string {
-    return this.pickCardByProfile(hand, profile, {
+  private pickOpeningCard(
+    hand: string[],
+    profile: BotProfile,
+  ): { card: string; strategy: BotDecisionStrategy } {
+    const card = this.pickCardByProfile(hand, profile, {
       aggressive: 'strongest',
       balanced: 'middle',
       cautious: 'weakest',
     });
+
+    const strategy: BotDecisionStrategy =
+      profile === 'aggressive'
+        ? 'opening-strongest'
+        : profile === 'cautious'
+          ? 'opening-weakest'
+          : 'opening-middle';
+
+    return { card, strategy };
   }
 
   private pickResponseCard(
@@ -216,18 +240,31 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     opponentCard: string,
     viraRank: Rank,
     profile: BotProfile,
-  ): string {
+  ): { card: string; strategy: BotDecisionStrategy } {
     const winningCards = hand.filter((candidate) => this.beats(candidate, opponentCard, viraRank));
 
     if (winningCards.length === 0) {
-      return this.pickLosingCard(hand, profile);
+      const card = this.pickLosingCard(hand, profile);
+      const strategy: BotDecisionStrategy =
+        profile === 'aggressive'
+          ? 'response-losing-strongest'
+          : profile === 'cautious'
+            ? 'response-losing-weakest'
+            : 'response-losing-middle';
+
+      return { card, strategy };
     }
 
-    return this.pickCardByProfile(winningCards, profile, {
+    const card = this.pickCardByProfile(winningCards, profile, {
       aggressive: 'strongest',
       balanced: 'weakest',
       cautious: 'weakest',
     });
+
+    const strategy: BotDecisionStrategy =
+      profile === 'aggressive' ? 'response-winning-strongest' : 'response-winning-weakest';
+
+    return { card, strategy };
   }
 
   private pickLosingCard(hand: string[], profile: BotProfile): string {
@@ -272,5 +309,18 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (result === 'A') return 1;
     if (result === 'B') return -1;
     return 0;
+  }
+
+  private buildMetadata(
+    strategy: BotDecisionStrategy,
+    handStrength?: number,
+  ): BotDecisionMetadata {
+    const rationale =
+      handStrength !== undefined ? { strategy, handStrength } : { strategy };
+
+    return {
+      source: 'heuristic',
+      rationale,
+    };
   }
 }
