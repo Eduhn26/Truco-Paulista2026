@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { MatchPlayerHandPanel } from './matchPlayerHandPanel';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
@@ -13,7 +14,11 @@ type Props = {
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   onPlayCard: (card: CardPayload) => void;
   isMyTurn: boolean;
+  isOneVsOne: boolean;
   viraRank: Rank;
+  isSubdued?: boolean;
+  isDecisionFocus?: boolean;
+  actionSurface?: ReactNode;
 };
 
 export function MatchPlayerHandDock({
@@ -25,54 +30,71 @@ export function MatchPlayerHandDock({
   currentPublicHand,
   onPlayCard,
   isMyTurn,
+  isOneVsOne,
   viraRank,
+  isSubdued = false,
+  isDecisionFocus = false,
+  actionSurface = null,
 }: Props) {
   const isInteractive = tablePhase === 'playing' && myCards.length > 0;
   const handCount = myCards.length;
+  const shouldElevateDecision = isDecisionFocus && handCount > 0;
 
   return (
     <motion.div
       layout
       className="relative mx-auto w-full max-w-4xl px-2 pb-0"
       initial={false}
+      // NOTE: mão de 11 is a decision moment, not a passive blocker.
+      // During that state the dock must become the visual protagonist so the
+      // player can inspect the hand before deciding.
       animate={{
-        y: isInteractive ? -1 : 0,
-        opacity: 1,
-        scale: 1,
+        y: shouldElevateDecision ? -8 : isSubdued ? 8 : isInteractive ? -1 : 0,
+        opacity: shouldElevateDecision ? 1 : isSubdued ? 0.44 : 1,
+        scale: shouldElevateDecision ? 1.02 : isSubdued ? 0.96 : 1,
       }}
-      transition={{ type: 'spring', stiffness: 180, damping: 24 }}
+      transition={{ type: 'spring', stiffness: 200, damping: 26 }}
     >
-      {/* NOTE: This ambient glow ties the hand to the table floor instead of creating a separate widget aura. */}
       <div
         className="pointer-events-none absolute inset-x-[14%] -top-4 h-12 rounded-full"
         style={{
-          background: isMyTurn
-            ? 'radial-gradient(circle, rgba(201,168,76,0.12) 0%, rgba(201,168,76,0.04) 42%, transparent 78%)'
-            : 'radial-gradient(circle, rgba(255,255,255,0.035) 0%, transparent 78%)',
+          background: shouldElevateDecision
+            ? 'radial-gradient(circle, rgba(255,223,128,0.2) 0%, rgba(201,168,76,0.08) 42%, transparent 78%)'
+            : isSubdued
+              ? 'radial-gradient(circle, rgba(255,255,255,0.01) 0%, transparent 78%)'
+              : isMyTurn
+                ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(201,168,76,0.04) 42%, transparent 78%)'
+                : 'radial-gradient(circle, rgba(255,255,255,0.035) 0%, transparent 78%)',
           filter: 'blur(16px)',
         }}
       />
 
-      {/* NOTE: The dock remains visually quiet, but must not clip hovered cards. */}
       <div
         className="relative"
         style={{
           borderRadius: 24,
           padding: '10px 10px 8px',
-          background: isMyTurn
-            ? 'linear-gradient(180deg, rgba(201,168,76,0.06) 0%, rgba(7,12,20,0.52) 22%, rgba(4,8,14,0.72) 100%)'
-            : 'linear-gradient(180deg, rgba(10,16,24,0.54) 0%, rgba(5,9,15,0.72) 100%)',
-          border: isMyTurn
-            ? '1px solid rgba(201,168,76,0.14)'
-            : '1px solid rgba(255,255,255,0.035)',
-          boxShadow: isMyTurn
-            ? '0 10px 24px rgba(0,0,0,0.18), 0 -6px 18px rgba(201,168,76,0.05), inset 0 1px 0 rgba(255,255,255,0.04)'
-            : '0 10px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.03)',
+          background: shouldElevateDecision
+            ? 'linear-gradient(180deg, rgba(201,168,76,0.12) 0%, rgba(18,24,36,0.8) 24%, rgba(5,9,15,0.88) 100%)'
+            : isSubdued
+              ? 'linear-gradient(180deg, rgba(5,10,18,0.48) 0%, rgba(3,6,12,0.62) 100%)'
+              : isMyTurn
+                ? 'linear-gradient(180deg, rgba(201,168,76,0.06) 0%, rgba(7,12,20,0.52) 22%, rgba(4,8,14,0.72) 100%)'
+                : 'linear-gradient(180deg, rgba(10,16,24,0.54) 0%, rgba(5,9,15,0.72) 100%)',
+          border: shouldElevateDecision
+            ? '1px solid rgba(255,223,128,0.32)'
+            : isMyTurn
+              ? '1px solid rgba(201,168,76,0.14)'
+              : '1px solid rgba(255,255,255,0.035)',
+          boxShadow: shouldElevateDecision
+            ? '0 14px 34px rgba(0,0,0,0.24), 0 -8px 22px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.06)'
+            : isMyTurn
+              ? '0 10px 24px rgba(0,0,0,0.18), 0 -6px 18px rgba(201,168,76,0.05), inset 0 1px 0 rgba(255,255,255,0.04)'
+              : '0 10px 24px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.03)',
           backdropFilter: 'blur(10px)',
           overflow: 'visible',
         }}
       >
-        {/* NOTE: This top sheen suggests the cards are emerging from the table edge, not from a standalone panel. */}
         <div
           className="pointer-events-none absolute inset-x-10 top-0 h-6 rounded-b-full"
           style={{
@@ -83,56 +105,80 @@ export function MatchPlayerHandDock({
           }}
         />
 
-        <div className="relative z-10 mb-1.5 flex items-center justify-between gap-3 px-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className="shrink-0 rounded-full px-2.5 py-0.5 text-[8px] font-black uppercase tracking-[0.18em]"
-              style={{
-                background: isMyTurn ? 'rgba(201,168,76,0.14)' : 'rgba(255,255,255,0.045)',
-                border: isMyTurn
-                  ? '1px solid rgba(201,168,76,0.22)'
-                  : '1px solid rgba(255,255,255,0.06)',
-                color: isMyTurn ? '#c9a84c' : 'rgba(255,255,255,0.38)',
-              }}
-            >
-              {isMyTurn ? 'Sua Vez' : 'Sua Mão'}
-            </span>
+        {/* CHANGE: the duplicate "V Você" avatar block was removed. The
+            bottom player identity is now owned by the BottomPlayerAnchor
+            above the dock (rendered by matchTableShell). The dock focuses
+            on card count + vira badge + action surface + cards. One avatar
+            per player, not two.
 
-            <span className="truncate text-[9px]" style={{ color: 'rgba(255,255,255,0.26)' }}>
-              {isInteractive
-                ? 'Escolha uma carta para jogar'
-                : handCount > 0
-                  ? 'Aguardando próxima ação'
-                  : 'Sua mão aparecerá aqui'}
-            </span>
+            Before: avatar + name + "Em turno" subtext + card count + vira.
+            After: just the context chips row + action surface + cards. */}
+        <div className="relative z-10 mb-2 flex flex-col gap-2 px-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="rounded-full px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.14em]"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  color: 'rgba(255,255,255,0.42)',
+                }}
+              >
+                Sua mão
+              </span>
+              {shouldElevateDecision ? (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
+                  style={{
+                    background: 'rgba(255,223,128,0.14)',
+                    border: '1px solid rgba(255,223,128,0.34)',
+                    color: '#f6dfa0',
+                  }}
+                >
+                  Decida sua mão
+                </span>
+              ) : isMyTurn ? (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
+                  style={{
+                    background: 'rgba(201,168,76,0.14)',
+                    border: '1px solid rgba(201,168,76,0.28)',
+                    color: '#e8c76a',
+                  }}
+                >
+                  Em turno
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span
+                className="rounded-full px-2 py-0.5 text-[8px] font-bold"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  color: 'rgba(255,255,255,0.32)',
+                }}
+              >
+                {handCount} carta{handCount !== 1 ? 's' : ''}
+              </span>
+
+              <span
+                className="rounded-full px-2 py-0.5 text-[8px] font-bold"
+                style={{
+                  background: 'rgba(201,168,76,0.08)',
+                  border: '1px solid rgba(201,168,76,0.14)',
+                  color: 'rgba(201,168,76,0.72)',
+                }}
+              >
+                Vira {viraRank}
+              </span>
+            </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span
-              className="rounded-full px-2 py-0.5 text-[8px] font-bold"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.05)',
-                color: 'rgba(255,255,255,0.32)',
-              }}
-            >
-              {handCount} carta{handCount !== 1 ? 's' : ''}
-            </span>
-
-            <span
-              className="rounded-full px-2 py-0.5 text-[8px] font-bold"
-              style={{
-                background: 'rgba(201,168,76,0.08)',
-                border: '1px solid rgba(201,168,76,0.14)',
-                color: 'rgba(201,168,76,0.72)',
-              }}
-            >
-              Vira {viraRank}
-            </span>
-          </div>
+          {actionSurface ? <div className="w-full">{actionSurface}</div> : null}
         </div>
 
-        {/* NOTE: This inner stage must stay overflow-visible so hovered cards can rise above the panel. */}
         <div
           className="relative z-10"
           style={{
@@ -165,6 +211,7 @@ export function MatchPlayerHandDock({
             onPlayCard={onPlayCard}
             isMyTurn={isMyTurn}
             viraRank={viraRank}
+            isDecisionFocus={shouldElevateDecision}
           />
         </div>
       </div>

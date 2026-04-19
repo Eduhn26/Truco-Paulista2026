@@ -11,7 +11,6 @@ import {
   normalizeServerErrorPayload,
   type CardPayload,
   type GameSocketEvents,
-  type Rank,
 } from './socketTypes';
 
 type ConnectOptions = {
@@ -117,8 +116,8 @@ export class GameSocketClient {
     this.socket?.emit('get-ranking', { limit });
   }
 
-  emitStartHand(matchId: string, viraRank: Rank): void {
-    this.socket?.emit('start-hand', { matchId, viraRank });
+  emitStartHand(matchId: string): void {
+    this.socket?.emit('start-hand', { matchId });
   }
 
   emitPlayCard(matchId: string, card: CardPayload): void {

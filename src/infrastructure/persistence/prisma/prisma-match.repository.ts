@@ -25,6 +25,8 @@ export class PrismaMatchRepository implements MatchRepository {
     const matchId = `match_${randomUUID().replace(/-/g, '')}`;
     const snapshot = match.toSnapshot();
 
+    this.logSnapshot('create', matchId, snapshot);
+
     await this.prisma.matchSnapshot.create({
       data: {
         matchId,
@@ -42,6 +44,8 @@ export class PrismaMatchRepository implements MatchRepository {
 
   async save(id: string, match: Match): Promise<void> {
     const snapshot = match.toSnapshot();
+
+    this.logSnapshot('save', id, snapshot);
 
     await this.prisma.matchSnapshot.update({
       where: { matchId: id },
@@ -73,6 +77,8 @@ export class PrismaMatchRepository implements MatchRepository {
       currentHand: data.currentHand,
     };
 
+    this.logSnapshot('load', id, snapshot);
+
     return Match.fromSnapshot(snapshot);
   }
 
@@ -102,6 +108,32 @@ export class PrismaMatchRepository implements MatchRepository {
     return {
       currentHand: rawCurrentHand == null ? null : (rawCurrentHand as HandSnapshot),
     };
+  }
+
+  private logSnapshot(
+    stage: 'create' | 'save' | 'load',
+    matchId: string,
+    snapshot: MatchSnapshot,
+  ): void {
+    const currentHand = snapshot.currentHand;
+
+    console.log(`[match-repo][${stage}]`, {
+      matchId,
+      state: snapshot.state,
+      score: snapshot.score,
+      currentHand: currentHand
+        ? {
+            currentValue: currentHand.currentValue,
+            betState: currentHand.betState,
+            pendingValue: currentHand.pendingValue,
+            requestedBy: currentHand.requestedBy,
+            raiseAuthority: currentHand.raiseAuthority,
+            finished: currentHand.finished,
+            winner: currentHand.winner,
+            awardedPoints: currentHand.awardedPoints,
+          }
+        : null,
+    });
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

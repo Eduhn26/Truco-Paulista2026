@@ -35,6 +35,29 @@ function shuffle(cards: Card[]): Card[] {
   return deck;
 }
 
+export function dealRandomHand(): DealtHands {
+  const shuffledDeck = shuffle(buildDeck());
+
+  const [viraCard] = shuffledDeck.splice(0, 1);
+
+  if (!viraCard) {
+    throw new Error('Failed to draw a random vira card from deck.');
+  }
+
+  const playerOneHand = shuffledDeck.splice(0, 3);
+  const playerTwoHand = shuffledDeck.splice(0, 3);
+
+  if (playerOneHand.length != 3 || playerTwoHand.length != 3) {
+    throw new Error('Failed to deal three cards to both players.');
+  }
+
+  return {
+    viraCard,
+    playerOneHand,
+    playerTwoHand,
+  };
+}
+
 export function dealHandsFromViraRank(viraRank: Rank): DealtHands {
   const shuffledDeck = shuffle(buildDeck());
 

@@ -38,19 +38,19 @@ function buildButtons(
     },
     {
       action: 'raise-to-six',
-      label: 'Aumentar (6)',
+      label: 'Seis',
       enabled: availableActions.canRaiseToSix,
       tier: 'raise',
     },
     {
       action: 'raise-to-nine',
-      label: 'Aumentar (9)',
+      label: 'Nove',
       enabled: availableActions.canRaiseToNine,
       tier: 'raise',
     },
     {
       action: 'raise-to-twelve',
-      label: 'Aumentar (12)',
+      label: 'Doze',
       enabled: availableActions.canRaiseToTwelve,
       tier: 'raise',
     },
@@ -69,12 +69,15 @@ function buildButtons(
   ];
 }
 
-function getButtonStyle(tier: ActionTier, isDisabled: boolean): MotionStyle {
+// CHANGE: buttons got a bigger minHeight when the prominence is "primary" so
+// response buttons feel like real decisions, not toolbar chips. Same palette,
+// heavier presence — especially when the PressureOverlay is visible above.
+function getButtonStyle(tier: ActionTier, isDisabled: boolean, isPrimary: boolean): MotionStyle {
   if (isDisabled) {
     return {
       background: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(255,255,255,0.06)',
-      color: 'rgba(255,255,255,0.2)',
+      border: '1px solid rgba(255,255,255,0.05)',
+      color: 'rgba(255,255,255,0.14)',
       cursor: 'not-allowed',
       boxShadow: 'none',
     };
@@ -83,31 +86,37 @@ function getButtonStyle(tier: ActionTier, isDisabled: boolean): MotionStyle {
   switch (tier) {
     case 'primary':
       return {
-        background: 'linear-gradient(180deg, #dc2626 0%, #b91c1c 55%, #991b1b 100%)',
-        border: '1px solid rgba(239,68,68,0.38)',
+        background: 'linear-gradient(180deg, #ea3423 0%, #c81d0d 55%, #9e1408 100%)',
+        border: '1px solid rgba(248,113,113,0.42)',
         color: '#fff',
-        boxShadow: '0 0 16px rgba(220,38,38,0.22), 0 8px 18px rgba(0,0,0,0.26)',
+        boxShadow: isPrimary
+          ? '0 0 20px rgba(220,38,38,0.32), 0 10px 22px rgba(0,0,0,0.30)'
+          : '0 0 12px rgba(220,38,38,0.20), 0 8px 18px rgba(0,0,0,0.24)',
       };
     case 'accept':
       return {
-        background: 'linear-gradient(180deg, #166534 0%, #14532d 100%)',
-        border: '1px solid rgba(74,222,128,0.22)',
-        color: '#dcfce7',
-        boxShadow: '0 0 12px rgba(22,163,74,0.14), 0 8px 18px rgba(0,0,0,0.24)',
+        background: 'linear-gradient(180deg, #22a04f 0%, #166534 100%)',
+        border: '1px solid rgba(74,222,128,0.36)',
+        color: '#f0fdf4',
+        boxShadow: isPrimary
+          ? '0 0 18px rgba(34,197,94,0.26), 0 10px 22px rgba(0,0,0,0.24)'
+          : '0 8px 16px rgba(0,0,0,0.18)',
       };
     case 'decline':
       return {
-        background: 'linear-gradient(180deg, rgba(43,52,66,0.92) 0%, rgba(24,31,42,0.98) 100%)',
-        border: '1px solid rgba(255,255,255,0.09)',
-        color: '#d1d5db',
-        boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
+        background: 'linear-gradient(180deg, rgba(48,58,72,0.98), rgba(22,29,40,0.98))',
+        border: '1px solid rgba(255,255,255,0.14)',
+        color: '#e5e7eb',
+        boxShadow: isPrimary
+          ? '0 0 16px rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.28)'
+          : '0 8px 16px rgba(0,0,0,0.18)',
       };
     case 'raise':
       return {
-        background: 'linear-gradient(180deg, #b45309 0%, #92400e 55%, #78350f 100%)',
-        border: '1px solid rgba(245,158,11,0.22)',
+        background: 'linear-gradient(180deg, #d97706 0%, #92400e 100%)',
+        border: '1px solid rgba(251,191,36,0.34)',
         color: '#fef3c7',
-        boxShadow: '0 0 12px rgba(180,83,9,0.14), 0 8px 18px rgba(0,0,0,0.24)',
+        boxShadow: '0 8px 16px rgba(0,0,0,0.18)',
       };
     default:
       return {};
@@ -117,16 +126,30 @@ function getButtonStyle(tier: ActionTier, isDisabled: boolean): MotionStyle {
 export function MatchActionSurface({
   availableActions,
   onAction,
+  isCritical = false,
+  emphasisLabel = null,
 }: {
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   onAction: (action: MatchAction) => void;
+  isCritical?: boolean;
+  emphasisLabel?: string | null;
 }) {
-  const [trucoParticles, setTrucoParticles] = useState(false);
+  const [trucoShake, setTrucoShake] = useState(false);
 
   const buttons = useMemo(() => buildButtons(availableActions), [availableActions]);
   const visibleButtons = buttons.filter((button) => button.enabled || button.persistWhenDisabled);
-  const enabledButtons = buttons.filter((button) => button.enabled);
-  const hasActiveActions = enabledButtons.length > 0;
+
+  const acceptButtons = visibleButtons.filter((button) => button.tier === 'accept');
+  const declineButtons = visibleButtons.filter((button) => button.tier === 'decline');
+  const raiseButtons = visibleButtons.filter((button) => button.tier === 'raise');
+  const responseButtons = [...acceptButtons, ...declineButtons, ...raiseButtons];
+  const trucoButton =
+    visibleButtons.find((button) => button.action === 'request-truco') ?? null;
+
+  const hasDecisionState = responseButtons.some((button) => button.enabled);
+  const helperLabel = hasDecisionState
+    ? emphasisLabel ?? 'Decisão pendente'
+    : emphasisLabel ?? 'Pressão disponível';
 
   const handleActionClick = (button: ActionButton) => {
     if (!button.enabled) {
@@ -134,160 +157,132 @@ export function MatchActionSurface({
     }
 
     if (button.action === 'request-truco') {
-      setTrucoParticles(true);
-      window.setTimeout(() => setTrucoParticles(false), 650);
+      setTrucoShake(true);
+      window.setTimeout(() => setTrucoShake(false), 480);
     }
 
     onAction(button.action);
+  };
+
+  const renderButton = (button: ActionButton, prominence: 'primary' | 'secondary') => {
+    const isDisabled = !button.enabled;
+    const isPrimary = prominence === 'primary';
+
+    return (
+      <motion.button
+        key={button.action}
+        type="button"
+        onClick={() => handleActionClick(button)}
+        whileHover={isDisabled ? {} : { y: -1, scale: 1.02 }}
+        whileTap={isDisabled ? {} : { scale: 0.97 }}
+        style={{
+          ...getButtonStyle(button.tier, isDisabled, isPrimary),
+          borderRadius: 999,
+          // CHANGE: response buttons (Aceitar / Correr) bumped to minHeight 44
+          // so they feel like decisive actions, not secondary chips.
+          minHeight: isPrimary ? 44 : 32,
+          minWidth: isPrimary ? 96 : 56,
+          padding: isPrimary ? '10px 22px' : '6px 12px',
+          fontSize: isPrimary ? 12 : 9,
+          fontWeight: 900,
+          letterSpacing: isPrimary ? '0.16em' : '0.13em',
+          textTransform: 'uppercase',
+          position: 'relative',
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {button.label}
+      </motion.button>
+    );
   };
 
   return (
     <div
       className="relative overflow-hidden"
       style={{
-        borderRadius: 18,
-        background: hasActiveActions
-          ? 'linear-gradient(180deg, rgba(6,12,20,0.56), rgba(4,8,14,0.72))'
-          : 'linear-gradient(180deg, rgba(5,10,16,0.42), rgba(4,8,14,0.58))',
-        border: hasActiveActions
-          ? '1px solid rgba(201,168,76,0.08)'
-          : '1px solid rgba(255,255,255,0.035)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.025)',
-        backdropFilter: 'blur(10px)',
-        padding: '8px 10px',
+        borderRadius: 20,
+        // CHANGE: the red "critical" wrapper was redundant with the new
+        // PressureOverlay that already screams "truco incoming" in the
+        // centre-top of the mesa. The action surface goes back to a calm,
+        // premium dark base in every state. Less visual noise, cleaner dock.
+        background: 'linear-gradient(180deg, rgba(6,12,22,0.84), rgba(3,8,16,0.90))',
+        border: isCritical
+          ? '1px solid rgba(201,168,76,0.22)'
+          : '1px solid rgba(201,168,76,0.10)',
+        backdropFilter: 'blur(12px)',
+        padding: hasDecisionState ? '12px 14px' : '8px 10px',
+        boxShadow: isCritical
+          ? '0 0 0 1px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.04)'
+          : 'inset 0 1px 0 rgba(255,255,255,0.02)',
       }}
     >
-      {/* NOTE: This top glow keeps the rail alive without turning it back into a heavy toolbar. */}
-      <div
-        className="pointer-events-none absolute inset-x-[20%] top-0 h-5 rounded-b-full"
-        style={{
-          background: hasActiveActions
-            ? 'rgba(201,168,76,0.06)'
-            : 'rgba(255,255,255,0.02)',
-          filter: 'blur(10px)',
-        }}
-      />
-
-      <div className="relative z-10 flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex min-w-0 shrink items-center gap-2">
+      <div className="relative z-10 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span
-            className="shrink-0 rounded-full px-2.5 py-0.5 text-[8px] font-black uppercase tracking-[0.18em]"
+            className="rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.18em]"
             style={{
-              background: hasActiveActions ? 'rgba(201,168,76,0.1)' : 'rgba(255,255,255,0.035)',
-              border: hasActiveActions
-                ? '1px solid rgba(201,168,76,0.18)'
-                : '1px solid rgba(255,255,255,0.06)',
-              color: hasActiveActions ? '#c9a84c' : 'rgba(255,255,255,0.28)',
+              background: hasDecisionState
+                ? 'rgba(201,168,76,0.14)'
+                : 'rgba(201,168,76,0.08)',
+              border: hasDecisionState
+                ? '1px solid rgba(201,168,76,0.26)'
+                : '1px solid rgba(201,168,76,0.12)',
+              color: hasDecisionState ? '#e8c76a' : 'rgba(201,168,76,0.78)',
             }}
           >
-            Ações
+            {helperLabel}
           </span>
 
-          <span className="truncate text-[9px]" style={{ color: 'rgba(255,255,255,0.24)' }}>
-            {hasActiveActions
-              ? `${enabledButtons.length} disponível${enabledButtons.length !== 1 ? 'is' : ''}`
-              : 'Aguardando a mesa'}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
-          {visibleButtons.length === 0 ? (
-            <div
-              className="rounded-full px-3 py-1 text-[8px] font-bold uppercase tracking-[0.16em]"
+          {trucoButton && !hasDecisionState ? (
+            <motion.button
+              type="button"
+              onClick={() => handleActionClick(trucoButton)}
+              whileHover={!trucoButton.enabled ? {} : { y: -1, scale: 1.02 }}
+              whileTap={!trucoButton.enabled ? {} : { scale: 0.98 }}
+              animate={trucoShake ? { x: [-2, 2, -2, 2, 0] } : {}}
               style={{
-                color: 'rgba(255,255,255,0.2)',
-                background: 'rgba(255,255,255,0.025)',
-                border: '1px solid rgba(255,255,255,0.05)',
-              }}
-            >
-              Aguardando
-            </div>
-          ) : (
-            visibleButtons.map((button) => {
-              const isDisabled = !button.enabled;
-              const baseStyle = getButtonStyle(button.tier, isDisabled);
-              const isPrimary = button.tier === 'primary';
-
-              const buttonStyle: MotionStyle = {
-                ...baseStyle,
+                ...getButtonStyle(trucoButton.tier, !trucoButton.enabled, true),
                 borderRadius: 999,
-                padding: isPrimary ? '8px 18px' : '7px 13px',
-                fontSize: isPrimary ? 11 : 9,
+                minHeight: 38,
+                minWidth: 112,
+                padding: '8px 18px',
+                fontSize: 11,
                 fontWeight: 900,
+                letterSpacing: '0.16em',
                 textTransform: 'uppercase',
-                letterSpacing: '0.14em',
                 position: 'relative',
                 overflow: 'hidden',
-                transition: 'box-shadow 0.18s, transform 0.15s',
-                minHeight: 34,
-              };
-
-              return (
-                <motion.button
-                  key={button.action}
-                  type="button"
-                  onClick={() => handleActionClick(button)}
-                  whileHover={isDisabled ? {} : { y: -1, scale: 1.015 }}
-                  whileTap={isDisabled ? {} : { scale: 0.98 }}
-                  animate={
-                    button.action === 'request-truco' && trucoParticles
-                      ? { x: [-2, 2, -2, 2, 0] }
-                      : {}
-                  }
-                  transition={{ duration: 0.18 }}
-                  disabled={isDisabled}
-                  style={buttonStyle}
-                >
-                  <div
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      background: isDisabled
-                        ? 'none'
-                        : 'linear-gradient(180deg, rgba(255,255,255,0.1), transparent 34%)',
-                      opacity: 0.75,
-                    }}
-                  />
-
-                  <span style={{ position: 'relative', zIndex: 1 }}>{button.label}</span>
-
-                  {button.action === 'request-truco' && trucoParticles && !isDisabled ? (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        overflow: 'hidden',
-                        borderRadius: 'inherit',
-                        pointerEvents: 'none',
-                      }}
-                    >
-                      {[...Array(10)].map((_, index) => (
-                        <motion.div
-                          key={index}
-                          initial={{ opacity: 1, x: 0, y: 0 }}
-                          animate={{
-                            opacity: 0,
-                            x: (Math.random() - 0.5) * 80,
-                            y: -Math.random() * 48,
-                          }}
-                          transition={{ duration: 0.55 }}
-                          style={{
-                            position: 'absolute',
-                            left: '50%',
-                            top: '50%',
-                            width: 4,
-                            height: 4,
-                            borderRadius: '50%',
-                            background: '#fde047',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                </motion.button>
-              );
-            })
-          )}
+              }}
+            >
+              {trucoButton.enabled ? (
+                <motion.div
+                  className="pointer-events-none absolute inset-0 rounded-full"
+                  animate={{ opacity: [0, 0.14, 0] }}
+                  transition={{ duration: 1.2, repeat: Infinity }}
+                  style={{
+                    background:
+                      'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.24), transparent 70%)',
+                  }}
+                />
+              ) : null}
+              {trucoButton.label}
+            </motion.button>
+          ) : null}
         </div>
+
+        {hasDecisionState ? (
+          // CHANGE: response row centred with more breathing room so each
+          // button reads as a distinct decision. Was tight and cramped before.
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+            {responseButtons.filter((button) => button.enabled).map((button) => {
+              const prominence =
+                button.tier === 'accept' || button.tier === 'decline' ? 'primary' : 'secondary';
+
+              return renderButton(button, prominence);
+            })}
+          </div>
+        ) : null}
       </div>
     </div>
   );

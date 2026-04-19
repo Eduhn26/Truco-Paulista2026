@@ -1468,7 +1468,23 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.executeBotBetDecision(matchId, botTurnContext, decision);
     }
 
-    if (decision.action !== 'play-card') {
+    const fallbackCard = botTurnContext.context.player.hand[0] ?? null;
+    const resolvedCard =
+      decision.action === 'play-card' && decision.card ? decision.card : fallbackCard;
+
+    if (!resolvedCard) {
+      this.logGateway('warn', {
+        layer: 'gateway',
+        event: 'play_card_rejected',
+        status: 'rejected',
+        matchId,
+        seatId: botTurnContext.seatId,
+        teamId: botTurnContext.teamId,
+        playerId: botTurnContext.playerId,
+        errorType: 'unexpected_error',
+        errorMessage: `Bot could not resolve a playable card. decision=${decision.action}`,
+      });
+
       return false;
     }
 
@@ -1477,7 +1493,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const dto: PlayCardRequestDto = {
       matchId,
       playerId: botTurnContext.playerId,
-      card: decision.card,
+      card: resolvedCard,
     };
 
     await this.playCardUseCase.execute(dto);
@@ -1497,7 +1513,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerId: botTurnContext.playerId,
       seatId: botTurnContext.seatId,
       teamId: botTurnContext.teamId,
-      card: decision.card,
+      card: resolvedCard,
       currentTurnSeatId: nextRoomState.currentTurnSeatId,
       isBot: true,
     });
@@ -1520,7 +1536,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       seatId: botTurnContext.seatId,
       teamId: botTurnContext.teamId,
       playerId: botTurnContext.playerId,
-      card: decision.card,
+      card: resolvedCard,
     });
 
     await this.finalizeMatchIfFinished(matchId, updatedState);
@@ -2254,15 +2270,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const authoritativeState = await this.getAuthoritativeMatchState(session.matchId);
 
       const matchIdRaw = payload?.matchId;
-      const viraRankRaw = payload?.viraRank;
 
       const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
-      const viraRank = typeof viraRankRaw === 'string' ? viraRankRaw.trim() : '';
 
-      if (!matchId || !viraRank) {
+      if (!matchId) {
         return this.reject(
           'start_hand_rejected',
-          'Invalid payload: matchId and viraRank are required.',
+          'Invalid payload: matchId is required.',
           {
             socketId: socket.id,
             matchId: session.matchId,
@@ -2334,15 +2348,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       try {
-        const dto: StartHandRequestDto = { matchId, viraRank };
+        const dto: StartHandRequestDto = { matchId };
         const result = await this.startHandUseCase.execute(dto);
 
         const roomState = this.roomManager.beginHand(matchId);
         this.server.to(matchId).emit('room-state', roomState);
 
+        const startedMatchState = await this.getAuthoritativeMatchState(matchId);
+        const startedViraRank = startedMatchState.currentHand?.viraRank ?? null;
+
         this.server.to(matchId).emit('hand-started', {
           matchId,
-          viraRank,
+          viraRank: startedViraRank,
           currentTurnSeatId: roomState.currentTurnSeatId,
         });
 
@@ -2355,9 +2372,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           status: 'succeeded',
           socketId: socket.id,
           matchId,
-          viraRank,
+          ...(startedViraRank !== null ? { viraRank: startedViraRank } : {}),
         });
-
         return { event: 'start-hand:ack', data: result };
       } finally {
         this.releaseStartHandLock(matchId);
@@ -2483,12 +2499,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       await this.finalizeMatchIfFinished(matchId, state);
 
-      // [AÇÃO A] NUNCA executar o bot imediatamente após a jogada humana.
-      // Sempre agendar com delay para dar tempo ao frontend de exibir a
-      // resolução da rodada antes que o bot jogue a próxima carta.
-      // Antes: await this.processBotTurns(matchId) — executava sem delay.
-      // Agora: scheduleDeferredBotTurn — sempre com BOT_CHAINED_TURN_DELAY_MS.
-      if (state.state === 'in_progress') {
+      const postFinalizeState = await this.getAuthoritativeMatchState(matchId);
+      const hasBotContinuation = Boolean(
+        await this.buildBotDecisionContext(matchId, postFinalizeState),
+      );
+
+      // NOTE: Only schedule the chained bot turn when the authoritative
+      // post-play state still has a real pending bot action. This avoids
+      // relying on stale pre-finalization state and guarantees that the bot
+      // follow-up is armed exactly when the next actor is a bot.
+      if (hasBotContinuation) {
         this.clearScheduledBotTurn(matchId);
         this.scheduleDeferredBotTurn(matchId);
       }

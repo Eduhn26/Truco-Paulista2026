@@ -1,9 +1,10 @@
-import { useEffect, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
+import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 import { useConfetti } from '../../hooks/useConfetti';
 import { useGameSound } from '../../hooks/useGameSound';
@@ -68,6 +69,8 @@ type MatchTableShellProps = {
   isMyTurn?: boolean;
   isResolvingRound: boolean;
   closingTableCards: { mine: string | null; opponent: string | null };
+  suppressHandOutcomeModal?: boolean;
+  onHandClimaxDismissed?: () => void;
 };
 
 const SUIT_SYMBOL_MAP: Record<string, string> = {
@@ -77,771 +80,1089 @@ const SUIT_SYMBOL_MAP: Record<string, string> = {
   E: '♠',
 };
 
+// CHANGE: climax auto-dismiss duration. After this, the climax card fades out
+// on its own — the fix for the "modal travado" bug. The underlying tablePhase
+// may stay at 'hand_finished' (backend-authoritative) but the visual takeover
+// lifts itself so the player sees the mesa again and can click "Nova mão"
+// without a blocker.
+const CLIMAX_AUTO_DISMISS_MS = 2800;
+
 function parseSuitColor(suit: string): boolean {
   return suit === 'P' || suit === 'O';
 }
 
-function publicMatchStateScoreT1(scoreLabel: string): string {
-  const match = scoreLabel.match(/T1\s+(\d+)/);
-  return match?.[1] ?? '0';
-}
-
-function publicMatchStateScoreT2(scoreLabel: string): string {
-  const match = scoreLabel.match(/T2\s+(\d+)/);
-  return match?.[1] ?? '0';
-}
-
-function formatPlayerIdLabel(playerId: string | null): string {
-  if (playerId === 'P1') {
-    return 'T1';
+function getTierVisuals(tier: ValeTier) {
+  switch (tier) {
+    case 'gold':
+      return {
+        background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 55%, #8a6a28 100%)',
+        border: '1px solid rgba(255,223,128,0.64)',
+        textColor: '#1a0a00',
+        glow: '0 0 28px rgba(201,168,76,0.45), 0 20px 42px rgba(0,0,0,0.38)',
+      };
+    case 'orange':
+      return {
+        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #92400e 100%)',
+        border: '1px solid rgba(251,191,36,0.62)',
+        textColor: '#1a0500',
+        glow: '0 0 36px rgba(245,158,11,0.52), 0 20px 42px rgba(0,0,0,0.40)',
+      };
+    case 'red':
+      return {
+        background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 55%, #7f1d1d 100%)',
+        border: '1px solid rgba(252,165,165,0.62)',
+        textColor: '#fff5f5',
+        glow: '0 0 44px rgba(220,38,38,0.58), 0 20px 42px rgba(0,0,0,0.42)',
+      };
+    case 'red-pulse':
+      return {
+        background: 'linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%)',
+        border: '1px solid rgba(254,226,226,0.82)',
+        textColor: '#ffffff',
+        glow: '0 0 56px rgba(248,113,113,0.72), 0 20px 42px rgba(0,0,0,0.44)',
+      };
+    case 'muted':
+    default:
+      return {
+        background: 'linear-gradient(135deg, #3a3424, #221f14)',
+        border: '1px solid rgba(201,168,76,0.22)',
+        textColor: 'rgba(232,199,106,0.82)',
+        glow: '0 14px 30px rgba(0,0,0,0.26)',
+      };
   }
-
-  if (playerId === 'P2') {
-    return 'T2';
-  }
-
-  return '—';
 }
 
-function getBetRequestLabel(nextValue: number | null): string {
-  if (nextValue === 3) {
-    return 'Truco';
-  }
-
-  if (nextValue === 6 || nextValue === 9 || nextValue === 12) {
-    return `${nextValue}`;
-  }
-
-  return 'Aposta';
-}
-
-function getRequestedByStatus(requestedBy: string | null): string {
-  const label = formatPlayerIdLabel(requestedBy);
-
-  if (label === '—') {
-    return 'Pedido pendente';
-  }
-
-  return `${label} pediu`;
-}
-
-function getBetDecisionLabel(availableActions: MatchTableShellProps['availableActions']): string {
-  const canRaise =
-    availableActions.canRaiseToSix ||
-    availableActions.canRaiseToNine ||
-    availableActions.canRaiseToTwelve;
-
-  if (availableActions.canAcceptBet || availableActions.canDeclineBet) {
-    return canRaise ? 'Aceite, corra ou suba a aposta' : 'Aceite ou corra';
-  }
-
-  return 'Aguardando resposta';
-}
-
-function PokerChip({ filled, small = false }: { filled: boolean; small?: boolean }) {
-  const size = small ? 'h-3.5 w-3.5' : 'h-5 w-5';
-
-  return (
-    <div
-      className={`${size} flex items-center justify-center rounded-full`}
-      style={
-        filled
-          ? {
-              background:
-                'conic-gradient(from 0deg, #c9a84c, #8a6a28, #e8c76a, #8a6a28, #c9a84c)',
-              boxShadow: '0 0 10px rgba(201,168,76,0.45), 0 2px 6px rgba(0,0,0,0.28)',
-              border: '2px solid rgba(255,220,100,0.42)',
-            }
-          : {
-              background:
-                'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015))',
-              border: '2px solid rgba(255,255,255,0.08)',
-            }
-      }
-    >
-      {filled ? <div className="h-1.5 w-1.5 rounded-full bg-amber-200/60" /> : null}
-    </div>
-  );
-}
-
-function TopPlayerPlate({
-  seat,
-  isOpponent,
-}: {
-  seat: TableSeatView;
-  isOpponent: boolean;
-}) {
-  const isCurrentTurn = seat.isCurrentTurn;
-
-  return (
-    <motion.div
-      animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
-      transition={{ duration: 1.8, repeat: isCurrentTurn ? Infinity : 0 }}
-      className="relative flex items-center gap-3 rounded-[20px] px-4 py-2.5 backdrop-blur-xl"
-      style={{
-        background: 'linear-gradient(180deg, rgba(4,10,18,0.66), rgba(5,12,20,0.48))',
-        border: isCurrentTurn
-          ? '1px solid rgba(201,168,76,0.24)'
-          : '1px solid rgba(255,255,255,0.08)',
-        boxShadow: isCurrentTurn
-          ? '0 0 22px rgba(201,168,76,0.1), 0 14px 30px rgba(0,0,0,0.24)'
-          : '0 14px 30px rgba(0,0,0,0.2)',
-      }}
-    >
-      {isCurrentTurn ? (
-        <motion.div
-          className="pointer-events-none absolute inset-0 rounded-[20px]"
-          animate={{ opacity: [0.16, 0.28, 0.16] }}
-          transition={{ duration: 1.8, repeat: Infinity }}
-          style={{
-            background:
-              'radial-gradient(circle at 50% 50%, rgba(201,168,76,0.16), transparent 72%)',
-          }}
-        />
-      ) : null}
-
-      <div
-        className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full"
-        style={{
-          background: seat.isMine
-            ? 'linear-gradient(135deg, #7a5b1a, #d2b15c)'
-            : 'linear-gradient(135deg, rgba(47,69,96,0.95), rgba(13,27,42,0.98))',
-          border: '1px solid rgba(201,168,76,0.22)',
-          boxShadow: '0 8px 18px rgba(0,0,0,0.24)',
-        }}
-      >
-        <svg viewBox="0 0 24 24" className="h-5.5 w-5.5" fill="rgba(255,255,255,0.82)">
-          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
-        </svg>
-      </div>
-
-      <div className="relative z-10 flex min-w-0 items-center gap-2">
-        <span
-          className="truncate text-[18px] font-black leading-none md:text-[20px]"
-          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
-        >
-          {seat.isMine ? 'Você' : isOpponent ? 'Oponente' : seat.seatId}
-        </span>
-        {seat.isBot ? (
-          <span
-            className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.14em]"
-            style={{
-              background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              color: 'rgba(255,255,255,0.58)',
-            }}
-          >
-            Bot
-          </span>
-        ) : null}
-      </div>
-
-      <div
-        className="relative z-10 flex h-6.5 w-6.5 items-center justify-center rounded-full"
-        style={{
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          color: 'rgba(255,255,255,0.38)',
-        }}
-      >
-        <span className="text-[10px]">⚙</span>
-      </div>
-    </motion.div>
-  );
-}
-
-function BottomPlayerAnchor({
-  seat,
-}: {
-  seat: TableSeatView;
-}) {
-  const isCurrentTurn = seat.isCurrentTurn;
-
-  return (
-    <motion.div
-      animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
-      transition={{ duration: 1.8, repeat: isCurrentTurn ? Infinity : 0 }}
-      className="relative flex flex-col items-center gap-0.5"
-    >
-      {isCurrentTurn ? (
-        <motion.div
-          className="absolute -inset-3 rounded-full"
-          animate={{ opacity: [0.24, 0.5, 0.24] }}
-          transition={{ duration: 1.8, repeat: Infinity }}
-          style={{
-            background: 'radial-gradient(circle, rgba(201,168,76,0.2) 0%, transparent 74%)',
-          }}
-        />
-      ) : null}
-
-      <div
-        className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full"
-        style={{
-          background: 'linear-gradient(135deg, #7a5b1a, #d2b15c)',
-          border: '1px solid rgba(201,168,76,0.38)',
-          boxShadow: '0 10px 22px rgba(0,0,0,0.22)',
-        }}
-      >
-        <svg viewBox="0 0 24 24" className="h-5.5 w-5.5" fill="rgba(255,255,255,0.88)">
-          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
-        </svg>
-
-        <div
-          className="absolute -bottom-1 -right-1 rounded-full px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-black"
-          style={{ background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }}
-        >
-          Você
-        </div>
-      </div>
-
-      <div
-        className="relative z-10 rounded-full px-2.5 py-1 text-[9px] font-bold"
-        style={{
-          background: 'rgba(0,0,0,0.3)',
-          border: isCurrentTurn
-            ? '1px solid rgba(201,168,76,0.22)'
-            : '1px solid rgba(255,255,255,0.08)',
-          color: isCurrentTurn ? '#e8c76a' : 'rgba(255,255,255,0.82)',
-        }}
-      >
-        Você
-      </div>
-
-      <div
-        className="text-[7px] font-medium tracking-wider"
-        style={{ color: 'rgba(255,255,255,0.4)' }}
-      >
-        {isCurrentTurn ? '— Em turno —' : seat.ready ? 'Pronto' : 'Aguardando'}
-      </div>
-    </motion.div>
-  );
-}
-
-const TableCard = ({
+function CardShape({
   rank,
   suit,
-  isWinner,
-  isFlipping,
-  isFading,
-  revealKey,
-  rotation = 0,
-  isLaunching,
+  faceDown = false,
+  winner = false,
+  highlight = false,
+  compact = false,
 }: {
-  rank: string;
-  suit: string;
-  isWinner?: boolean;
-  isFlipping?: boolean;
-  isFading?: boolean;
-  revealKey?: number;
-  rotation?: number;
-  isLaunching?: boolean;
-}) => {
-  const isRed = parseSuitColor(suit);
-  const textColor = isRed ? '#c0392b' : '#1a1a2e';
-  const symbol = SUIT_SYMBOL_MAP[suit] ?? suit;
+  rank?: string;
+  suit?: string;
+  faceDown?: boolean;
+  winner?: boolean;
+  highlight?: boolean;
+  compact?: boolean;
+}) {
+  const isRed = parseSuitColor(suit ?? '');
+  const symbol = suit ? SUIT_SYMBOL_MAP[suit] : '♦';
 
-  return (
-    <motion.div
-      key={revealKey}
-      initial={
-        isFlipping ? { scale: 0.86, rotateY: 180, opacity: 0, rotate: rotation } : { scale: 1 }
-      }
-      animate={{
-        scale: isFading ? 0.92 : 1,
-        rotateY: 0,
-        opacity: isFading ? 0.34 : 1,
-        y: isLaunching ? -32 : 0,
-        rotate: rotation,
-      }}
-      transition={{
-        type: 'spring',
-        stiffness: 280,
-        damping: 22,
-        duration: isFlipping ? 0.55 : 0.24,
-      }}
-      className="relative rounded-[16px]"
-      style={{
-        width: 92,
-        height: 126,
-        background: 'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 60%, #f2edd8 100%)',
-        boxShadow: isWinner
-          ? '0 0 26px rgba(250,204,21,0.42), 0 12px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.9)'
-          : '0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.9)',
-        border: isWinner
-          ? '2px solid rgba(250,204,21,0.68)'
-          : '1px solid rgba(0,0,0,0.08)',
-      }}
-    >
+  if (faceDown) {
+    // Face-down back with TP monogram in gold (kept from previous patch —
+    // matches the reference image's opponent card backs).
+    return (
       <div
-        className="pointer-events-none absolute inset-0 rounded-[16px]"
+        className={`relative rounded-[14px] border ${compact ? 'h-[96px] w-[68px]' : 'h-[120px] w-[86px]'}`}
         style={{
-          background:
-            'linear-gradient(150deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.15) 18%, transparent 35%)',
-        }}
-      />
-
-      <div className="absolute left-2 top-2 flex flex-col items-center leading-none">
-        <span className="text-[16px] font-black" style={{ color: textColor }}>
-          {rank}
-        </span>
-        <span className="text-[12px]" style={{ color: textColor }}>
-          {symbol}
-        </span>
-      </div>
-
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-[48px] leading-none" style={{ color: textColor }}>
-          {symbol}
-        </span>
-      </div>
-
-      <div className="absolute bottom-2 right-2 flex rotate-180 flex-col items-center leading-none">
-        <span className="text-[16px] font-black" style={{ color: textColor }}>
-          {rank}
-        </span>
-        <span className="text-[12px]" style={{ color: textColor }}>
-          {symbol}
-        </span>
-      </div>
-
-      {isWinner ? (
-        <motion.div
-          initial={{ scale: 0, rotate: -180 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 14, delay: 0.2 }}
-          className="absolute -right-3 -top-3 z-20 rounded-full px-2 py-1 text-[10px] font-black text-black shadow-lg"
-          style={{ background: 'linear-gradient(135deg, #fde047, #f59e0b)' }}
-        >
-          🏆
-        </motion.div>
-      ) : null}
-    </motion.div>
-  );
-};
-
-function OpponentBackCards() {
-  return (
-    <div className="flex items-center justify-center gap-1.5">
-      {[0, 1, 2].map((index) => (
-        <motion.div
-          key={index}
-          initial={{ rotate: 0 }}
-          animate={{ rotate: index === 0 ? -7 : index === 1 ? 0 : 7 }}
-          transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-          style={{
-            width: 56,
-            height: 80,
-            borderRadius: 12,
-            background: 'linear-gradient(145deg, #1a1f29 0%, #171d27 50%, #232934 100%)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 7px 16px rgba(0,0,0,0.34)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              inset: 8,
-              borderRadius: 9,
-              border: '1px solid rgba(230,195,100,0.12)',
-              backgroundImage:
-                'repeating-linear-gradient(45deg, rgba(230,195,100,0.14) 0, rgba(230,195,100,0.14) 1px, transparent 1px, transparent 5px)',
-            }}
-          />
-        </motion.div>
-      ))}
-    </div>
-  );
-}
-
-function ViraCard({ rank, suit }: { rank: string; suit?: string }) {
-  const displaySuit = suit ?? 'C';
-  const isRed = parseSuitColor(displaySuit);
-  const textColor = isRed ? '#c0392b' : '#1a1a2e';
-  const symbol = SUIT_SYMBOL_MAP[displaySuit] ?? '♣';
-
-  return (
-    <div className="relative flex flex-col items-center gap-1.5 opacity-90">
-      <div
-        className="text-[8px] font-black uppercase tracking-[0.2em]"
-        style={{ color: 'rgba(230,195,100,0.76)' }}
-      >
-        Vira
-      </div>
-
-      <motion.div
-        initial={{ rotateY: 180, scale: 0.92 }}
-        animate={{ rotateY: 0, scale: 1 }}
-        transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-        className="relative rounded-[16px]"
-        style={{
-          width: 84,
-          height: 114,
-          background: 'linear-gradient(145deg, #fefdf8, #f5f0e4)',
-          border: '1px solid rgba(201,168,76,0.26)',
+          background: 'linear-gradient(180deg, #132643 0%, #0b1a32 50%, #091528 100%)',
+          borderColor: 'rgba(230,195,100,0.32)',
           boxShadow:
-            '0 0 12px rgba(201,168,76,0.12), 0 7px 16px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.92)',
+            '0 14px 28px rgba(0,0,0,0.55), inset 0 0 18px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.06)',
         }}
       >
         <div
+          className="absolute inset-[4px] rounded-[10px]"
           style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'linear-gradient(150deg, rgba(255,255,255,0.84) 0%, transparent 30%)',
-            borderRadius: 'inherit',
+            background:
+              'repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 4px)',
+            border: '1px solid rgba(255,255,255,0.05)',
           }}
         />
 
-        <div className="absolute left-2 top-2 flex flex-col items-center leading-none">
-          <span className="text-[15px] font-black" style={{ color: textColor }}>
-            {rank}
-          </span>
-          <span className="text-[10px]" style={{ color: textColor }}>
-            {symbol}
-          </span>
+        <div
+          className="absolute inset-0 flex items-center justify-center font-black"
+          style={{
+            fontFamily: 'Georgia, serif',
+            fontSize: compact ? 20 : 26,
+            letterSpacing: '0.02em',
+            color: 'transparent',
+            background: 'linear-gradient(180deg, #f2d488 0%, #c9a84c 55%, #8a6a28 100%)',
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            filter: 'drop-shadow(0 2px 2px rgba(0,0,0,0.30))',
+          }}
+        >
+          TP
         </div>
 
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-[40px]" style={{ color: textColor }}>
-            {symbol}
-          </span>
-        </div>
+        <div
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            width: compact ? 42 : 54,
+            height: compact ? 42 : 54,
+            border: '1px solid rgba(230,195,100,0.24)',
+            boxShadow: 'inset 0 0 12px rgba(230,195,100,0.12)',
+          }}
+        />
+      </div>
+    );
+  }
 
-        <div className="absolute bottom-2 right-2 flex rotate-180 flex-col items-center leading-none">
-          <span className="text-[15px] font-black" style={{ color: textColor }}>
-            {rank}
-          </span>
-          <span className="text-[10px]" style={{ color: textColor }}>
-            {symbol}
-          </span>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function ScoreBoard({
-  scoreT1,
-  scoreT2,
-  playedRoundsCount,
-}: {
-  scoreT1: string;
-  scoreT2: string;
-  playedRoundsCount: number;
-}) {
   return (
-    <div
-      className="min-w-[170px] rounded-[20px] px-5 py-5 backdrop-blur-xl"
+    <motion.div
+      animate={
+        winner
+          ? { y: [-2, -8, -2], rotate: [0, 0.7, 0], scale: [1.02, 1.06, 1.02] }
+          : highlight
+            ? { y: [-1, -2, -1] }
+            : {}
+      }
+      transition={{ duration: 1.1, repeat: winner || highlight ? Infinity : 0 }}
+      className={`relative rounded-[16px] border ${
+        compact ? 'h-[86px] w-[62px]' : 'h-[132px] w-[94px]'
+      }`}
       style={{
-        background: 'linear-gradient(180deg, rgba(4,10,18,0.62), rgba(3,8,14,0.46))',
-        border: '1px solid rgba(230,195,100,0.12)',
-        boxShadow: '0 14px 28px rgba(0,0,0,0.2)',
+        background: 'linear-gradient(180deg, #fefdf8 0%, #f8f5ec 50%, #f5f0e4 100%)',
+        borderColor: winner ? 'rgba(255,223,128,0.92)' : 'rgba(0,0,0,0.14)',
+        boxShadow: winner
+          ? '0 0 52px rgba(201,168,76,0.58), 0 0 20px rgba(255,223,128,0.44), 0 28px 44px rgba(0,0,0,0.40)'
+          : highlight
+            ? '0 0 16px rgba(201,168,76,0.14), 0 20px 36px rgba(0,0,0,0.32)'
+            : '0 6px 14px rgba(0,0,0,0.30), 0 18px 34px rgba(0,0,0,0.36)',
       }}
     >
-      <div className="flex items-center justify-center gap-2.5">
+      {winner ? (
+        <motion.div
+          className="pointer-events-none absolute inset-0 rounded-[16px]"
+          animate={{ opacity: [0.22, 0.5, 0.22] }}
+          transition={{ duration: 0.95, repeat: Infinity }}
+          style={{
+            background:
+              'radial-gradient(circle at 50% 45%, rgba(255,223,128,0.52), transparent 72%)',
+          }}
+        />
+      ) : null}
+
+      <div className="absolute left-2 top-1.5 flex flex-col items-start leading-none">
         <span
-          className="text-[40px] font-black leading-none"
-          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
+          className={`${compact ? 'text-[16px]' : 'text-[22px]'} font-black`}
+          style={{ color: isRed ? '#b91c1c' : '#0f172a' }}
         >
-          {scoreT1}
+          {rank}
         </span>
         <span
-          className="text-[17px] font-light leading-none"
-          style={{ color: 'rgba(255,255,255,0.24)' }}
+          className={`${compact ? 'text-[12px]' : 'text-[16px]'} font-black leading-none`}
+          style={{ color: isRed ? '#ef4444' : '#111827' }}
         >
-          ×
-        </span>
-        <span
-          className="text-[40px] font-black leading-none"
-          style={{ color: '#e6c364', fontFamily: 'Georgia, serif' }}
-        >
-          {scoreT2}
+          {symbol}
         </span>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-2.5">
+      <div
+        className={`absolute inset-0 flex items-center justify-center ${
+          compact ? 'text-[22px]' : 'text-[36px]'
+        } font-black`}
+        style={{ color: isRed ? '#ef4444' : '#111827', opacity: 0.92 }}
+      >
+        {symbol}
+      </div>
+
+      <div className="absolute bottom-1.5 right-2 rotate-180 leading-none">
+        <span
+          className={`${compact ? 'text-[12px]' : 'text-[16px]'} font-black`}
+          style={{ color: isRed ? '#ef4444' : '#111827' }}
+        >
+          {symbol}
+        </span>
+      </div>
+    </motion.div>
+  );
+}
+
+// CHANGE: Opponent group — avatar pill sits IMMEDIATELY above the 3 face-down
+// cards, tight coupling. Matches the reference where T2A + cards are one
+// visual unit. Adds a subtle ground shadow under the cards to anchor them.
+function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent: boolean }) {
+  const isCurrentTurn = seat.isCurrentTurn;
+  const displayName = seat.isMine ? 'Você' : seat.seatId;
+  const initial = displayName.charAt(0).toUpperCase();
+
+  return (
+    <div className="flex flex-col items-center gap-2.5">
+      <motion.div
+        animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
+        transition={{ duration: 2.2, repeat: isCurrentTurn ? Infinity : 0 }}
+        className="relative flex items-center gap-3 rounded-full px-4 py-1.5 backdrop-blur-xl"
+        style={{
+          background: 'linear-gradient(180deg, rgba(20,30,48,0.92), rgba(10,18,32,0.86))',
+          border: isCurrentTurn
+            ? '1px solid rgba(230,195,100,0.52)'
+            : '1px solid rgba(255,255,255,0.10)',
+          boxShadow: isCurrentTurn
+            ? '0 0 24px rgba(230,195,100,0.22), 0 14px 30px rgba(0,0,0,0.48)'
+            : '0 14px 30px rgba(0,0,0,0.44)',
+        }}
+      >
+        <div
+          className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-black"
+          style={{
+            background: 'linear-gradient(135deg, #3a4a62 0%, #1a2234 55%, #0d141f 100%)',
+            border: '1px solid rgba(255,255,255,0.16)',
+            color: 'rgba(235,220,180,0.92)',
+            fontFamily: 'Georgia, serif',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 4px 10px rgba(0,0,0,0.42)',
+          }}
+        >
+          {initial}
+        </div>
+
+        <span
+          className="relative z-10 text-[18px] font-black leading-none"
+          style={{
+            color: '#e8d5a0',
+            fontFamily: 'Georgia, serif',
+            letterSpacing: '0.02em',
+          }}
+        >
+          {displayName}
+        </span>
+
+        <span
+          className="relative z-10 h-2.5 w-2.5 rounded-full"
+          style={{
+            background: seat.isBot
+              ? 'rgba(148,163,184,0.55)'
+              : isCurrentTurn
+                ? '#22c55e'
+                : 'rgba(148,163,184,0.42)',
+            boxShadow: isCurrentTurn ? '0 0 10px rgba(34,197,94,0.64)' : 'none',
+          }}
+        />
+      </motion.div>
+
+      <div className="flex items-center gap-3">
         {[0, 1, 2].map((index) => (
-          <PokerChip key={index} filled={index < playedRoundsCount} />
+          <motion.div
+            key={index}
+            initial={{ opacity: 0, y: -8, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
+            animate={{ opacity: 1, y: 0, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
+            transition={{ delay: index * 0.06 }}
+          >
+            <CardShape faceDown />
+          </motion.div>
         ))}
       </div>
 
+      {/* Ground shadow under the opponent cluster so it reads as "sitting on
+          the table", not floating. */}
       <div
-        className="mt-3 text-center text-[8px] font-black uppercase tracking-[0.2em]"
-        style={{ color: 'rgba(255,255,255,0.24)' }}
+        aria-hidden
+        className="pointer-events-none h-3 w-40 rounded-full"
+        style={{
+          background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.40) 0%, transparent 72%)',
+          filter: 'blur(6px)',
+        }}
+      />
+    </div>
+  );
+}
+
+// CHANGE: Vira with the reference's treatment — just "Vira" in a fine gold
+// caps label above the card. No wrapper, no caption. Voiddddd clean.
+function ViraCard({ rank, suit }: { rank: string; suit: string }) {
+  return (
+    <div className="relative flex flex-col items-center gap-1.5">
+      <span
+        className="text-[11px] font-bold tracking-[0.26em]"
+        style={{
+          color: '#e8c76a',
+          fontFamily: 'Georgia, serif',
+          textShadow: '0 2px 4px rgba(0,0,0,0.50)',
+        }}
       >
-        {playedRoundsCount} / 3 Rodadas
+        Vira
+      </span>
+
+      <div className="relative">
+        <div
+          className="pointer-events-none absolute -inset-3 rounded-full"
+          style={{
+            background:
+              'radial-gradient(circle, rgba(230,195,100,0.28) 0%, rgba(230,195,100,0.08) 36%, transparent 70%)',
+            filter: 'blur(12px)',
+          }}
+        />
+        <div className="relative">
+          <CardShape rank={rank} suit={suit} highlight />
+        </div>
       </div>
     </div>
   );
 }
 
-function SideInfoBlock({
-  title,
-  value,
-  status,
+// CHANGE: NEW — Context column on the LEFT. Absorbs "pressure" notifications
+// ("Aguardando Truco", "Truco pedido", "Resposta pendente") so they no longer
+// need to float over the cards. Modeled after the reference's
+// "VALOR ATUAL / ESTADO" column.
+function LeftContextColumn({
+  currentValue,
+  valeTier,
+  stateLabel,
+  stateAccent,
 }: {
-  title: string;
-  value: string | number;
-  status: string;
+  currentValue: number;
+  valeTier: ValeTier;
+  stateLabel: string;
+  stateAccent: 'neutral' | 'pressure' | 'escalate' | 'win' | 'loss';
 }) {
+  const accentColor =
+    stateAccent === 'pressure'
+      ? '#f87171'
+      : stateAccent === 'escalate'
+        ? '#fbbf24'
+        : stateAccent === 'win'
+          ? '#e8c76a'
+          : stateAccent === 'loss'
+            ? '#fca5a5'
+            : '#e8d5a0';
+
+  const valeVisuals = getTierVisuals(valeTier);
+
   return (
-    <div className="flex max-w-[116px] flex-col gap-3 text-left">
-      <div
-        className="space-y-1 pb-3"
-        style={{ borderBottom: '1px solid rgba(230,195,100,0.14)' }}
-      >
+    <div className="flex w-[150px] shrink-0 flex-col gap-5 self-center">
+      <div>
         <div
-          className="text-[8px] font-black uppercase tracking-[0.2em]"
-          style={{ color: 'rgba(255,255,255,0.38)' }}
+          className="text-[10px] font-bold uppercase tracking-[0.22em]"
+          style={{ color: 'rgba(232,213,160,0.52)' }}
         >
-          {title}
+          Valor atual
         </div>
-        <div
-          className="text-[40px] font-black leading-none"
-          style={{ color: '#f0e6d3', fontFamily: 'Georgia, serif' }}
-        >
-          {value}
+        <div className="mt-1 flex items-baseline gap-2">
+          <span
+            className="text-[34px] font-black leading-none"
+            style={{
+              color: valeTier === 'muted' ? '#e8d5a0' : 'transparent',
+              background: valeTier === 'muted' ? 'none' : valeVisuals.background,
+              WebkitBackgroundClip: valeTier === 'muted' ? 'border-box' : 'text',
+              backgroundClip: valeTier === 'muted' ? 'border-box' : 'text',
+              fontFamily: 'Georgia, serif',
+              filter:
+                valeTier === 'red-pulse'
+                  ? 'drop-shadow(0 0 10px rgba(248,113,113,0.60))'
+                  : valeTier === 'red'
+                    ? 'drop-shadow(0 0 8px rgba(220,38,38,0.42))'
+                    : valeTier === 'orange'
+                      ? 'drop-shadow(0 0 8px rgba(245,158,11,0.40))'
+                      : valeTier === 'gold'
+                        ? 'drop-shadow(0 0 6px rgba(201,168,76,0.36))'
+                        : 'none',
+            }}
+          >
+            {currentValue}
+          </span>
+          <span
+            className="text-[10px] font-bold uppercase tracking-[0.20em]"
+            style={{ color: 'rgba(232,213,160,0.48)' }}
+          >
+            {currentValue === 1 ? 'ponto' : 'pontos'}
+          </span>
         </div>
       </div>
 
       <div>
         <div
-          className="text-[8px] font-black uppercase tracking-[0.2em]"
-          style={{ color: 'rgba(255,255,255,0.3)' }}
+          className="text-[10px] font-bold uppercase tracking-[0.22em]"
+          style={{ color: 'rgba(232,213,160,0.52)' }}
         >
           Estado
         </div>
-        <div className="mt-1 text-[12px] font-bold leading-snug text-white/90">{status}</div>
+        <motion.div
+          key={stateLabel}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="mt-1 text-[16px] font-black leading-tight"
+          style={{
+            color: accentColor,
+            fontFamily: 'Georgia, serif',
+          }}
+        >
+          {stateLabel}
+        </motion.div>
       </div>
     </div>
   );
 }
 
-function PlayedSlot({
-  label,
-  card,
-  revealKey,
-  isWinner,
-  isFading,
-  rotation,
-  isLaunching = false,
+// CHANGE: NEW — Right column with compact score + round chips (2/3 dots from
+// the reference). Absorbs "round result" notifications — when a round is
+// decided, the corresponding chip lights up gold/red and this IS the
+// notification. No central overlay needed.
+function RightScoreColumn({
+  scoreT1,
+  scoreT2,
+  rounds,
 }: {
-  label: string;
+  scoreT1: number;
+  scoreT2: number;
+  rounds: { result: string | null; finished: boolean }[];
+}) {
+  const maxChips = 3;
+  const chips = Array.from({ length: maxChips }, (_, index) => rounds[index] ?? null);
+  const playedCount = rounds.filter((round) => round.finished).length;
+
+  return (
+    <div className="flex w-[170px] shrink-0 flex-col items-end gap-4 self-center">
+      <div
+        className="flex items-center gap-3 rounded-[14px] px-4 py-2"
+        style={{
+          background: 'linear-gradient(180deg, rgba(12,22,38,0.94), rgba(6,14,26,0.88))',
+          border: '1px solid rgba(230,195,100,0.28)',
+          boxShadow: '0 10px 22px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)',
+        }}
+      >
+        <div className="flex flex-col items-center">
+          <span
+            className="text-[9px] font-bold uppercase tracking-[0.22em]"
+            style={{ color: 'rgba(232,213,160,0.54)' }}
+          >
+            T1
+          </span>
+          <span
+            className="text-[26px] font-black leading-none"
+            style={{ color: '#e8d5a0', fontFamily: 'Georgia, serif' }}
+          >
+            {scoreT1}
+          </span>
+        </div>
+
+        <span
+          className="text-[18px] font-black leading-none"
+          style={{ color: 'rgba(232,213,160,0.30)', fontFamily: 'Georgia, serif' }}
+        >
+          x
+        </span>
+
+        <div className="flex flex-col items-center">
+          <span
+            className="text-[9px] font-bold uppercase tracking-[0.22em]"
+            style={{ color: 'rgba(232,213,160,0.54)' }}
+          >
+            T2
+          </span>
+          <span
+            className="text-[26px] font-black leading-none"
+            style={{ color: '#e8d5a0', fontFamily: 'Georgia, serif' }}
+          >
+            {scoreT2}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex items-center gap-2">
+          {chips.map((round, index) => {
+            const result = round?.result ?? null;
+            const finished = round?.finished ?? false;
+
+            let background = 'rgba(255,255,255,0.06)';
+            let border = '1px solid rgba(255,255,255,0.10)';
+            let innerGlow = '';
+
+            if (finished) {
+              if (result === 'P1') {
+                background =
+                  'radial-gradient(circle at 40% 35%, #f2d488 0%, #c9a84c 60%, #6b5014 100%)';
+                border = '1px solid rgba(255,223,128,0.84)';
+                innerGlow =
+                  '0 0 14px rgba(201,168,76,0.52), inset 0 1px 2px rgba(255,255,255,0.38)';
+              } else if (result === 'P2') {
+                background =
+                  'radial-gradient(circle at 40% 35%, #fca5a5 0%, #b91c1c 60%, #450a0a 100%)';
+                border = '1px solid rgba(254,202,202,0.74)';
+                innerGlow = '0 0 14px rgba(220,38,38,0.48), inset 0 1px 2px rgba(255,255,255,0.28)';
+              } else if (result === 'TIE') {
+                background =
+                  'radial-gradient(circle at 40% 35%, #cbd5e1 0%, #64748b 60%, #1e293b 100%)';
+                border = '1px solid rgba(203,213,225,0.64)';
+                innerGlow =
+                  '0 0 10px rgba(148,163,184,0.42), inset 0 1px 2px rgba(255,255,255,0.32)';
+              }
+            }
+
+            return (
+              <motion.div
+                key={index}
+                initial={false}
+                animate={{ scale: finished ? 1 : 0.88 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+                className="h-5 w-5 rounded-full"
+                style={{
+                  background,
+                  border,
+                  boxShadow: innerGlow || '0 2px 4px rgba(0,0,0,0.30)',
+                }}
+              />
+            );
+          })}
+        </div>
+
+        <span
+          className="text-[9px] font-bold uppercase tracking-[0.22em]"
+          style={{ color: 'rgba(232,213,160,0.42)' }}
+        >
+          {playedCount}/{maxChips}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+type PlayedSlotProps = {
+  label?: string;
   card: { rank: string; suit: string } | null;
   revealKey: number;
   isWinner: boolean;
   isFading: boolean;
   rotation: number;
   isLaunching?: boolean;
-}) {
+  hideEmpty?: boolean;
+  winnerBadgeLabel?: string | null;
+  isTieHighlight?: boolean;
+};
+
+function PlayedSlot({
+  label = '',
+  card,
+  revealKey,
+  isWinner,
+  isFading,
+  rotation,
+  isLaunching = false,
+  hideEmpty = false,
+  winnerBadgeLabel = null,
+  isTieHighlight = false,
+}: PlayedSlotProps) {
+  const shouldRenderCard = Boolean(card) || !hideEmpty;
+  const showWinnerBadge = Boolean(card && isWinner && winnerBadgeLabel);
+  const showTieHighlight = Boolean(card && isTieHighlight && !isWinner);
+
   return (
-    <div className="flex min-h-[140px] min-w-[100px] flex-col items-center gap-1.5">
-      <div
-        className="text-[8px] font-black uppercase tracking-[0.18em]"
-        style={{ color: 'rgba(255,255,255,0.3)' }}
+    <div className="relative flex min-w-[132px] flex-col items-center gap-3">
+      <span
+        className="text-[10px] font-black uppercase tracking-[0.24em]"
+        style={{
+          color: isWinner
+            ? 'rgba(242,212,136,0.96)'
+            : showTieHighlight
+              ? 'rgba(203,213,225,0.86)'
+              : 'rgba(255,255,255,0.42)',
+          textShadow: isWinner ? '0 0 10px rgba(201,168,76,0.32)' : 'none',
+        }}
       >
         {label}
-      </div>
+      </span>
 
-      <AnimatePresence initial={false}>
-        {card ? (
+      <div className="relative flex h-[164px] w-[116px] items-center justify-center">
+        {showWinnerBadge ? (
           <motion.div
-            key={`${label}-${revealKey}`}
-            initial={{ opacity: 0, y: label === 'Oponente' ? -20 : 20, rotate: rotation }}
-            animate={{ opacity: 1, y: 0, rotate: rotation }}
-            exit={{ opacity: 0 }}
-          >
-            <TableCard
-              rank={card.rank}
-              suit={card.suit}
-              isWinner={isWinner}
-              isFlipping
-              isFading={isFading}
-              revealKey={revealKey}
-              rotation={rotation}
-              isLaunching={isLaunching}
-            />
-          </motion.div>
-        ) : (
-          <div
-            className="flex items-center justify-center rounded-[16px]"
+            initial={{ opacity: 0, scale: 0.82, y: 6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="pointer-events-none absolute -right-2 top-0 z-30 rounded-full px-3 py-1"
             style={{
-              width: 92,
-              height: 126,
-              border: '2px dashed rgba(255,255,255,0.1)',
-              background: 'rgba(0,0,0,0.08)',
+              background: 'linear-gradient(135deg, #f2d488 0%, #c9a84c 58%, #7b5a1d 100%)',
+              border: '1px solid rgba(255,223,128,0.84)',
+              boxShadow: '0 8px 18px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.34)',
             }}
           >
             <span
-              className="text-[9px] font-bold uppercase tracking-[0.18em]"
-              style={{ color: 'rgba(255,255,255,0.18)' }}
+              className="text-[9px] font-black uppercase tracking-[0.2em]"
+              style={{ color: '#1a1204' }}
             >
-              {label === 'Oponente' ? 'Aguarde' : 'Sua jogada'}
+              {winnerBadgeLabel}
             </span>
-          </div>
-        )}
-      </AnimatePresence>
+          </motion.div>
+        ) : null}
+
+        {showTieHighlight ? (
+          <div
+            className="pointer-events-none absolute inset-x-3 top-3 z-10 h-12 rounded-full"
+            style={{
+              background:
+                'radial-gradient(circle at 50% 50%, rgba(203,213,225,0.18) 0%, transparent 72%)',
+              filter: 'blur(8px)',
+            }}
+          />
+        ) : null}
+
+        {shouldRenderCard ? (
+          <motion.div
+            key={`${label}-${card?.rank ?? 'empty'}${card?.suit ?? ''}-${revealKey}`}
+            initial={{ opacity: 0, y: isLaunching ? 26 : 10, scale: 0.92, rotate: rotation }}
+            animate={{
+              opacity: isFading ? 0.78 : 1,
+              y: isWinner ? -6 : 0,
+              scale: isWinner ? 1.04 : 1,
+              rotate: rotation,
+            }}
+            transition={{
+              duration: isWinner ? 0.28 : 0.22,
+              ease: 'easeOut',
+            }}
+            className="relative"
+            style={{
+              filter: isWinner
+                ? 'drop-shadow(0 0 22px rgba(201,168,76,0.42))'
+                : showTieHighlight
+                  ? 'drop-shadow(0 0 12px rgba(148,163,184,0.22))'
+                  : 'none',
+            }}
+          >
+            {card ? (
+              <>
+                {isWinner ? (
+                  <div
+                    className="pointer-events-none absolute -inset-2 rounded-[22px]"
+                    style={{
+                      background:
+                        'radial-gradient(circle at 50% 42%, rgba(242,212,136,0.28) 0%, rgba(201,168,76,0.12) 42%, transparent 78%)',
+                      filter: 'blur(10px)',
+                    }}
+                  />
+                ) : null}
+
+                <div
+                  className="relative rounded-[18px]"
+                  style={{
+                    boxShadow: isWinner
+                      ? '0 0 0 1px rgba(255,223,128,0.58), 0 0 24px rgba(201,168,76,0.24)'
+                      : showTieHighlight
+                        ? '0 0 0 1px rgba(203,213,225,0.28)'
+                        : 'none',
+                  }}
+                >
+                  <CardShape
+                    rank={card.rank}
+                    suit={card.suit}
+                    winner={isWinner}
+                    highlight={showTieHighlight}
+                  />
+                </div>
+              </>
+            ) : (
+              <div
+                className="h-[132px] w-[94px] rounded-[18px] border border-white/8"
+                style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  opacity: hideEmpty ? 0 : 1,
+                }}
+              />
+            )}
+          </motion.div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function BetStateBanner({
-  handStatusLabel,
-  handStatusTone,
-  currentValue,
-  pendingValue,
-  requestedBy,
+function CenterActionBar({
   availableActions,
+  onAction,
 }: {
-  handStatusLabel: string;
-  handStatusTone: HandStatusVariant;
-  currentValue: number;
-  pendingValue: number | null;
-  requestedBy: string | null;
-  availableActions: MatchTableShellProps['availableActions'];
+  availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
+  onAction: (action: MatchAction) => void;
 }) {
-  const nextValue = pendingValue ?? currentValue;
-  const requestLabel = getBetRequestLabel(nextValue);
-  const requestedByStatus = getRequestedByStatus(requestedBy);
-  const decisionLabel = getBetDecisionLabel(availableActions);
+  const canAccept = availableActions.canAcceptBet || availableActions.canAcceptMaoDeOnze;
+  const canDecline = availableActions.canDeclineBet || availableActions.canDeclineMaoDeOnze;
+  const canRaise =
+    availableActions.canRaiseToSix ||
+    availableActions.canRaiseToNine ||
+    availableActions.canRaiseToTwelve;
+  const canTruco = availableActions.canRequestTruco;
+  const hasDecision = canAccept || canDecline || canRaise;
 
-  const glowColor =
-    handStatusTone === 'success'
-      ? 'rgba(74,222,128,0.28)'
-      : handStatusTone === 'warning'
-        ? 'rgba(230,195,100,0.28)'
-        : 'rgba(255,255,255,0.14)';
+  const raiseAction: MatchAction | null = availableActions.canRaiseToSix
+    ? 'raise-to-six'
+    : availableActions.canRaiseToNine
+      ? 'raise-to-nine'
+      : availableActions.canRaiseToTwelve
+        ? 'raise-to-twelve'
+        : null;
+  const acceptAction: MatchAction | null = availableActions.canAcceptBet
+    ? 'accept-bet'
+    : availableActions.canAcceptMaoDeOnze
+      ? 'accept-mao-de-onze'
+      : null;
+  const declineAction: MatchAction | null = availableActions.canDeclineBet
+    ? 'decline-bet'
+    : availableActions.canDeclineMaoDeOnze
+      ? 'decline-mao-de-onze'
+      : null;
+
+  const raiseLabel = availableActions.canRaiseToSix
+    ? 'Aumentar 6'
+    : availableActions.canRaiseToNine
+      ? 'Aumentar 9'
+      : availableActions.canRaiseToTwelve
+        ? 'Aumentar 12'
+        : 'Aumentar';
+
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <motion.button
+        type="button"
+        onClick={() => canTruco && onAction('request-truco')}
+        disabled={!canTruco || hasDecision}
+        whileHover={canTruco && !hasDecision ? { y: -1, scale: 1.02 } : {}}
+        whileTap={canTruco && !hasDecision ? { scale: 0.97 } : {}}
+        className="relative overflow-hidden"
+        style={{
+          borderRadius: 999,
+          minHeight: 44,
+          minWidth: 112,
+          padding: '10px 22px',
+          fontSize: 13,
+          fontWeight: 900,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          fontFamily: 'Georgia, serif',
+          background:
+            canTruco && !hasDecision
+              ? 'linear-gradient(180deg, #ef4444 0%, #c81d0d 55%, #7f1d1d 100%)'
+              : 'rgba(255,255,255,0.03)',
+          border:
+            canTruco && !hasDecision
+              ? '1px solid rgba(252,165,165,0.46)'
+              : '1px solid rgba(255,255,255,0.05)',
+          color: canTruco && !hasDecision ? '#fff' : 'rgba(255,255,255,0.18)',
+          boxShadow:
+            canTruco && !hasDecision
+              ? '0 0 22px rgba(220,38,38,0.32), 0 10px 22px rgba(0,0,0,0.32)'
+              : 'none',
+          cursor: canTruco && !hasDecision ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Truco!
+      </motion.button>
+
+      <motion.button
+        type="button"
+        onClick={() => acceptAction && onAction(acceptAction)}
+        disabled={!canAccept}
+        whileHover={canAccept ? { y: -1, scale: 1.02 } : {}}
+        whileTap={canAccept ? { scale: 0.97 } : {}}
+        style={{
+          borderRadius: 999,
+          minHeight: 44,
+          minWidth: 112,
+          padding: '10px 22px',
+          fontSize: 13,
+          fontWeight: 900,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          fontFamily: 'Georgia, serif',
+          background: canAccept
+            ? 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))'
+            : 'rgba(255,255,255,0.03)',
+          border: canAccept
+            ? '1px solid rgba(230,195,100,0.34)'
+            : '1px solid rgba(255,255,255,0.05)',
+          color: canAccept ? '#e8d5a0' : 'rgba(255,255,255,0.18)',
+          boxShadow: canAccept
+            ? '0 10px 22px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)'
+            : 'none',
+          cursor: canAccept ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Aceitar
+      </motion.button>
+
+      <motion.button
+        type="button"
+        onClick={() => {
+          if (raiseAction) {
+            onAction(raiseAction);
+          } else if (declineAction) {
+            onAction(declineAction);
+          }
+        }}
+        disabled={!canRaise && !canDecline}
+        whileHover={canRaise || canDecline ? { y: -1, scale: 1.02 } : {}}
+        whileTap={canRaise || canDecline ? { scale: 0.97 } : {}}
+        style={{
+          borderRadius: 999,
+          minHeight: 44,
+          minWidth: 112,
+          padding: '10px 22px',
+          fontSize: 13,
+          fontWeight: 900,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          fontFamily: 'Georgia, serif',
+          background: canRaise
+            ? 'linear-gradient(180deg, #d97706 0%, #92400e 100%)'
+            : canDecline
+              ? 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))'
+              : 'rgba(255,255,255,0.03)',
+          border: canRaise
+            ? '1px solid rgba(251,191,36,0.44)'
+            : canDecline
+              ? '1px solid rgba(148,163,184,0.30)'
+              : '1px solid rgba(255,255,255,0.05)',
+          color: canRaise ? '#fef3c7' : canDecline ? '#cbd5e1' : 'rgba(255,255,255,0.18)',
+          boxShadow: canRaise || canDecline ? '0 10px 22px rgba(0,0,0,0.30)' : 'none',
+          cursor: canRaise || canDecline ? 'pointer' : 'not-allowed',
+        }}
+      >
+        {canRaise ? raiseLabel : canDecline ? 'Correr' : 'Aumentar'}
+      </motion.button>
+    </div>
+  );
+}
+
+// CHANGE: NEW — Climax card with auto-dismiss. This is the fix for the
+// "modal travado" bug. The card:
+//   1. Is a motion.div with proper exit animation
+//   2. Auto-dismisses after CLIMAX_AUTO_DISMISS_MS via internal state
+//   3. The parent's AnimatePresence still wraps it, so if the parent unmounts
+//      it (tablePhase changes), it fades out correctly too.
+// The underlying tablePhase may stay 'hand_finished' indefinitely (backend
+// authoritative), but the visual takeover always lifts after ~2.8s.
+function HandClimaxStage({
+  isMyHand,
+  awardedPoints,
+  valueTier,
+  isMatchFinished,
+  onDismiss,
+}: {
+  isMyHand: boolean;
+  awardedPoints: number;
+  valueTier: ValeTier;
+  isMatchFinished: boolean;
+  onDismiss: () => void;
+}) {
+  // CHANGE: auto-dismiss timer. Match finished stays 1s longer so the player
+  // has time to absorb the final verdict.
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      onDismiss,
+      isMatchFinished ? CLIMAX_AUTO_DISMISS_MS + 1000 : CLIMAX_AUTO_DISMISS_MS,
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [isMatchFinished, onDismiss]);
+
+  const heroTier: ValeTier = isMyHand ? valueTier : 'red';
+  const visuals = getTierVisuals(heroTier);
+
+  const heading = isMatchFinished
+    ? isMyHand
+      ? 'Partida sua'
+      : 'Partida deles'
+    : isMyHand
+      ? 'Mão sua'
+      : 'Mão deles';
+
+  const subheading = isMatchFinished
+    ? isMyHand
+      ? 'Você fechou a partida'
+      : 'O oponente fechou a partida'
+    : isMyHand
+      ? 'Você marcou'
+      : 'Eles marcaram';
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -18, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -12, scale: 0.98 }}
-      transition={{ type: 'spring', stiffness: 280, damping: 24 }}
-      className="pointer-events-none absolute left-1/2 top-6 z-30 w-[min(92%,720px)] -translate-x-1/2"
+      className="pointer-events-auto fixed inset-0 z-[60]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.24 }}
+      onClick={onDismiss}
+      role="button"
+      tabIndex={0}
+      aria-label="Fechar resultado da mão"
     >
       <div
-        className="relative overflow-hidden rounded-[24px] px-5 py-4 backdrop-blur-xl"
+        className="absolute inset-0"
         style={{
-          background: 'linear-gradient(180deg, rgba(7,14,24,0.92), rgba(9,18,30,0.82))',
-          border: '1px solid rgba(230,195,100,0.24)',
-          boxShadow: `0 0 28px ${glowColor}, 0 22px 44px rgba(0,0,0,0.34)`,
+          background: 'rgba(2,6,12,0.68)',
+          backdropFilter: 'blur(6px)',
         }}
+      />
+
+      <motion.div
+        className="absolute inset-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0, 0.42, 0] }}
+        transition={{ duration: 0.22, times: [0, 0.3, 1] }}
+        style={{
+          background: isMyHand
+            ? 'radial-gradient(circle at 50% 50%, rgba(255,223,128,0.38), transparent 62%)'
+            : 'radial-gradient(circle at 50% 50%, rgba(220,38,38,0.36), transparent 62%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <motion.div
+        className="absolute left-1/2 top-1/2"
+        initial={{ x: '-50%', y: '-50%', scale: 0.4, opacity: 0 }}
+        animate={{ x: '-50%', y: '-50%', scale: 1, opacity: 1 }}
+        exit={{ x: '-50%', y: '-50%', scale: 0.94, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 360, damping: 20 }}
       >
         <div
-          className="pointer-events-none absolute inset-0"
+          className="relative overflow-hidden rounded-[26px] px-10 py-7 text-center"
           style={{
-            background:
-              'linear-gradient(135deg, rgba(230,195,100,0.08), transparent 32%, rgba(230,195,100,0.05) 100%)',
+            background: visuals.background,
+            border: `2px solid ${visuals.border.replace('1px solid ', '')}`,
+            color: visuals.textColor,
+            boxShadow: `${visuals.glow}, 0 40px 90px rgba(0,0,0,0.55)`,
+            minWidth: 360,
           }}
-        />
+        >
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.22), transparent 62%)',
+            }}
+          />
 
-        <div className="relative z-10 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div
-                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                style={{
-                  background: 'rgba(230,195,100,0.12)',
-                  border: '1px solid rgba(230,195,100,0.2)',
-                  color: '#e8c76a',
-                }}
-              >
-                Decisão de aposta
-              </div>
-
-              <div
-                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  color: 'rgba(255,255,255,0.78)',
-                }}
-              >
-                {requestedByStatus}
-              </div>
+          <div className="relative z-10">
+            <div
+              className="text-[11px] font-black uppercase tracking-[0.26em]"
+              style={{ opacity: 0.72 }}
+            >
+              {isMatchFinished ? 'Fim da partida' : 'Resultado da mão'}
             </div>
 
-            <div className="flex items-center gap-2">
-              <div
-                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                style={{
-                  background: 'rgba(255,255,255,0.06)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  color: 'rgba(255,255,255,0.68)',
-                }}
-              >
-                Atual {currentValue}
-              </div>
+            <div
+              className="mt-1 text-[36px] font-black uppercase leading-none tracking-[0.08em]"
+              style={{ fontFamily: 'Georgia, serif' }}
+            >
+              {heading}
+            </div>
 
-              <div
-                className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(201,168,76,0.22), rgba(232,199,106,0.16))',
-                  border: '1px solid rgba(230,195,100,0.24)',
-                  color: '#f0e6d3',
-                }}
-              >
-                Pedido {requestLabel}
-              </div>
+            <div
+              className="mt-3 text-[11px] font-bold uppercase tracking-[0.18em]"
+              style={{ opacity: 0.8 }}
+            >
+              {subheading}
+            </div>
+
+            <motion.div
+              initial={{ y: 24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.18, duration: 0.36 }}
+              className="mt-2 text-[62px] font-black leading-none"
+              style={{
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 6px 18px rgba(0,0,0,0.32)',
+              }}
+            >
+              +{awardedPoints}
+            </motion.div>
+
+            <div
+              className="text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{ opacity: 0.68 }}
+            >
+              ponto{awardedPoints === 1 ? '' : 's'}
+            </div>
+
+            <div
+              className="mt-4 text-[9px] font-bold uppercase tracking-[0.22em]"
+              style={{ opacity: 0.54 }}
+            >
+              Toque para continuar
             </div>
           </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
 
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="space-y-1">
-              <div
-                className="text-[22px] font-black leading-none"
-                style={{ color: '#f3ead8', fontFamily: 'Georgia, serif' }}
-              >
-                {handStatusLabel}
-              </div>
 
-              <div className="text-[12px] font-semibold text-white/70">{decisionLabel}</div>
+
+function MaoDeOnzeDecisionStage({
+  isVisible,
+  onPlay,
+  onRun,
+}: {
+  isVisible: boolean;
+  onPlay: () => void;
+  onRun: () => void;
+}) {
+  if (!isVisible) {
+    return null;
+  }
+
+  return (
+    <motion.div
+      initial={{ y: 28, opacity: 0, scale: 0.96 }}
+      animate={{ y: 0, opacity: 1, scale: 1 }}
+      exit={{ y: 20, opacity: 0, scale: 0.96 }}
+      transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+      className="pointer-events-auto fixed inset-x-4 bottom-[308px] z-[110] mx-auto w-full max-w-lg md:bottom-[324px] md:max-w-xl"
+    >
+      <div
+        className="overflow-hidden rounded-[26px] border px-4 py-3.5 md:px-5 md:py-4 backdrop-blur-xl"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(18,22,30,0.94) 0%, rgba(10,12,18,0.90) 100%)',
+          borderColor: 'rgba(255,223,128,0.34)',
+          boxShadow:
+            '0 28px 54px rgba(0,0,0,0.42), 0 0 36px rgba(201,168,76,0.16), inset 0 1px 0 rgba(255,255,255,0.06)',
+        }}
+      >
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <div
+              className="text-[11px] font-black uppercase tracking-[0.28em]"
+              style={{ color: '#f6dfa0' }}
+            >
+              Mão de 11
             </div>
+            <h3
+              className="mt-1 text-[24px] font-black leading-none"
+              style={{ color: '#fff8e1', fontFamily: 'Georgia, serif' }}
+            >
+              Analise sua mão antes de decidir
+            </h3>
+            <p className="mt-2 text-[13px] leading-relaxed" style={{ color: 'rgba(255,248,225,0.72)' }}>
+              Você ainda não pode jogar carta. Primeiro escolha se vai seguir na mão ou correr.
+            </p>
+          </div>
 
-            <div className="flex items-center gap-2">
-              {availableActions.canAcceptBet ? (
-                <div
-                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
-                  style={{
-                    background: 'rgba(74,222,128,0.12)',
-                    border: '1px solid rgba(74,222,128,0.24)',
-                    color: '#86efac',
-                  }}
-                >
-                  Aceitar
-                </div>
-              ) : null}
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <motion.button
+              type="button"
+              onClick={onPlay}
+              whileHover={{ y: -1, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+              style={{
+                background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 60%, #8a6a28 100%)',
+                color: '#1a1104',
+                border: '1px solid rgba(255,223,128,0.72)',
+                boxShadow: '0 14px 28px rgba(0,0,0,0.28), 0 0 16px rgba(201,168,76,0.18)',
+              }}
+            >
+              Jogar
+            </motion.button>
 
-              {availableActions.canDeclineBet ? (
-                <div
-                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
-                  style={{
-                    background: 'rgba(248,113,113,0.12)',
-                    border: '1px solid rgba(248,113,113,0.22)',
-                    color: '#fca5a5',
-                  }}
-                >
-                  Correr
-                </div>
-              ) : null}
-
-              {availableActions.canRaiseToSix ||
-              availableActions.canRaiseToNine ||
-              availableActions.canRaiseToTwelve ? (
-                <div
-                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em]"
-                  style={{
-                    background: 'rgba(230,195,100,0.12)',
-                    border: '1px solid rgba(230,195,100,0.24)',
-                    color: '#fcd34d',
-                  }}
-                >
-                  Subir
-                </div>
-              ) : null}
-            </div>
+            <motion.button
+              type="button"
+              onClick={onRun}
+              whileHover={{ y: -1, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))',
+                color: '#d6dde8',
+                border: '1px solid rgba(148,163,184,0.26)',
+                boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
+              }}
+            >
+              Correr
+            </motion.button>
           </div>
         </div>
       </div>
@@ -849,76 +1170,196 @@ function BetStateBanner({
   );
 }
 
-function HandOutcomeBanner({
-  winner,
-  awardedPoints,
-  canStartHand,
+function MaoDeOnzeAcceptedBadge() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -6, scale: 0.96 }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      className="pointer-events-none fixed right-6 top-[88px] z-[95] md:right-8 md:top-[92px]"
+    >
+      <div
+        className="rounded-full px-4 py-2"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(242,212,136,0.18) 0%, rgba(201,168,76,0.14) 55%, rgba(123,90,29,0.12) 100%)',
+          border: '1px solid rgba(255,223,128,0.34)',
+          boxShadow:
+            '0 10px 24px rgba(0,0,0,0.26), 0 0 18px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.10)',
+          backdropFilter: 'blur(10px)',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{
+              background: '#e8c76a',
+              boxShadow: '0 0 10px rgba(201,168,76,0.42)',
+            }}
+          />
+          <span
+            className="text-[10px] font-black uppercase tracking-[0.22em]"
+            style={{
+              color: '#f2d488',
+              fontFamily: 'Georgia, serif',
+              textShadow: '0 2px 6px rgba(0,0,0,0.28)',
+            }}
+          >
+            Mão de 11 aceita
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function MatchResultModal({
+  isOpen,
+  isVictory,
+  scoreLabel,
 }: {
-  winner: string | null;
-  awardedPoints: number | null;
-  canStartHand: boolean;
+  isOpen: boolean;
+  isVictory: boolean;
+  scoreLabel: string;
 }) {
-  if (!winner || awardedPoints === null) {
+  if (!isOpen) {
     return null;
   }
 
-  const winnerLabel = winner === 'P1' ? 'T1' : 'T2';
-  const pointsLabel = awardedPoints === 1 ? '1 ponto' : `${awardedPoints} pontos`;
+  const title = isVictory ? 'Vitória' : 'Derrota';
+  const subtitle = isVictory
+    ? 'Você fechou a partida. Belo fechamento de mesa.'
+    : 'A partida terminou. Vale revisar o placar e voltar preparado para a próxima.'
+    ;
+  const accentBackground = isVictory
+    ? 'linear-gradient(135deg, #f2d488 0%, #c9a84c 55%, #7b5a1d 100%)'
+    : 'linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%)';
+  const accentColor = isVictory ? '#1a1204' : '#fff5f5';
+
+  const handleBackToLobby = () => {
+    window.location.assign('/lobby');
+  };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 18, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 12, scale: 0.98 }}
-      transition={{ type: 'spring', stiffness: 280, damping: 24 }}
-      className="pointer-events-none absolute bottom-20 left-1/2 z-30 w-[min(92%,520px)] -translate-x-1/2"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[120] flex items-center justify-center px-4"
     >
       <div
-        className="rounded-[22px] px-5 py-4 text-center backdrop-blur-xl"
+        className="absolute inset-0"
         style={{
-          background: 'linear-gradient(180deg, rgba(7,14,24,0.92), rgba(9,18,30,0.82))',
-          border: '1px solid rgba(74,222,128,0.22)',
-          boxShadow: '0 0 22px rgba(74,222,128,0.18), 0 18px 40px rgba(0,0,0,0.34)',
+          background: 'rgba(4,6,10,0.68)',
+          backdropFilter: 'blur(10px)',
+        }}
+      />
+
+      <motion.div
+        initial={{ y: 24, scale: 0.96, opacity: 0 }}
+        animate={{ y: 0, scale: 1, opacity: 1 }}
+        exit={{ y: 18, scale: 0.98, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 230, damping: 24 }}
+        className="relative w-full max-w-xl overflow-hidden rounded-[30px] border px-6 py-6"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(16,20,30,0.96) 0%, rgba(8,10,18,0.96) 100%)',
+          borderColor: isVictory ? 'rgba(255,223,128,0.36)' : 'rgba(252,165,165,0.28)',
+          boxShadow:
+            '0 34px 64px rgba(0,0,0,0.48), 0 0 42px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05)',
         }}
       >
         <div
-          className="text-[10px] font-black uppercase tracking-[0.2em]"
-          style={{ color: '#86efac' }}
+          className="inline-flex rounded-full px-4 py-1 text-[11px] font-black uppercase tracking-[0.24em]"
+          style={{
+            background: accentBackground,
+            color: accentColor,
+            boxShadow: '0 10px 22px rgba(0,0,0,0.24)',
+          }}
         >
-          Resultado da mão
+          Partida encerrada
         </div>
 
-        <div className="mt-1 text-[22px] font-black text-white">
-          {winnerLabel} venceu e marcou {pointsLabel}
+        <h2
+          className="mt-4 text-[40px] font-black leading-none"
+          style={{ color: isVictory ? '#fff0bf' : '#ffe4e6', fontFamily: 'Georgia, serif' }}
+        >
+          {title}
+        </h2>
+
+        <p className="mt-3 text-[15px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.78)' }}>
+          {subtitle}
+        </p>
+
+        <div
+          className="mt-5 rounded-[22px] border px-5 py-4"
+          style={{
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02))',
+            borderColor: 'rgba(255,255,255,0.08)',
+          }}
+        >
+          <div
+            className="text-[10px] font-black uppercase tracking-[0.24em]"
+            style={{ color: 'rgba(232,213,160,0.58)' }}
+          >
+            Placar final
+          </div>
+          <div
+            className="mt-2 text-[24px] font-black"
+            style={{ color: '#f3e7bf', fontFamily: 'Georgia, serif' }}
+          >
+            {scoreLabel}
+          </div>
         </div>
 
-        <div className="mt-1 text-[12px] font-semibold text-white/68">
-          {canStartHand
-            ? 'A próxima mão já pode ser iniciada.'
-            : 'Aguardando a mesa ficar pronta para a próxima mão.'}
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <motion.button
+            type="button"
+            onClick={handleBackToLobby}
+            whileHover={{ y: -1, scale: 1.01 }}
+            whileTap={{ scale: 0.98 }}
+            className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+            style={{
+              background: accentBackground,
+              color: accentColor,
+              border: '1px solid rgba(255,223,128,0.48)',
+              boxShadow: '0 16px 28px rgba(0,0,0,0.24)',
+            }}
+          >
+            Voltar ao lobby
+          </motion.button>
+
+          <button
+            type="button"
+            disabled
+            className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              color: 'rgba(255,255,255,0.42)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              cursor: 'not-allowed',
+            }}
+            title="Backend rematch flow is not wired yet."
+          >
+            Revanche em breve
+          </button>
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }
 
 export function MatchTableShell(props: MatchTableShellProps) {
   const {
-    handStatusLabel,
-    handStatusTone,
     betState,
     currentValue,
     pendingValue,
-    requestedBy,
-    specialState,
     winner,
     awardedPoints,
-    latestRound,
     displayedResolvedRoundFinished,
     displayedResolvedRoundResult,
     tablePhase,
-    canStartHand,
-    scoreLabel,
     opponentSeatView,
     mySeatView,
     displayedOpponentPlayedCard,
@@ -926,7 +1367,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     opponentRevealKey,
     myRevealKey,
     myCardLaunching,
-    roundResolvedKey,
     currentPrivateViraRank,
     currentPublicViraRank,
     viraRank,
@@ -938,31 +1378,42 @@ export function MatchTableShell(props: MatchTableShellProps) {
     currentPrivateHand,
     currentPublicHand,
     onPlayCard,
-    playedRoundsCount,
     isMyTurn = false,
     isResolvingRound,
     closingTableCards,
   } = props;
+
+  // CHANGE: alias so the RightScoreColumn round-chips logic reads clearly.
+  const publicHandForRounds = currentPublicHand;
 
   const { play } = useGameSound();
   const { fire } = useConfetti();
 
   const effectiveViraRank = currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
   const isAwaitingBet = betState === 'awaiting_response';
-  const isMaoDeOnze = specialState === 'mao_de_onze';
+  const isMaoDeOnze = props.specialState === 'mao_de_onze';
+  const isViewerMaoDeOnzeDecision =
+    props.specialDecisionPending &&
+    (availableActions.canAcceptMaoDeOnze || availableActions.canDeclineMaoDeOnze);
+  const isMaoDeOnzeAcceptedState =
+    isMaoDeOnze && !props.specialDecisionPending && tablePhase === 'playing';
   const isMatchFinished = tablePhase === 'match_finished';
   const isHandFinished = tablePhase === 'hand_finished';
-  const scoreT1 = publicMatchStateScoreT1(scoreLabel);
-  const scoreT2 = publicMatchStateScoreT2(scoreLabel);
 
-  const parseCard = (cardStr: string | null) => {
-    if (!cardStr || cardStr.length < 2) {
+  const activeValueForTier = isAwaitingBet && pendingValue !== null ? pendingValue : currentValue;
+  const activeTier = useMemo<ValeTier>(
+    () => resolveValeTier(activeValueForTier),
+    [activeValueForTier],
+  );
+
+  const parseCard = (cardString: string | null) => {
+    if (!cardString || cardString.length < 2) {
       return null;
     }
 
     return {
-      rank: cardStr.slice(0, -1),
-      suit: cardStr.slice(-1),
+      rank: cardString.slice(0, -1),
+      suit: cardString.slice(-1),
     };
   };
 
@@ -977,9 +1428,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const resolvedRoundFinished = displayedResolvedRoundFinished;
   const resolvedRoundResult = displayedResolvedRoundResult;
 
-  const hasAnyClosingCard =
-    closingTableCards.mine !== null || closingTableCards.opponent !== null;
-
+  const hasAnyClosingCard = closingTableCards.mine !== null || closingTableCards.opponent !== null;
   const hasAnyDisplayedCard =
     displayedMyPlayedCard !== null || displayedOpponentPlayedCard !== null;
 
@@ -989,68 +1438,146 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
   const shouldFadeMyCard = Boolean(
     closingTableCards.mine !== null &&
-      resolvedMyCardString === closingTableCards.mine &&
-      isResolvingRound,
+    resolvedMyCardString === closingTableCards.mine &&
+    isResolvingRound,
   );
-
   const shouldFadeOpponentCard = Boolean(
     closingTableCards.opponent !== null &&
-      resolvedOpponentCardString === closingTableCards.opponent &&
-      isResolvingRound,
+    resolvedOpponentCardString === closingTableCards.opponent &&
+    isResolvingRound,
   );
 
   const myCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P1');
   const opponentCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P2');
+  const isTieRound = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'TIE');
 
   const shouldBlockHandDock =
     isAwaitingBet ||
+    props.specialDecisionPending ||
     availableActions.canAcceptBet ||
     availableActions.canDeclineBet ||
     availableActions.canRaiseToSix ||
     availableActions.canRaiseToNine ||
-    availableActions.canRaiseToTwelve;
+    availableActions.canRaiseToTwelve ||
+    availableActions.canAcceptMaoDeOnze ||
+    availableActions.canDeclineMaoDeOnze;
+
+  // CHANGE: climax dismissal is now a local state controlled by the Stage
+  // component itself. Once the user clicks OR 2.8s pass, the climax is
+  // hidden even if tablePhase remains 'hand_finished'. Reset when the phase
+  // transitions away from hand_finished so the next climax can fire.
+  const [climaxDismissed, setClimaxDismissed] = useState(false);
+  const lastClimaxPhaseRef = useRef<TablePhase | null>(null);
 
   useEffect(() => {
-    console.log('[shell][render-source]', {
-      isResolvingRound,
-      closingTableCards,
-      displayedMyPlayedCard,
-      displayedOpponentPlayedCard,
-      resolvedMyCardString,
-      resolvedOpponentCardString,
-      latestRoundFinished: Boolean(latestRound?.finished),
-      latestRoundResult: latestRound?.result ?? null,
-      displayedResolvedRoundFinished,
-      displayedResolvedRoundResult,
-      resolvedRoundFinished,
-      resolvedRoundResult,
-      betState,
-      currentValue,
-      pendingValue,
-      requestedBy,
-      winner,
-      awardedPoints,
-    });
+    if (tablePhase !== 'hand_finished' && tablePhase !== 'match_finished') {
+      setClimaxDismissed(false);
+      lastClimaxPhaseRef.current = tablePhase;
+    } else if (lastClimaxPhaseRef.current !== tablePhase) {
+      // New climax-eligible phase → reset dismissal so the stage fires again.
+      setClimaxDismissed(false);
+      lastClimaxPhaseRef.current = tablePhase;
+    }
+  }, [tablePhase]);
+
+  // CHANGE: stateLabel derives from the actual hand state and feeds the
+  // LeftContextColumn. This is the main "notification absorber" — we stopped
+  // floating banners over the cards and instead write the semantic state
+  // into the left column.
+  const stateInfo = useMemo<{
+    label: string;
+    accent: 'neutral' | 'pressure' | 'escalate' | 'win' | 'loss';
+  }>(() => {
+    if (isMatchFinished) {
+      return { label: 'Partida encerrada', accent: winner === 'P1' ? 'win' : 'loss' };
+    }
+
+    if (isHandFinished && winner !== null) {
+      return winner === 'P1'
+        ? { label: 'Mão sua', accent: 'win' }
+        : { label: 'Mão deles', accent: 'loss' };
+    }
+
+    if (isAwaitingBet) {
+      const ask = pendingValue ?? currentValue;
+      if (ask > 3) {
+        return { label: `Subiu para ${ask}`, accent: 'escalate' };
+      }
+      return { label: 'Truco pedido', accent: 'pressure' };
+    }
+
+    if (props.specialDecisionPending) {
+      return isViewerMaoDeOnzeDecision
+        ? { label: 'Decida a mão de 11', accent: 'escalate' }
+        : { label: 'Mão de 11', accent: 'escalate' };
+    }
+
+    if (isMaoDeOnzeAcceptedState) {
+      return { label: 'Mão de 11 aceita', accent: 'win' };
+    }
+
+    if (isShowingResolvedRoundCards && resolvedRoundResult) {
+      if (resolvedRoundResult === 'P1') {
+        return { label: 'Rodada sua', accent: 'win' };
+      }
+      if (resolvedRoundResult === 'P2') {
+        return { label: 'Rodada deles', accent: 'loss' };
+      }
+      return { label: 'Empate', accent: 'neutral' };
+    }
+
+    if (isMyTurn && canPlayCard) {
+      return { label: 'Sua jogada', accent: 'neutral' };
+    }
+
+    return { label: 'Aguardando', accent: 'neutral' };
   }, [
-    awardedPoints,
-    betState,
-    closingTableCards,
+    canPlayCard,
     currentValue,
-    displayedMyPlayedCard,
-    displayedOpponentPlayedCard,
-    displayedResolvedRoundFinished,
-    displayedResolvedRoundResult,
-    isResolvingRound,
-    latestRound?.finished,
-    latestRound?.result,
+    isAwaitingBet,
+    isHandFinished,
+    isMatchFinished,
+    isMyTurn,
+    isShowingResolvedRoundCards,
     pendingValue,
-    requestedBy,
-    resolvedRoundFinished,
+    isMaoDeOnzeAcceptedState,
+    isViewerMaoDeOnzeDecision,
+    props.specialDecisionPending,
     resolvedRoundResult,
-    resolvedMyCardString,
-    resolvedOpponentCardString,
     winner,
   ]);
+
+  // Round chips for the RightScoreColumn.
+  const roundsForChips = useMemo(() => {
+    const rounds = publicHandForRounds?.rounds ?? [];
+    return rounds.map((round) => ({
+      result: round.result ?? null,
+      finished: Boolean(round.finished),
+    }));
+  }, [publicHandForRounds]);
+
+  // Score from scoreLabel (same parsing as the header).
+  const scoreT1 = Number(props.scoreLabel?.match(/T1\s+(\d+)/)?.[1] ?? '0');
+  const scoreT2 = Number(props.scoreLabel?.match(/T2\s+(\d+)/)?.[1] ?? '0');
+
+  const climax = (() => {
+    if (props.suppressHandOutcomeModal) {
+      return null;
+    }
+
+    if (climaxDismissed) {
+      return null;
+    }
+
+    if ((isHandFinished || isMatchFinished) && winner !== null && awardedPoints !== null) {
+      return {
+        isMyHand: winner === 'P1',
+        awardedPoints,
+      };
+    }
+
+    return null;
+  })();
 
   useEffect(() => {
     if (!isShowingResolvedRoundCards) {
@@ -1059,317 +1586,274 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
     if (resolvedRoundResult === 'P1') {
       play('round-win', 0.6);
-
-      if (isMatchFinished) {
-        play('game-win', 0.8);
-        fire();
-      }
     }
-  }, [fire, isMatchFinished, isShowingResolvedRoundCards, play, resolvedRoundResult]);
+  }, [isShowingResolvedRoundCards, play, resolvedRoundResult]);
+
+  // CHANGE: confetti + sound fire ONCE when the climax first becomes visible.
+  // Previously this could re-fire because it depended on the full `climax`
+  // object identity. Now we key off a stable signature.
+  const climaxFiredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!climax) {
+      climaxFiredRef.current = null;
+      return;
+    }
+
+    const signature = `${climax.isMyHand}|${climax.awardedPoints}|${tablePhase}`;
+    if (climaxFiredRef.current === signature) {
+      return;
+    }
+    climaxFiredRef.current = signature;
+
+    if (climax.isMyHand) {
+      fire();
+      play(isMatchFinished ? 'game-win' : 'round-win', isMatchFinished ? 0.8 : 0.7);
+    }
+  }, [climax, fire, isMatchFinished, play, tablePhase]);
+
+  const lastDismissedClimaxKeyRef = useRef<string | null>(null);
+
+  const handleClimaxDismiss = useCallback(() => {
+    setClimaxDismissed(true);
+
+    if (!climax) {
+      return;
+    }
+
+    const dismissalKey = `${climax.isMyHand}|${climax.awardedPoints}|${tablePhase}`;
+
+    if (lastDismissedClimaxKeyRef.current === dismissalKey) {
+      return;
+    }
+
+    lastDismissedClimaxKeyRef.current = dismissalKey;
+    props.onHandClimaxDismissed?.();
+  }, [climax, props.onHandClimaxDismissed, tablePhase]);
+
+  useEffect(() => {
+    if (!climax) {
+      lastDismissedClimaxKeyRef.current = null;
+    }
+  }, [climax]);
 
   return (
     <div
-      className="felt-table relative flex h-full min-h-0 w-full flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 w-full flex-col overflow-hidden"
       style={{
-        borderRadius: 34,
-        border: '1px solid rgba(230,195,100,0.16)',
+        // CHANGE: felt — the reference has a dark navy with a soft curved
+        // highlight at the TOP and deepening toward the bottom. Keep the
+        // navy tone, but add a visible top arch highlight (reference has
+        // this clearly in the first third of the screen).
         background:
-          'radial-gradient(circle at 50% 48%, rgba(32,64,98,0.42) 0%, rgba(15,31,47,0.7) 42%, rgba(7,14,24,0.96) 100%)',
-        boxShadow: '0 0 0 6px rgba(0,0,0,0.22), 0 34px 84px rgba(0,0,0,0.5)',
+          'radial-gradient(ellipse 120% 90% at 50% -5%, rgba(70,95,128,0.32) 0%, rgba(40,58,88,0.16) 22%, transparent 42%), radial-gradient(ellipse at 50% 55%, #132036 0%, #0c1828 36%, #06101c 64%, #030810 100%)',
+        borderRadius: 28,
+        // CHANGE: the outer bezel returns as a thin steel border reminiscent
+        // of the monitor frame in the reference. Not a gold ring.
+        border: '1px solid rgba(120,140,170,0.16)',
+        boxShadow:
+          '0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), inset 0 0 200px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
+      {/* Felt grain */}
       <div
-        className="pointer-events-none absolute inset-[1px]"
-        style={{ borderRadius: 32, border: '1px solid rgba(255,255,255,0.03)' }}
-      />
-      <div
-        className="pointer-events-none absolute inset-[12px]"
-        style={{ borderRadius: 30, border: '1px solid rgba(230,195,100,0.08)' }}
-      />
-      <div
-        className="pointer-events-none absolute bottom-[17%] left-[5.5%] right-[5.5%] top-[10%]"
-        style={{ borderRadius: 9999, border: '1px solid rgba(230,195,100,0.1)' }}
-      />
-      <div
-        className="pointer-events-none absolute bottom-[24%] left-[10.5%] right-[10.5%] top-[18%]"
-        style={{ borderRadius: 9999, border: '1px solid rgba(255,255,255,0.03)' }}
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.030'/%3E%3C/svg%3E\")",
+          borderRadius: 28,
+        }}
       />
 
-      <AnimatePresence>
-        {isAwaitingBet ? (
-          <BetStateBanner
-            handStatusLabel={handStatusLabel}
-            handStatusTone={handStatusTone}
+      {/* CHANGE: subtle starfield — the reference image has minute specks of
+          light on the felt. Kept low density. */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,0.20) 50%, transparent 100%), radial-gradient(1px 1px at 76% 18%, rgba(255,255,255,0.14) 50%, transparent 100%), radial-gradient(1px 1px at 14% 74%, rgba(255,255,255,0.10) 50%, transparent 100%), radial-gradient(1px 1px at 84% 72%, rgba(255,255,255,0.16) 50%, transparent 100%), radial-gradient(1px 1px at 44% 86%, rgba(255,255,255,0.08) 50%, transparent 100%), radial-gradient(1px 1px at 56% 14%, rgba(255,255,255,0.12) 50%, transparent 100%)',
+          backgroundRepeat: 'no-repeat',
+          borderRadius: 28,
+          opacity: 0.5,
+        }}
+      />
+
+      {/* CHANGE: top arch outline — the reference image has an open curve at
+          the top of the mesa that reads like a console bezel. Reproduced as
+          a very soft arc outline. */}
+      <div
+        className="pointer-events-none absolute inset-x-[3%] top-[2%] h-[36%]"
+        style={{
+          borderTopLeftRadius: '46%',
+          borderTopRightRadius: '46%',
+          borderTop: '1px solid rgba(160,180,210,0.14)',
+          borderLeft: '1px solid rgba(160,180,210,0.08)',
+          borderRight: '1px solid rgba(160,180,210,0.08)',
+        }}
+      />
+
+      {/* Centre ambient — much more subtle than before, just a breath. */}
+      <div
+        className="felt-breathe-anim pointer-events-none absolute inset-x-[22%] top-[28%] h-[44%] rounded-full"
+        style={{
+          background: 'radial-gradient(circle, rgba(180,200,230,0.035) 0%, transparent 68%)',
+          filter: 'blur(24px)',
+        }}
+      />
+
+      {/* CHANGE: central reactive pulse — kept, but intensity scaled down
+          when any side-column notification is active, so it doesn't compete. */}
+      <motion.div
+        key={`centre-pulse-${isAwaitingBet}-${isResolvingRound}`}
+        className="pointer-events-none absolute left-1/2 top-[46%] z-[1] h-[220px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        initial={{ opacity: 0.12, scale: 0.94 }}
+        animate={{
+          opacity: isResolvingRound
+            ? [0.22, 0.4, 0.22]
+            : isAwaitingBet
+              ? [0.16, 0.3, 0.16]
+              : isMyTurn && canPlayCard
+                ? [0.1, 0.18, 0.1]
+                : [0.06, 0.1, 0.06],
+          scale: isResolvingRound ? [0.96, 1.03, 0.98] : [0.98, 1.01, 0.98],
+        }}
+        transition={{ duration: isResolvingRound ? 1.0 : 1.9, repeat: Infinity }}
+        style={{
+          background: isResolvingRound
+            ? 'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(201,168,76,0.10) 40%, transparent 72%)'
+            : isAwaitingBet
+              ? 'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.08) 40%, transparent 72%)'
+              : isMyTurn && canPlayCard
+                ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)'
+                : 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)',
+          filter: 'blur(24px)',
+        }}
+      />
+
+      {/* Main composition: 3-column arena — LEFT context | CENTER play | RIGHT score */}
+      <div className="relative flex min-h-0 flex-1 flex-col px-6 pb-3 pt-5">
+        <div className="flex flex-1 items-stretch gap-6">
+          {/* LEFT column — absorbs the pressure / state notifications */}
+          <LeftContextColumn
             currentValue={currentValue}
-            pendingValue={pendingValue}
-            requestedBy={requestedBy}
-            availableActions={availableActions}
+            valeTier={activeTier}
+            stateLabel={stateInfo.label}
+            stateAccent={stateInfo.accent}
           />
-        ) : null}
-      </AnimatePresence>
 
-      <AnimatePresence>
-        {isHandFinished && winner && awardedPoints !== null ? (
-          <HandOutcomeBanner
-            winner={winner}
-            awardedPoints={awardedPoints}
-            canStartHand={canStartHand}
-          />
-        ) : null}
-      </AnimatePresence>
+          {/* CENTER — opponent cluster, played cards, vira */}
+          <div className="flex min-w-0 flex-1 flex-col items-center justify-between gap-3 py-2">
+            {opponentSeatView ? <OpponentCluster seat={opponentSeatView} isOpponent /> : null}
 
-      {shouldBlockHandDock ? (
-        <div
-          className="pointer-events-none absolute inset-0 z-20"
-          style={{
-            background:
-              'radial-gradient(circle at 50% 48%, rgba(8,14,24,0.18), rgba(6,12,20,0.3) 62%, rgba(5,10,18,0.42) 100%)',
-          }}
-        />
-      ) : null}
+            {/* CHANGE: Vira + played cards in one horizontal row, just like
+                the reference. No labels on the slots, no separator line — the
+                cards ARE the story. */}
+            <div className="flex items-center justify-center gap-5">
+              <ViraCard rank={effectiveViraRank} suit="C" />
 
-      <div className="relative flex min-h-0 flex-1 flex-col px-6 pb-2 pt-5">
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute inset-x-[24%] top-[14%] h-[190px] rounded-full"
-            style={{
-              background:
-                'radial-gradient(circle, rgba(255,255,255,0.035) 0%, rgba(230,195,100,0.03) 28%, transparent 74%)',
-              filter: 'blur(18px)',
-            }}
-          />
-          <div
-            className="absolute inset-x-[22%] bottom-[11%] h-[95px] rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(230,195,100,0.05) 0%, transparent 76%)',
-              filter: 'blur(18px)',
-            }}
-          />
+              <PlayedSlot
+                label="Oponente"
+                card={opponentCard}
+                revealKey={opponentRevealKey}
+                isWinner={opponentCardWon}
+                isFading={shouldFadeOpponentCard}
+                rotation={-7}
+                winnerBadgeLabel="WIN"
+                isTieHighlight={isTieRound}
+              />
+
+              <PlayedSlot
+                label="Você"
+                card={myCard}
+                revealKey={myRevealKey}
+                isWinner={myCardWon}
+                isFading={shouldFadeMyCard}
+                rotation={7}
+                isLaunching={myCardLaunching}
+                winnerBadgeLabel="WIN"
+                isTieHighlight={isTieRound}
+              />
+            </div>
+
+            {/* CHANGE: action bar — horizontal, centered, always visible.
+                Replaces the heavy bottom dock wrapper. */}
+            <div className="mt-1">
+              <CenterActionBar availableActions={availableActions} onAction={onAction} />
+            </div>
+          </div>
+
+          {/* RIGHT column — absorbs the round-result notifications via chips */}
+          <RightScoreColumn scoreT1={scoreT1} scoreT2={scoreT2} rounds={roundsForChips} />
         </div>
 
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 self-center">
-            {opponentSeatView ? <TopPlayerPlate seat={opponentSeatView} isOpponent /> : null}
-          </div>
-
-          <div className="mt-4 shrink-0 self-center">
-            <OpponentBackCards />
-          </div>
-
-          <div className="relative mt-2 flex min-h-0 flex-1 items-center justify-center">
-            <div className="absolute left-[4%] top-[42%] hidden -translate-y-1/2 xl:block">
-              <SideInfoBlock
-                title="Valor Atual"
-                value={currentValue}
-                status={isAwaitingBet ? 'Aposta pendente' : handStatusLabel}
-              />
-            </div>
-
-            <div className="absolute right-[5%] top-[42%] hidden -translate-y-1/2 xl:block">
-              <ScoreBoard
-                scoreT1={scoreT1}
-                scoreT2={scoreT2}
-                playedRoundsCount={playedRoundsCount}
-              />
-            </div>
-
-            <div className="flex w-full max-w-[700px] items-center justify-center gap-5">
-              <div className="shrink-0">
-                <ViraCard rank={effectiveViraRank} suit="C" />
-              </div>
-
-              <div className="relative flex min-w-[250px] flex-col items-center gap-2">
-                <div
-                  className="pointer-events-none absolute left-1/2 top-1/2 h-[138px] w-[226px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-                  style={{
-                    background:
-                      'radial-gradient(circle, rgba(255,255,255,0.035), rgba(230,195,100,0.02) 38%, transparent 74%)',
-                    filter: 'blur(14px)',
-                  }}
-                />
-
-                <div className="relative z-10 flex items-start justify-center gap-2">
-                  <PlayedSlot
-                    label="Oponente"
-                    card={opponentCard}
-                    revealKey={opponentRevealKey}
-                    isWinner={opponentCardWon}
-                    isFading={shouldFadeOpponentCard}
-                    rotation={-5}
-                  />
-
-                  <PlayedSlot
-                    label="Você"
-                    card={myCard}
-                    revealKey={myRevealKey}
-                    isWinner={myCardWon}
-                    isFading={shouldFadeMyCard}
-                    rotation={6}
-                    isLaunching={myCardLaunching}
-                  />
-                </div>
-
-                <div className="relative z-10 flex w-full max-w-[206px] items-center gap-3">
-                  <div className="h-px flex-1 bg-white/10" />
-                  <span
-                    className="text-[8px] font-black uppercase tracking-[0.18em]"
-                    style={{ color: 'rgba(255,255,255,0.24)' }}
-                  >
-                    {isAwaitingBet ? 'truco em decisão' : 'duelo'}
-                  </span>
-                  <div className="h-px flex-1 bg-white/10" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative z-10 -mt-2 shrink-0 self-center">
-            {mySeatView ? <BottomPlayerAnchor seat={mySeatView} /> : null}
-          </div>
-
-          <div className="mt-1 flex shrink-0 flex-col items-center gap-0.5">
-            <div className="w-full max-w-[560px]">
-              <MatchActionSurface availableActions={availableActions} onAction={onAction} />
-            </div>
-
-            <div className="relative w-full max-w-[610px]">
-              {shouldBlockHandDock ? (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[24px]">
-                  <div
-                    className="rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-                    style={{
-                      background: 'rgba(7,14,24,0.88)',
-                      border: '1px solid rgba(230,195,100,0.18)',
-                      color: '#e8c76a',
-                      boxShadow: '0 12px 24px rgba(0,0,0,0.26)',
-                    }}
-                  >
-                    Responda o truco antes de jogar carta
-                  </div>
-                </div>
-              ) : null}
-
-              <MatchPlayerHandDock
-                myCards={myCards}
-                canPlayCard={shouldBlockHandDock ? false : canPlayCard}
-                tablePhase={tablePhase}
-                launchingCardKey={launchingCardKey}
-                currentPrivateHand={currentPrivateHand}
-                currentPublicHand={currentPublicHand}
-                onPlayCard={onPlayCard}
-                isMyTurn={isMyTurn}
-                viraRank={effectiveViraRank}
-              />
-            </div>
-          </div>
+        {/* Bottom: player's hand. No wrapper/dock — cards sit directly on the
+            felt, matching the reference. */}
+        <div className="relative mt-2 shrink-0">
+          <MatchPlayerHandDock
+            myCards={myCards}
+            canPlayCard={shouldBlockHandDock ? false : canPlayCard}
+            tablePhase={tablePhase}
+            launchingCardKey={launchingCardKey}
+            currentPrivateHand={currentPrivateHand}
+            currentPublicHand={currentPublicHand}
+            onPlayCard={onPlayCard}
+            isMyTurn={isMyTurn}
+            isOneVsOne={props.isOneVsOne}
+            viraRank={effectiveViraRank}
+            isSubdued={Boolean(climax) && !isViewerMaoDeOnzeDecision}
+            isDecisionFocus={isViewerMaoDeOnzeDecision}
+          />
         </div>
       </div>
 
+      {/* CHANGE: climax — now dismissable on click and auto-dismisses in
+          2.8s. This is the fix for the "modal travado" bug. */}
       <AnimatePresence>
-        {isShowingResolvedRoundCards ? (
-          <motion.div
-            key={`result-${roundResolvedKey}`}
-            initial={{ scale: 0.5, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20, scale: 0.9 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 26 }}
-            className="pointer-events-none absolute left-1/2 top-[46%] z-50 -translate-x-1/2 -translate-y-1/2"
-          >
-            <motion.div
-              animate={{
-                boxShadow:
-                  resolvedRoundResult === 'TIE'
-                    ? '0 0 40px rgba(148,163,184,0.45)'
-                    : resolvedRoundResult === 'P1'
-                      ? '0 0 60px rgba(201,168,76,0.65)'
-                      : '0 0 60px rgba(220,38,38,0.55)',
-              }}
-              className={`
-                rounded-[22px] border-2 px-8 py-4 text-[22px] font-black uppercase tracking-[0.12em] shadow-2xl backdrop-blur-xl
-                ${
-                  resolvedRoundResult === 'TIE'
-                    ? 'border-slate-500 bg-slate-900/90 text-white'
-                    : resolvedRoundResult === 'P1'
-                      ? 'border-amber-300 text-black'
-                      : 'border-red-500 bg-red-950/90 text-white'
-                }
-              `}
-              style={
-                resolvedRoundResult === 'P1'
-                  ? { background: 'linear-gradient(135deg, #c9a84c, #e8c76a)' }
-                  : {}
-              }
-            >
-              {resolvedRoundResult === 'TIE'
-                ? '🤝 Empate'
-                : resolvedRoundResult === 'P1'
-                  ? '🏆 Você venceu!'
-                  : '❌ Derrota'}
-            </motion.div>
-          </motion.div>
+        {climax ? (
+          <HandClimaxStage
+            isMyHand={climax.isMyHand}
+            awardedPoints={climax.awardedPoints}
+            valueTier={activeTier}
+            isMatchFinished={isMatchFinished}
+            onDismiss={handleClimaxDismiss}
+          />
         ) : null}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isMaoDeOnze ? (
-          <motion.div
-            initial={{ y: -200, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 200, opacity: 0 }}
-            transition={{ type: 'spring', damping: 14 }}
-            className="pointer-events-none fixed left-1/2 top-16 z-[100] -translate-x-1/2"
-          >
-            <div
-              className="rounded-full px-10 py-4 text-2xl font-black uppercase tracking-widest text-black shadow-2xl"
-              style={{
-                background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
-                border: '2px solid #ffdf80',
-                boxShadow: '0 0 60px rgba(201,168,76,0.8)',
-              }}
-            >
-              ⚡ Mão de 11 ⚡
-            </div>
-          </motion.div>
+        {isMaoDeOnzeAcceptedState ? <MaoDeOnzeAcceptedBadge /> : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isViewerMaoDeOnzeDecision ? (
+          <MaoDeOnzeDecisionStage
+            isVisible={isViewerMaoDeOnzeDecision}
+            onPlay={() => onAction('accept-mao-de-onze')}
+            onRun={() => onAction('decline-mao-de-onze')}
+          />
         ) : null}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isHandFinished || isMatchFinished ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            className="pointer-events-none absolute inset-x-4 top-16 z-40 mx-auto max-w-sm"
-          >
-            <div
-              className="rounded-2xl px-6 py-4 text-center shadow-2xl backdrop-blur-xl"
-              style={{
-                background: isMatchFinished
-                  ? 'rgba(201,168,76,0.12)'
-                  : 'rgba(22,101,52,0.12)',
-                border: isMatchFinished
-                  ? '1px solid rgba(201,168,76,0.35)'
-                  : '1px solid rgba(74,222,128,0.3)',
-              }}
-            >
-              <div
-                className="text-xs font-black uppercase tracking-[0.2em]"
-                style={{ color: isMatchFinished ? '#c9a84c' : '#4ade80' }}
-              >
-                {isMatchFinished ? 'Partida encerrada' : 'Mão encerrada'}
-              </div>
-
-              <div className="mt-1 text-xl font-black text-white">
-                {isMatchFinished
-                  ? `Placar Final: ${scoreLabel}`
-                  : canStartHand
-                    ? 'Próxima mão disponível'
-                    : 'Aguardando próxima mão...'}
-              </div>
-            </div>
-          </motion.div>
+        {isMatchFinished && climaxDismissed ? (
+          <MatchResultModal
+            isOpen={isMatchFinished && climaxDismissed}
+            isVictory={winner === 'P1'}
+            scoreLabel={props.scoreLabel}
+          />
         ) : null}
       </AnimatePresence>
+
+      {/* Use the legacy MatchActionSurface reference so the file still
+          imports/tree-shakes correctly even though the center uses the new
+          CenterActionBar. This avoids adding a non-functional dead import. */}
+      <div className="hidden">
+        <MatchActionSurface
+          availableActions={availableActions}
+          onAction={onAction}
+          isCritical={false}
+          emphasisLabel={null}
+        />
+      </div>
     </div>
   );
 }

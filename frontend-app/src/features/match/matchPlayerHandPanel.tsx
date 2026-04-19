@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-
 import { getSuitDisplay, isSuitRed } from '../../services/socket/socketTypes';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 
@@ -13,6 +12,7 @@ type MatchPlayerHandPanelProps = {
   onPlayCard: (card: CardPayload) => void;
   isMyTurn?: boolean;
   viraRank?: Rank;
+  isDecisionFocus?: boolean;
 };
 
 type FanMetrics = {
@@ -23,12 +23,6 @@ type FanMetrics = {
 
 const RANK_ORDER: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
 
-/*
- * NOTE:
- * Truco Paulista manilha is the next rank after the vira.
- * Suit strength for manilhas follows the classic Paulista order:
- * clubs < hearts < spades < diamonds.
- */
 const SUIT_STRENGTH = {
   C: 0,
   P: 1,
@@ -38,22 +32,18 @@ const SUIT_STRENGTH = {
 
 function getManilhaRank(viraRank: Rank): Rank {
   const viraIndex = RANK_ORDER.indexOf(viraRank);
-
   if (viraIndex === -1) {
     return '5';
   }
-
   return RANK_ORDER[(viraIndex + 1) % RANK_ORDER.length]!;
 }
 
 function getCardStrength(card: CardPayload, viraRank: Rank): number {
   const manilhaRank = getManilhaRank(viraRank);
   const rankIndex = RANK_ORDER.indexOf(card.rank);
-
   if (card.rank === manilhaRank) {
     return 100 + SUIT_STRENGTH[card.suit as keyof typeof SUIT_STRENGTH];
   }
-
   return rankIndex;
 }
 
@@ -61,13 +51,11 @@ function getFanMetrics(cardCount: number, index: number): FanMetrics {
   if (cardCount <= 1) {
     return { rotate: 0, x: 0, y: 0 };
   }
-
   const midpoint = (cardCount - 1) / 2;
   const offsetFromCenter = index - midpoint;
   const maxSpread = cardCount <= 3 ? 16 : 20;
   const horizontalStep = cardCount <= 3 ? 36 : 32;
   const verticalDepth = cardCount <= 3 ? 6 : 9;
-
   return {
     rotate: offsetFromCenter * maxSpread * 0.24,
     x: offsetFromCenter * horizontalStep,
@@ -78,16 +66,13 @@ function getFanMetrics(cardCount: number, index: number): FanMetrics {
 function getBestCardIndex(myCards: CardPayload[], viraRank: Rank): number {
   let bestCardIndex = -1;
   let bestStrength = -Infinity;
-
   myCards.forEach((card, index) => {
     const strength = getCardStrength(card, viraRank);
-
     if (strength > bestStrength) {
       bestStrength = strength;
       bestCardIndex = index;
     }
   });
-
   return bestCardIndex;
 }
 
@@ -98,10 +83,13 @@ export function MatchPlayerHandPanel({
   launchingCardKey,
   onPlayCard,
   viraRank = '4',
+  isDecisionFocus = false,
 }: MatchPlayerHandPanelProps) {
   const cardCount = myCards.length;
   const bestCardIndex = getBestCardIndex(myCards, viraRank);
   const hasPlayableHand = cardCount > 0 && canPlayCard && tablePhase === 'playing';
+  const hasDecisionFocusHand = cardCount > 0 && isDecisionFocus;
+  const canInspectCards = canPlayCard || isDecisionFocus;
 
   if (cardCount === 0 && tablePhase === 'waiting') {
     return (
@@ -141,29 +129,31 @@ export function MatchPlayerHandPanel({
           filter: 'blur(10px)',
         }}
       />
-
+      
       {/* NOTE: This ambient glow helps the hand feel premium without making the panel larger. */}
       <div
         className="pointer-events-none absolute inset-x-10 bottom-1 h-10 rounded-[999px] transition-opacity duration-300"
         style={{
-          opacity: hasPlayableHand ? 1 : 0.22,
+          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.22,
           background:
             'radial-gradient(circle at center, rgba(201,168,76,0.1), rgba(201,168,76,0) 68%)',
           filter: 'blur(12px)',
         }}
       />
-
+      
       <div
         className="pointer-events-none absolute inset-x-[24%] bottom-3 h-14 rounded-[999px]"
         style={{
-          opacity: hasPlayableHand ? 1 : 0.35,
-          background: hasPlayableHand
-            ? 'radial-gradient(circle, rgba(255,235,170,0.16) 0%, rgba(201,168,76,0.08) 34%, transparent 74%)'
-            : 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 74%)',
+          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.35,
+          background: hasDecisionFocusHand
+            ? 'radial-gradient(circle, rgba(255,235,170,0.22) 0%, rgba(201,168,76,0.14) 38%, transparent 78%)'
+            : hasPlayableHand
+              ? 'radial-gradient(circle, rgba(255,235,170,0.16) 0%, rgba(201,168,76,0.08) 34%, transparent 74%)'
+              : 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 74%)',
           filter: 'blur(14px)',
         }}
       />
-
+      
       {/* NOTE: Card size stays the same. The improvement is in presentation, not scale. */}
       <div className="relative flex h-[118px] w-full items-end justify-center overflow-visible">
         {myCards.map((card, index) => {
@@ -175,7 +165,8 @@ export function MatchPlayerHandPanel({
           const fan = getFanMetrics(cardCount, index);
           const isBestCard = index === bestCardIndex && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
-
+          const isDecisionHeroCard = isDecisionFocus && centerDistance <= 0.5;
+          
           return (
             <motion.button
               key={cardKey}
@@ -195,7 +186,13 @@ export function MatchPlayerHandPanel({
                 y: isLaunching ? -180 : fan.y,
                 x: isLaunching ? fan.x + 82 : fan.x,
                 rotate: isLaunching ? fan.rotate - 7 : fan.rotate,
-                scale: isLaunching ? 0.8 : isBestCard ? 1.02 : 1,
+                scale: isLaunching
+                  ? 0.8
+                  : isDecisionHeroCard
+                    ? 1.04
+                    : isBestCard
+                      ? 1.02
+                      : 1,
               }}
               transition={{
                 type: 'spring',
@@ -204,11 +201,11 @@ export function MatchPlayerHandPanel({
                 delay: isLaunching ? 0 : index * 0.025,
               }}
               whileHover={
-                canPlayCard && !isLaunching
+                canInspectCards && !isLaunching
                   ? {
-                      y: fan.y - 28,
+                      y: fan.y - (isDecisionFocus ? 34 : 28),
                       rotate: fan.rotate * 0.12,
-                      scale: isBestCard ? 1.075 : 1.06,
+                      scale: isDecisionHeroCard ? 1.09 : isBestCard ? 1.075 : 1.06,
                       zIndex: 140,
                     }
                   : {}
@@ -228,27 +225,33 @@ export function MatchPlayerHandPanel({
                 className="pointer-events-none absolute inset-0 rounded-[16px]"
                 style={{
                   transform: 'scale(1.08)',
-                  background: isBestCard
-                    ? 'radial-gradient(circle, rgba(255,228,140,0.26) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
-                    : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 76%)',
+                  background: isDecisionHeroCard
+                    ? 'radial-gradient(circle, rgba(255,228,140,0.34) 0%, rgba(201,168,76,0.18) 36%, transparent 76%)'
+                    : isBestCard
+                      ? 'radial-gradient(circle, rgba(255,228,140,0.26) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
+                      : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 76%)',
                   filter: 'blur(12px)',
                   opacity: isLaunching ? 0 : 1,
                 }}
               />
-
+              
               <div
-                className="relative flex flex-col justify-between overflow-hidden"
+                className="relative flex flex-col justify-between overflow-hidden playing-card"
                 style={{
                   width: 84,
                   height: 118,
                   borderRadius: 14,
                   background: 'linear-gradient(145deg, #fffefb 0%, #faf6ee 52%, #f2ead6 100%)',
-                  boxShadow: isBestCard
-                    ? '0 0 22px rgba(201,168,76,0.3), 0 12px 26px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.98)'
-                    : '0 8px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.92)',
-                  border: isBestCard
-                    ? '2px solid rgba(201,168,76,0.46)'
-                    : '1px solid rgba(0,0,0,0.1)',
+                  boxShadow: isDecisionHeroCard
+                    ? '0 0 28px rgba(201,168,76,0.36), 0 14px 30px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.98)'
+                    : isBestCard
+                      ? '0 0 22px rgba(201,168,76,0.3), 0 12px 26px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.98)'
+                      : '0 8px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.92)',
+                  border: isDecisionHeroCard
+                    ? '2px solid rgba(255,223,128,0.62)'
+                    : isBestCard
+                      ? '2px solid rgba(201,168,76,0.46)'
+                      : '1px solid rgba(0,0,0,0.1)',
                   padding: '7px 7px',
                 }}
               >
@@ -263,7 +266,6 @@ export function MatchPlayerHandPanel({
                     pointerEvents: 'none',
                   }}
                 />
-
                 <div
                   style={{
                     position: 'absolute',
@@ -275,7 +277,7 @@ export function MatchPlayerHandPanel({
                     pointerEvents: 'none',
                   }}
                 />
-
+                
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <div
                     style={{
@@ -293,7 +295,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </div>
                 </div>
-
+                
                 <div
                   style={{
                     position: 'absolute',
@@ -320,7 +322,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </span>
                 </div>
-
+                
                 <div
                   style={{
                     position: 'relative',
@@ -345,7 +347,7 @@ export function MatchPlayerHandPanel({
                     {suitData.symbol}
                   </div>
                 </div>
-
+                
                 {/* NOTE: Keep the sheen elegant and internal, without external tags or tabs. */}
                 <div
                   className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 hover:opacity-100"

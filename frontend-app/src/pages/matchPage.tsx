@@ -21,14 +21,13 @@ import type {
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
-const VIRA_RANK_OPTIONS: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
-
-const HAND_INTRO_HOLD_MS = 650;
-const HAND_RESULT_HOLD_MS = 900;
-const NEXT_HAND_COMMIT_MS = 220;
-const BET_FEEDBACK_HOLD_MS = 1800;
-const BET_FEEDBACK_MIN_REQUESTED_MS = 1200;
-const REALTIME_RESOLUTION_GRACE_MS = 400;
+const HAND_INTRO_HOLD_MS = 720;
+const HAND_RESULT_HOLD_MS = 760;
+const NEXT_HAND_COMMIT_MS = 180;
+const BET_FEEDBACK_HOLD_MS = 1500;
+const BET_FEEDBACK_MIN_REQUESTED_MS = 950;
+const REALTIME_RESOLUTION_GRACE_MS = 550;
+const AUTO_NEXT_HAND_DELAY_MS = 3000;
 
 type TableSeatView = {
   seatId: string;
@@ -40,7 +39,7 @@ type TableSeatView = {
 
 type MatchStatusTone = 'neutral' | 'success' | 'warning';
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
-type VisualBeat = 'idle' | 'hand_intro' | 'hand_result_hold' | 'live';
+type VisualBeat = 'idle' | 'hand_intro' | 'hand_result_hold' | 'hand_reset' | 'live';
 
 type BetFeedbackTone = 'neutral' | 'success' | 'warning';
 type BetFeedbackKind = 'requested' | 'accepted' | 'declined';
@@ -177,6 +176,18 @@ function TrucoDebugBadge({ publicMatchState, privateMatchState }: TrucoDebugBadg
   );
 }
 
+function shouldShowTrucoDebugBadge(): boolean {
+  if (!import.meta.env.DEV) {
+    return false;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return new URLSearchParams(window.location.search).get('debugTruco') === '1';
+}
+
 function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   if (!feedback) {
     return null;
@@ -185,36 +196,50 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   const toneClasses =
     feedback.tone === 'success'
       ? {
-          border: 'border-emerald-400/35',
-          chip: 'text-emerald-300',
-          bg: 'linear-gradient(180deg, rgba(6, 40, 28, 0.96), rgba(6, 20, 16, 0.92))',
+          chip: 'rgba(134, 239, 172, 0.9)',
+          border: '1px solid rgba(74,222,128,0.20)',
+          background:
+            'linear-gradient(180deg, rgba(5, 40, 26, 0.97), rgba(5, 18, 14, 0.94) 100%)',
+          glow: '0 0 28px rgba(34,197,94,0.12), 0 22px 52px rgba(0,0,0,0.42)',
         }
       : feedback.tone === 'warning'
         ? {
-            border: 'border-amber-400/35',
-            chip: 'text-amber-300',
-            bg: 'linear-gradient(180deg, rgba(54, 36, 5, 0.96), rgba(18, 14, 8, 0.92))',
+            chip: 'rgba(253, 224, 71, 0.92)',
+            border: '1px solid rgba(245,158,11,0.24)',
+            background:
+              'linear-gradient(180deg, rgba(64, 28, 6, 0.97), rgba(26, 12, 8, 0.94) 100%)',
+            glow: '0 0 28px rgba(245,158,11,0.12), 0 22px 52px rgba(0,0,0,0.42)',
           }
         : {
-            border: 'border-sky-400/35',
-            chip: 'text-sky-300',
-            bg: 'linear-gradient(180deg, rgba(8, 28, 48, 0.96), rgba(8, 14, 24, 0.92))',
+            chip: 'rgba(147, 197, 253, 0.92)',
+            border: '1px solid rgba(96,165,250,0.22)',
+            background:
+              'linear-gradient(180deg, rgba(6, 23, 44, 0.97), rgba(5, 12, 24, 0.94) 100%)',
+            glow: '0 0 28px rgba(59,130,246,0.10), 0 22px 52px rgba(0,0,0,0.42)',
           };
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-4 z-50 -translate-x-1/2 px-3">
+    <div className="pointer-events-none absolute left-1/2 top-[23%] z-[70] w-full max-w-[560px] -translate-x-1/2 px-4">
       <div
-        className={`min-w-[320px] max-w-[520px] rounded-2xl ${toneClasses.border} px-5 py-3 backdrop-blur-xl`}
+        className="rounded-[26px] px-6 py-4 text-center backdrop-blur-xl"
         style={{
-          background: toneClasses.bg,
-          boxShadow: '0 18px 50px rgba(0,0,0,0.44)',
+          background: toneClasses.background,
+          border: toneClasses.border,
+          boxShadow: toneClasses.glow,
         }}
       >
-        <div className={`text-[10px] font-black uppercase tracking-[0.24em] ${toneClasses.chip}`}>
+        <div
+          className="text-[10px] font-black uppercase tracking-[0.28em]"
+          style={{ color: toneClasses.chip }}
+        >
           Truco
         </div>
-        <div className="mt-1 text-base font-black text-white">{feedback.title}</div>
-        <div className="mt-1 text-sm text-slate-200">{feedback.detail}</div>
+        <div className="mt-2 text-[18px] font-black uppercase tracking-[0.08em] text-white">
+          {feedback.title}
+        </div>
+        <div className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-200">
+          {feedback.detail}
+        </div>
       </div>
     </div>
   );
@@ -230,8 +255,11 @@ export function MatchPage() {
   const [showSecondary, setShowSecondary] = useState(false);
   const [visualBeat, setVisualBeat] = useState<VisualBeat>('idle');
   const [betFeedback, setBetFeedback] = useState<BetFeedbackState | null>(null);
+  const [isAutoNextHandArmed, setIsAutoNextHandArmed] = useState(false);
   const { play } = useGameSound();
   const [cachedMyCards, setCachedMyCards] = useState<CardPayload[]>([]);
+  const lastHydratedHandKeyRef = useRef<string | null>(null);
+  const shouldRenderTrucoDebugBadge = shouldShowTrucoDebugBadge();
   const beginHandTransitionRef = useRef<() => void>(() => {});
   const registerIncomingPlayedCardRef = useRef<
     (params: { owner: 'mine' | 'opponent' | null; card: string | null }) => void
@@ -248,6 +276,13 @@ export function MatchPage() {
   const lastHandStartedAtRef = useRef<number | null>(null);
   const handIntroTimeoutRef = useRef<number | null>(null);
   const deferredNextHandTimeoutRef = useRef<number | null>(null);
+  const autoNextHandTimeoutRef = useRef<number | null>(null);
+  const lastAutoNextHandKeyRef = useRef<string | null>(null);
+  const pendingAutoNextHandKeyRef = useRef<string | null>(null);
+  const lastAutoNextHandWaitLogKeyRef = useRef<string | null>(null);
+  const latestCanStartHandRef = useRef(false);
+  const latestIsStartHandPendingRef = useRef(false);
+  const latestResolvedMatchIdRef = useRef('');
   const startHandPendingTimeoutRef = useRef<number | null>(null);
   const betFeedbackTimeoutRef = useRef<number | null>(null);
   const pendingRealtimeResolutionRef = useRef<PendingRealtimeResolution | null>(null);
@@ -375,21 +410,30 @@ export function MatchPage() {
     [],
   );
 
-  const handleRealtimeHandStarted = useCallback(
-    (payload: { matchId?: string; viraRank?: Rank | null }) => {
-      if (payload.viraRank) {
-        setViraRank(payload.viraRank);
-      }
+  const handleRealtimeHandStarted = useCallback((payload: {
+    matchId?: string;
+    viraRank?: Rank | null;
+  }) => {
+    if (payload.viraRank) {
+      setViraRank(payload.viraRank);
+    }
 
-      lastHandStartedAtRef.current = Date.now();
-      startHandLockRef.current = true;
-      setIsStartHandPending(false);
-      setVisualBeat('hand_intro');
-      bufferedCardsDuringIntroRef.current = [];
-      pendingBetCycleRef.current = null;
-    },
-    [],
-  );
+    if (autoNextHandTimeoutRef.current !== null) {
+      window.clearTimeout(autoNextHandTimeoutRef.current);
+      autoNextHandTimeoutRef.current = null;
+    }
+
+    pendingAutoNextHandKeyRef.current = null;
+    lastAutoNextHandKeyRef.current = null;
+    lastAutoNextHandWaitLogKeyRef.current = null;
+    lastHandStartedAtRef.current = Date.now();
+    startHandLockRef.current = true;
+    setIsStartHandPending(false);
+    setIsAutoNextHandArmed(false);
+    setVisualBeat('hand_intro');
+    bufferedCardsDuringIntroRef.current = [];
+    pendingBetCycleRef.current = null;
+  }, []);
 
   const handleRealtimeCardPlayed = useCallback(
     (payload: { matchId?: string; playerId?: string | null; card?: string | null }) => {
@@ -504,8 +548,8 @@ export function MatchPage() {
 
       const authoritativeHandInProgress = Boolean(
         publicMatchState?.state === 'in_progress' &&
-        publicMatchState.currentHand &&
-        !publicMatchState.currentHand.finished,
+          publicMatchState.currentHand &&
+          !publicMatchState.currentHand.finished,
       );
 
       if (!authoritativeHandInProgress) {
@@ -670,6 +714,10 @@ export function MatchPage() {
         window.clearTimeout(startHandPendingTimeoutRef.current);
       }
 
+      if (autoNextHandTimeoutRef.current !== null) {
+        window.clearTimeout(autoNextHandTimeoutRef.current);
+      }
+
       if (pendingRealtimeResolutionTimeoutRef.current !== null) {
         window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
       }
@@ -682,6 +730,8 @@ export function MatchPage() {
       bufferedCardsDuringIntroRef.current = [];
       betFeedbackQueueRef.current = [];
       pendingBetCycleRef.current = null;
+      lastAutoNextHandKeyRef.current = null;
+      lastAutoNextHandWaitLogKeyRef.current = null;
     };
   }, []);
 
@@ -763,13 +813,13 @@ export function MatchPage() {
     const isMyTurn = Boolean(mySeat && visualRoomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-      !handFinished &&
-      nextDecisionType === 'play-card' &&
-      viewerCanActNow &&
-      isMyTurn &&
-      resolvedAvailableActions.canAttemptPlayCard &&
-      myCards.length > 0 &&
-      !pendingBotAction,
+        !handFinished &&
+        nextDecisionType === 'play-card' &&
+        viewerCanActNow &&
+        isMyTurn &&
+        resolvedAvailableActions.canAttemptPlayCard &&
+        myCards.length > 0 &&
+        !pendingBotAction,
     );
 
     const contractPresentation = buildMatchContractPresentation({
@@ -832,6 +882,12 @@ export function MatchPage() {
     visualRoomState,
   ]);
 
+  useEffect(() => {
+    latestCanStartHandRef.current = viewModel.canStartHand;
+    latestIsStartHandPendingRef.current = isStartHandPending;
+    latestResolvedMatchIdRef.current = viewModel.resolvedMatchId;
+  }, [isStartHandPending, viewModel.canStartHand, viewModel.resolvedMatchId]);
+
   const liveTableTransition = useMatchTableTransition({
     tablePhase: viewModel.tablePhase,
     myPlayedCard: viewModel.myPlayedCard,
@@ -864,10 +920,30 @@ export function MatchPage() {
   }, [viewModel.currentPrivateHand?.viraRank, viewModel.currentPublicHand?.viraRank]);
 
   useEffect(() => {
-    if (viewModel.myCards.length > 0 && !viewModel.handFinished) {
-      setCachedMyCards(viewModel.myCards);
+    const privateHand = viewModel.currentPrivateHand;
+
+    if (!privateHand || privateHand.finished) {
+      return;
     }
-  }, [viewModel.handFinished, viewModel.myCards]);
+
+    const nextHandKey = [
+      viewModel.resolvedMatchId,
+      privateHand.viraRank,
+      privateHand.rounds.length,
+      privateHand.currentValue,
+      privateHand.betState,
+    ].join('|');
+
+    if (viewModel.myCards.length > 0) {
+      lastHydratedHandKeyRef.current = nextHandKey;
+      setCachedMyCards(viewModel.myCards);
+      return;
+    }
+
+    if (lastHydratedHandKeyRef.current === nextHandKey) {
+      return;
+    }
+  }, [viewModel.currentPrivateHand, viewModel.myCards, viewModel.resolvedMatchId]);
 
   useEffect(() => {
     const publicHand = visualPublicMatchState?.currentHand ?? null;
@@ -984,7 +1060,7 @@ export function MatchPage() {
 
         enqueueBetFeedback({
           kind: 'requested',
-          title: 'Truco pedido',
+          title: 'TRUCO!',
           detail,
           tone: 'neutral',
         });
@@ -1007,8 +1083,10 @@ export function MatchPage() {
     const acceptedValue = effectiveHand.currentValue >= pendingCycle.pendingValue;
 
     if (!effectiveHand.finished && acceptedValue) {
-      const title = requesterIsMine ? `${responderLabel} aceitou o truco` : 'Truco aceito';
-      const detail = `A mão agora vale ${effectiveHand.currentValue} pontos.`;
+      const title = requesterIsMine ? `${responderLabel.toUpperCase()} ACEITOU` : 'ACEITO';
+      const detail = `Agora vale ${effectiveHand.currentValue} ponto${
+        effectiveHand.currentValue === 1 ? '' : 's'
+      }.`;
 
       appendLog(
         [
@@ -1035,12 +1113,16 @@ export function MatchPage() {
     }
 
     if (effectiveHand.finished && effectiveHand.awardedPoints === pendingCycle.previousValue) {
-      const title = requesterIsMine ? `${responderLabel} correu` : 'Você correu';
+      const title = requesterIsMine
+        ? opponentIsBot
+          ? 'BOT FUGIU'
+          : 'ADVERSÁRIO CORREU'
+        : 'VOCÊ CORREU';
       const detail = requesterIsMine
-        ? `Você venceu a mão por ${effectiveHand.awardedPoints} ponto${
+        ? `Mão sua · +${effectiveHand.awardedPoints} ponto${
             effectiveHand.awardedPoints === 1 ? '' : 's'
           }.`
-        : `A mão foi encerrada e o adversário levou ${effectiveHand.awardedPoints} ponto${
+        : `Mão deles · +${effectiveHand.awardedPoints} ponto${
             effectiveHand.awardedPoints === 1 ? '' : 's'
           }.`;
 
@@ -1075,6 +1157,9 @@ export function MatchPage() {
     viewModel.opponentSeatView,
   ]);
 
+  const suppressHandOutcomeModal =
+    betFeedback?.kind === 'requested' || betFeedback?.kind === 'declined';
+
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
     useMatchActionBridge({
       resolvedMatchId: viewModel.resolvedMatchId,
@@ -1082,7 +1167,6 @@ export function MatchPage() {
       canStartHand: viewModel.canStartHand,
       canPlayCard: viewModel.canPlayCard,
       availableActions: viewModel.availableActions,
-      viraRank,
       appendLog,
       emitGetState,
       emitStartHand,
@@ -1098,6 +1182,143 @@ export function MatchPage() {
       beginHandTransition: liveTableTransition.beginHandTransition,
       beginOwnCardLaunch: liveTableTransition.beginOwnCardLaunch,
     });
+
+  const handleStartHandWithGate = useCallback(() => {
+    if (startHandLockRef.current || isStartHandPending || !viewModel.canStartHand) {
+      appendLog('Ignored start-hand because a start request is already locked.');
+      return;
+    }
+
+    startHandLockRef.current = true;
+    setIsStartHandPending(true);
+    setIsAutoNextHandArmed(false);
+
+    if (autoNextHandTimeoutRef.current !== null) {
+      window.clearTimeout(autoNextHandTimeoutRef.current);
+      autoNextHandTimeoutRef.current = null;
+    }
+
+    pendingAutoNextHandKeyRef.current = null;
+    lastAutoNextHandKeyRef.current = null;
+    lastAutoNextHandWaitLogKeyRef.current = null;
+
+    if (startHandPendingTimeoutRef.current !== null) {
+      window.clearTimeout(startHandPendingTimeoutRef.current);
+    }
+
+    startHandPendingTimeoutRef.current = window.setTimeout(() => {
+      setIsStartHandPending(false);
+      startHandPendingTimeoutRef.current = null;
+    }, HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200);
+
+    handleStartHand();
+  }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand]);
+
+  const tryDispatchAutomaticNextHand = useCallback(() => {
+    const pendingKey = pendingAutoNextHandKeyRef.current;
+
+    if (!pendingKey) {
+      return;
+    }
+
+    if (!latestResolvedMatchIdRef.current) {
+      const waitKey = `${pendingKey}|missing-match-id`;
+
+      if (lastAutoNextHandWaitLogKeyRef.current !== waitKey) {
+        lastAutoNextHandWaitLogKeyRef.current = waitKey;
+        appendLog('Automatic next hand is armed, but matchId is unavailable yet.');
+      }
+
+      return;
+    }
+
+    if (latestIsStartHandPendingRef.current) {
+      return;
+    }
+
+    if (!latestCanStartHandRef.current) {
+      const waitKey = `${pendingKey}|waiting-readiness`;
+
+      if (lastAutoNextHandWaitLogKeyRef.current !== waitKey) {
+        lastAutoNextHandWaitLogKeyRef.current = waitKey;
+        appendLog('Automatic next hand is armed, waiting for authoritative readiness.');
+      }
+
+      return;
+    }
+
+    lastAutoNextHandWaitLogKeyRef.current = null;
+    appendLog('Automatic next hand dispatching start-hand.');
+    pendingAutoNextHandKeyRef.current = null;
+    handleStartHandWithGate();
+  }, [appendLog, handleStartHandWithGate]);
+
+  useEffect(() => {
+    if (!pendingAutoNextHandKeyRef.current) {
+      return;
+    }
+
+    tryDispatchAutomaticNextHand();
+  }, [
+    tryDispatchAutomaticNextHand,
+    viewModel.canStartHand,
+    isStartHandPending,
+    viewModel.resolvedMatchId,
+  ]);
+
+  useEffect(() => {
+    const currentHand = viewModel.currentPublicHand ?? viewModel.currentPrivateHand;
+
+    if (betFeedback?.kind !== 'declined' || viewModel.matchFinished || !currentHand?.finished) {
+      return;
+    }
+
+    const autoStartKey = [
+      viewModel.resolvedMatchId,
+      currentHand.viraRank,
+      currentHand.winner ?? 'tie',
+      currentHand.awardedPoints ?? 'null',
+      viewModel.playedRoundsCount,
+      visualPublicMatchState?.score.playerOne ?? 0,
+      visualPublicMatchState?.score.playerTwo ?? 0,
+      'declined',
+    ].join('|');
+
+    if (lastAutoNextHandKeyRef.current === autoStartKey) {
+      return;
+    }
+
+    lastAutoNextHandKeyRef.current = autoStartKey;
+    pendingAutoNextHandKeyRef.current = null;
+    lastAutoNextHandWaitLogKeyRef.current = null;
+    setIsAutoNextHandArmed(true);
+    setVisualBeat('hand_reset');
+    beginHandTransitionRef.current();
+
+    if (autoNextHandTimeoutRef.current !== null) {
+      window.clearTimeout(autoNextHandTimeoutRef.current);
+    }
+
+    appendLog('Bet declined. Arming automatic next hand.');
+
+    autoNextHandTimeoutRef.current = window.setTimeout(() => {
+      autoNextHandTimeoutRef.current = null;
+      pendingAutoNextHandKeyRef.current = autoStartKey;
+      lastAutoNextHandWaitLogKeyRef.current = null;
+      tryDispatchAutomaticNextHand();
+    }, AUTO_NEXT_HAND_DELAY_MS);
+  }, [
+    appendLog,
+    betFeedback?.kind,
+    tryDispatchAutomaticNextHand,
+    viewModel.currentPrivateHand,
+    viewModel.currentPublicHand,
+    viewModel.matchFinished,
+    viewModel.playedRoundsCount,
+    viewModel.resolvedMatchId,
+    visualPublicMatchState?.score.playerOne,
+    visualPublicMatchState?.score.playerTwo,
+  ]);
 
   useEffect(() => {
     const handIsLive =
@@ -1118,8 +1339,8 @@ export function MatchPage() {
   useEffect(() => {
     const authoritativeHandInProgress = Boolean(
       publicMatchState?.state === 'in_progress' &&
-      publicMatchState.currentHand &&
-      !publicMatchState.currentHand.finished,
+        publicMatchState.currentHand &&
+        !publicMatchState.currentHand.finished,
     );
 
     if (authoritativeHandInProgress) {
@@ -1152,29 +1373,59 @@ export function MatchPage() {
     publicMatchState?.state,
   ]);
 
-  const handleStartHandWithGate = useCallback(() => {
-    if (startHandLockRef.current || isStartHandPending || !viewModel.canStartHand) {
-      appendLog('Ignored start-hand because a start request is already locked.');
+  const handleHandClimaxDismissed = useCallback(() => {
+    const currentHand = viewModel.currentPublicHand ?? viewModel.currentPrivateHand;
+
+    if (viewModel.matchFinished || suppressHandOutcomeModal || !currentHand?.finished) {
       return;
     }
 
-    startHandLockRef.current = true;
-    setIsStartHandPending(true);
+    const autoStartKey = [
+      viewModel.resolvedMatchId,
+      currentHand.viraRank,
+      currentHand.winner ?? 'tie',
+      currentHand.awardedPoints ?? 'null',
+      viewModel.playedRoundsCount,
+      visualPublicMatchState?.score.playerOne ?? 0,
+      visualPublicMatchState?.score.playerTwo ?? 0,
+      'climax',
+    ].join('|');
 
-    if (startHandPendingTimeoutRef.current !== null) {
-      window.clearTimeout(startHandPendingTimeoutRef.current);
+    if (lastAutoNextHandKeyRef.current === autoStartKey) {
+      return;
     }
 
-    startHandPendingTimeoutRef.current = window.setTimeout(
-      () => {
-        setIsStartHandPending(false);
-        startHandPendingTimeoutRef.current = null;
-      },
-      HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200,
-    );
+    lastAutoNextHandKeyRef.current = autoStartKey;
+    pendingAutoNextHandKeyRef.current = null;
+    lastAutoNextHandWaitLogKeyRef.current = null;
+    setIsAutoNextHandArmed(true);
+    setVisualBeat('hand_reset');
+    beginHandTransitionRef.current();
 
-    handleStartHand();
-  }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand]);
+    if (autoNextHandTimeoutRef.current !== null) {
+      window.clearTimeout(autoNextHandTimeoutRef.current);
+    }
+
+    appendLog('Hand result dismissed. Arming automatic next hand.');
+
+    autoNextHandTimeoutRef.current = window.setTimeout(() => {
+      autoNextHandTimeoutRef.current = null;
+      pendingAutoNextHandKeyRef.current = autoStartKey;
+      lastAutoNextHandWaitLogKeyRef.current = null;
+      tryDispatchAutomaticNextHand();
+    }, AUTO_NEXT_HAND_DELAY_MS);
+  }, [
+    appendLog,
+    suppressHandOutcomeModal,
+    tryDispatchAutomaticNextHand,
+    viewModel.currentPrivateHand,
+    viewModel.currentPublicHand,
+    viewModel.matchFinished,
+    viewModel.playedRoundsCount,
+    viewModel.resolvedMatchId,
+    visualPublicMatchState?.score.playerOne,
+    visualPublicMatchState?.score.playerTwo,
+  ]);
 
   const playCardWithSound = useCallback(
     (card: CardPayload) => {
@@ -1227,7 +1478,18 @@ export function MatchPage() {
   const canRenderLiveState = Boolean(
     session?.backendUrl && session?.authToken && viewModel.resolvedMatchId,
   );
-  const effectiveMyCards = viewModel.handFinished ? cachedMyCards : viewModel.myCards;
+  const shouldKeepCardsDuringResultBeat =
+    visualBeat === 'hand_result_hold' || (viewModel.matchFinished && !isAutoNextHandArmed);
+  const shouldDelayHandOutcomeModal =
+    liveTableTransition.isResolvingRound ||
+    visualBeat === 'hand_reset' ||
+    visualBeat === 'hand_intro';
+
+  const effectiveMyCards = shouldKeepCardsDuringResultBeat
+    ? cachedMyCards
+    : viewModel.myCards.length > 0
+      ? viewModel.myCards
+      : cachedMyCards;
 
   const displayedMyPlayedCard = liveTableTransition.displayedMyPlayedCard;
   const displayedOpponentPlayedCard = liveTableTransition.displayedOpponentPlayedCard;
@@ -1288,13 +1550,13 @@ export function MatchPage() {
             resolvedMatchId={viewModel.resolvedMatchId}
             mySeat={viewModel.mySeat}
             viraRank={viraRank}
-            viraRankOptions={VIRA_RANK_OPTIONS}
             canStartHand={
               viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
             }
             onRefreshState={handleRefreshState}
-            onChangeViraRank={setViraRank}
             onStartHand={handleStartHandWithGate}
+            scoreLabel={viewModel.scoreLabel}
+            currentValue={viewModel.currentValue}
           />
 
           {!hasHydratedMatchState ? (
@@ -1342,7 +1604,7 @@ export function MatchPage() {
                 }
                 myCardLaunching={Boolean(
                   liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
-                  !viewModel.myPlayedCard,
+                    !viewModel.myPlayedCard,
                 )}
                 roundIntroKey={liveTableTransition.roundIntroKey}
                 roundResolvedKey={liveTableTransition.roundResolvedKey}
@@ -1361,14 +1623,20 @@ export function MatchPage() {
                 onPlayCard={playCardWithSound}
                 playedRoundsCount={viewModel.playedRoundsCount}
                 isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
+                suppressHandOutcomeModal={
+                  suppressHandOutcomeModal || shouldDelayHandOutcomeModal
+                }
+                onHandClimaxDismissed={handleHandClimaxDismissed}
               />
 
               <BetFeedbackBanner feedback={betFeedback} />
 
-              <TrucoDebugBadge
-                publicMatchState={visualPublicMatchState}
-                privateMatchState={visualPrivateMatchState}
-              />
+              {shouldRenderTrucoDebugBadge ? (
+                <TrucoDebugBadge
+                  publicMatchState={visualPublicMatchState}
+                  privateMatchState={visualPrivateMatchState}
+                />
+              ) : null}
             </div>
 
             <div className="shrink-0 px-2 pb-2 pt-1 md:px-3 md:pb-3">
@@ -1519,3 +1787,5 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
+
+

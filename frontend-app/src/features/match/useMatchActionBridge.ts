@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 import type { MatchAction } from './matchActionTypes';
-import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
+import type { CardPayload, MatchStatePayload } from '../../services/socket/socketTypes';
 
 type UseMatchActionBridgeParams = {
   resolvedMatchId: string;
@@ -9,10 +9,9 @@ type UseMatchActionBridgeParams = {
   canStartHand: boolean;
   canPlayCard: boolean;
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
-  viraRank: Rank;
   appendLog: (line: string) => void;
   emitGetState: (matchId: string) => void;
-  emitStartHand: (matchId: string, viraRank: Rank) => void;
+  emitStartHand: (matchId: string) => void;
   emitPlayCard: (matchId: string, card: CardPayload) => void;
   emitRequestTruco: (matchId: string) => void;
   emitAcceptBet: (matchId: string) => void;
@@ -42,7 +41,6 @@ export function useMatchActionBridge(
     canStartHand,
     canPlayCard,
     availableActions,
-    viraRank,
     appendLog,
     emitGetState,
     emitStartHand,
@@ -85,8 +83,8 @@ export function useMatchActionBridge(
         // NOTE: Starting a new hand is the one place where a full table reset
         // is expected before the next authoritative frames arrive.
         beginHandTransition();
-        emitStartHand(resolvedMatchId, viraRank);
-        appendLog(`Emitted start-hand (${resolvedMatchId}, ${viraRank}).`);
+        emitStartHand(resolvedMatchId);
+        appendLog(`Emitted start-hand (${resolvedMatchId}).`);
       },
 
       handlePlayCard(card: CardPayload): void {
@@ -194,8 +192,7 @@ export function useMatchActionBridge(
       canStartHand,
       canPlayCard,
       availableActions,
-      viraRank,
-      appendLog,
+        appendLog,
       emitGetState,
       emitStartHand,
       emitPlayCard,
