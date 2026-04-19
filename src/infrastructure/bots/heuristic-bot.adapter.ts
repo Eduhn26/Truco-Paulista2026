@@ -140,18 +140,22 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return null;
   }
 
+  // 22.B: thresholds widened between profiles to make bet behaviour perceptibly distinct.
+  // - aggressive: accepts earlier (0.28) and raises on solid — not just excellent — hands (0.65).
+  // - balanced:   unchanged anchor (0.50 / 0.84) — preserves regression baseline for the default profile.
+  // - cautious:   only raises on near-unbeatable hands (0.97) and demands a strong hand to accept (0.70).
   private resolveBetThresholds(profile: BotProfile): BotBetThresholds {
     if (profile === 'aggressive') {
       return {
-        accept: 0.34,
-        raise: 0.72,
+        accept: 0.28,
+        raise: 0.65,
       };
     }
 
     if (profile === 'cautious') {
       return {
-        accept: 0.64,
-        raise: 0.94,
+        accept: 0.7,
+        raise: 0.97,
       };
     }
 
@@ -245,19 +249,28 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
     if (winningCards.length === 0) {
       const card = this.pickLosingCard(hand, profile);
+      // 22.B: aggressive on a losing round no longer burns its strongest card.
+      // Losing-round strategy labels after the adjustment:
+      //  - aggressive: 'response-losing-middle' (was 'response-losing-strongest')
+      //  - balanced:   'response-losing-middle' (unchanged)
+      //  - cautious:   'response-losing-weakest' (unchanged)
       const strategy: BotDecisionStrategy =
-        profile === 'aggressive'
-          ? 'response-losing-strongest'
-          : profile === 'cautious'
-            ? 'response-losing-weakest'
-            : 'response-losing-middle';
+        profile === 'cautious' ? 'response-losing-weakest' : 'response-losing-middle';
 
       return { card, strategy };
     }
 
+    // 22.B: balanced no longer collides with cautious here. Now:
+    //  - aggressive: plays the strongest winning card (crush the opponent).
+    //  - balanced:   plays the middle winning card (economical but not stingy).
+    //  - cautious:   plays the weakest winning card (save high cards for later rounds).
+    // Strategy label for balanced reuses 'response-winning-weakest' — the closest existing label
+    // in the shared whitelist (the port / python adapter do not define a 'response-winning-middle'
+    // value and this step's scope forbids touching them). The behavioural difference is real; only
+    // the telemetry label is approximated.
     const card = this.pickCardByProfile(winningCards, profile, {
       aggressive: 'strongest',
-      balanced: 'weakest',
+      balanced: 'middle',
       cautious: 'weakest',
     });
 
@@ -268,8 +281,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
   }
 
   private pickLosingCard(hand: string[], profile: BotProfile): string {
+    // 22.B: aggressive switched from 'strongest' to 'middle' to stop wasting top cards on lost rounds.
+    // cautious stays on 'weakest' (correct tactically: preserve strength for following rounds).
     return this.pickCardByProfile(hand, profile, {
-      aggressive: 'strongest',
+      aggressive: 'middle',
       balanced: 'middle',
       cautious: 'weakest',
     });
@@ -311,12 +326,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return 0;
   }
 
-  private buildMetadata(
-    strategy: BotDecisionStrategy,
-    handStrength?: number,
-  ): BotDecisionMetadata {
-    const rationale =
-      handStrength !== undefined ? { strategy, handStrength } : { strategy };
+  private buildMetadata(strategy: BotDecisionStrategy, handStrength?: number): BotDecisionMetadata {
+    const rationale = handStrength !== undefined ? { strategy, handStrength } : { strategy };
 
     return {
       source: 'heuristic',

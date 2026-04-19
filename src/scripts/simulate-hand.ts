@@ -86,10 +86,6 @@ function draw(deck: string[]): string {
   return c;
 }
 
-function rankFromCard(code: string): Rank {
-  return code.slice(0, 1) as Rank;
-}
-
 function prettyCard(code: string): string {
   const rank = code.slice(0, 1) as Rank;
   const suit = code.slice(1, 2) as Suit;
@@ -150,13 +146,12 @@ async function simulateMatch(): Promise<void> {
 
     const deck = shuffle(makeDeck());
     const vira = draw(deck);
-    const viraRank = rankFromCard(vira);
 
     hr();
     out(`🂠 MÃO #${hands}  (vale 1 tento)`);
     out(`Vira: ${prettyCard(vira)}  →  Manilha: (depende do domínio)`);
     arch('StartHandUseCase.execute()');
-    await startHand.execute({ matchId, viraRank });
+    await startHand.execute({ matchId });
 
     await sleep(HAND_DELAY_MS);
 

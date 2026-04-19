@@ -357,7 +357,7 @@ export class PythonBotAdapter implements BotDecisionPort {
     if (candidate.action === 'play-card') {
       return (
         typeof (candidate as { card?: unknown }).card === 'string' &&
-        ((candidate as { card: string }).card).trim().length > 0
+        (candidate as { card: string }).card.trim().length > 0
       );
     }
 

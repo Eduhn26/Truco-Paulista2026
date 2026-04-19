@@ -25,5 +25,4 @@ export class StartHandUseCase {
     }
     return normalized;
   }
-
 }
