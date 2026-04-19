@@ -1099,10 +1099,10 @@ function MaoDeOnzeDecisionStage({
       animate={{ y: 0, opacity: 1, scale: 1 }}
       exit={{ y: 20, opacity: 0, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-      className="pointer-events-auto fixed inset-x-4 bottom-[252px] z-[110] mx-auto w-full max-w-xl md:bottom-[272px] md:max-w-2xl"
+      className="pointer-events-auto fixed inset-x-4 bottom-[308px] z-[110] mx-auto w-full max-w-lg md:bottom-[324px] md:max-w-xl"
     >
       <div
-        className="overflow-hidden rounded-[26px] border px-4 py-3.5 md:rounded-[28px] md:px-5 md:py-4 backdrop-blur-xl"
+        className="overflow-hidden rounded-[26px] border px-4 py-3.5 md:px-5 md:py-4 backdrop-blur-xl"
         style={{
           background:
             'linear-gradient(180deg, rgba(18,22,30,0.94) 0%, rgba(10,12,18,0.90) 100%)',
@@ -1164,6 +1164,50 @@ function MaoDeOnzeDecisionStage({
               Correr
             </motion.button>
           </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function MaoDeOnzeAcceptedBadge() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -6, scale: 0.96 }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      className="pointer-events-none fixed right-6 top-[88px] z-[95] md:right-8 md:top-[92px]"
+    >
+      <div
+        className="rounded-full px-4 py-2"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(242,212,136,0.18) 0%, rgba(201,168,76,0.14) 55%, rgba(123,90,29,0.12) 100%)',
+          border: '1px solid rgba(255,223,128,0.34)',
+          boxShadow:
+            '0 10px 24px rgba(0,0,0,0.26), 0 0 18px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.10)',
+          backdropFilter: 'blur(10px)',
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{
+              background: '#e8c76a',
+              boxShadow: '0 0 10px rgba(201,168,76,0.42)',
+            }}
+          />
+          <span
+            className="text-[10px] font-black uppercase tracking-[0.22em]"
+            style={{
+              color: '#f2d488',
+              fontFamily: 'Georgia, serif',
+              textShadow: '0 2px 6px rgba(0,0,0,0.28)',
+            }}
+          >
+            Mão de 11 aceita
+          </span>
         </div>
       </div>
     </motion.div>
@@ -1351,6 +1395,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const isViewerMaoDeOnzeDecision =
     props.specialDecisionPending &&
     (availableActions.canAcceptMaoDeOnze || availableActions.canDeclineMaoDeOnze);
+  const isMaoDeOnzeAcceptedState =
+    isMaoDeOnze && !props.specialDecisionPending && tablePhase === 'playing';
   const isMatchFinished = tablePhase === 'match_finished';
   const isHandFinished = tablePhase === 'hand_finished';
 
@@ -1466,6 +1512,10 @@ export function MatchTableShell(props: MatchTableShellProps) {
         : { label: 'Mão de 11', accent: 'escalate' };
     }
 
+    if (isMaoDeOnzeAcceptedState) {
+      return { label: 'Mão de 11 aceita', accent: 'win' };
+    }
+
     if (isShowingResolvedRoundCards && resolvedRoundResult) {
       if (resolvedRoundResult === 'P1') {
         return { label: 'Rodada sua', accent: 'win' };
@@ -1490,6 +1540,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
     isMyTurn,
     isShowingResolvedRoundCards,
     pendingValue,
+    isMaoDeOnzeAcceptedState,
     isViewerMaoDeOnzeDecision,
     props.specialDecisionPending,
     resolvedRoundResult,
@@ -1769,26 +1820,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isMaoDeOnze && !isViewerMaoDeOnzeDecision ? (
-          <motion.div
-            initial={{ y: -200, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 200, opacity: 0 }}
-            transition={{ type: 'spring', damping: 14 }}
-            className="pointer-events-none fixed left-1/2 top-16 z-[100] -translate-x-1/2"
-          >
-            <div
-              className="rounded-full px-10 py-4 text-2xl font-black uppercase tracking-widest text-black shadow-2xl"
-              style={{
-                background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
-                border: '2px solid #ffdf80',
-                boxShadow: '0 0 60px rgba(201,168,76,0.8)',
-              }}
-            >
-              ⚡ Mão de 11 ⚡
-            </div>
-          </motion.div>
-        ) : null}
+        {isMaoDeOnzeAcceptedState ? <MaoDeOnzeAcceptedBadge /> : null}
       </AnimatePresence>
 
       <AnimatePresence>
