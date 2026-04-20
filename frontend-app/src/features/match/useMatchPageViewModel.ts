@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { buildMatchContractPresentation } from './matchPresentationSelectors';
 import { cardStringToPayload } from '../../services/socket/socketTypes';
 import type {
+  BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
   RoomStatePayload,
@@ -15,6 +16,7 @@ export type TableSeatView = {
   isBot: boolean;
   isCurrentTurn: boolean;
   isMine: boolean;
+  botIdentity: BotIdentityPayload | null;
 };
 
 export type MatchViewModel = {
@@ -62,6 +64,7 @@ export function useMatchPageViewModel({
         isBot: player?.isBot ?? false,
         isCurrentTurn: roomState?.currentTurnSeatId === seatId,
         isMine: seatId === mySeat,
+        botIdentity: player?.botIdentity ?? null,
       };
     });
 

@@ -34,6 +34,15 @@ export type PlayerAssignedPayload = {
   profileId?: string;
 };
 
+export type BotProfilePayload = 'balanced' | 'aggressive' | 'cautious' | string;
+
+export type BotIdentityPayload = {
+  id: string;
+  displayName: string;
+  avatarKey: string;
+  profile: BotProfilePayload;
+};
+
 export type RoomStatePayload = {
   matchId: string;
   mode?: '1v1' | '2v2' | string;
@@ -42,6 +51,7 @@ export type RoomStatePayload = {
     teamId: string;
     ready: boolean;
     isBot?: boolean;
+    botIdentity?: BotIdentityPayload;
   }>;
   canStart: boolean;
   currentTurnSeatId: SeatId | null;
@@ -332,17 +342,42 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       ? input.players.map((player) => {
           const item = asObject(player);
           const isBot = typeof item.isBot === 'boolean' ? item.isBot : undefined;
+          const botIdentity = normalizeBotIdentityPayload(item.botIdentity);
 
           return {
             seatId: asString(item.seatId),
             teamId: asString(item.teamId),
             ready: asBoolean(item.ready),
             ...(isBot !== undefined ? { isBot } : {}),
+            ...(botIdentity !== undefined ? { botIdentity } : {}),
           };
         })
       : [],
     canStart: asBoolean(input.canStart),
     currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+  };
+}
+
+function normalizeBotIdentityPayload(value: unknown): BotIdentityPayload | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const id = asOptionalString(input.id);
+  const displayName = asOptionalString(input.displayName);
+  const avatarKey = asOptionalString(input.avatarKey);
+  const profile = asOptionalString(input.profile);
+
+  if (id === undefined || displayName === undefined || avatarKey === undefined || profile === undefined) {
+    return undefined;
+  }
+
+  return {
+    id,
+    displayName,
+    avatarKey,
+    profile,
   };
 }
 

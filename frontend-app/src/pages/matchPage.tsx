@@ -13,6 +13,7 @@ import { useMatchTableTransition } from '../features/match/useMatchTableTransiti
 import { useGameSound } from '../hooks/useGameSound';
 import { cardStringToPayload } from '../services/socket/socketTypes';
 import type {
+  BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
   Rank,
@@ -35,6 +36,7 @@ type TableSeatView = {
   isBot: boolean;
   isCurrentTurn: boolean;
   isMine: boolean;
+  botIdentity: BotIdentityPayload | null;
 };
 
 type MatchStatusTone = 'neutral' | 'success' | 'warning';
@@ -764,6 +766,7 @@ export function MatchPage() {
         isBot: player?.isBot ?? false,
         isCurrentTurn: visualRoomState?.currentTurnSeatId === seatId,
         isMine: mySeat === seatId,
+        botIdentity: player?.botIdentity ?? null,
       };
     });
     const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
@@ -1787,5 +1790,3 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
-
-

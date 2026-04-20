@@ -5,7 +5,12 @@ import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
-import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
+import type {
+  BotIdentityPayload,
+  CardPayload,
+  MatchStatePayload,
+  Rank,
+} from '../../services/socket/socketTypes';
 import { useConfetti } from '../../hooks/useConfetti';
 import { useGameSound } from '../../hooks/useGameSound';
 
@@ -18,6 +23,7 @@ type TableSeatView = {
   isBot: boolean;
   isCurrentTurn: boolean;
   isMine: boolean;
+  botIdentity: BotIdentityPayload | null;
 };
 
 type RoundView = NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
@@ -275,10 +281,60 @@ function CardShape({
 // CHANGE: Opponent group — avatar pill sits IMMEDIATELY above the 3 face-down
 // cards, tight coupling. Matches the reference where T2A + cards are one
 // visual unit. Adds a subtle ground shadow under the cards to anchor them.
+// Maps a short backend-owned avatarKey to a tiny visual glyph. Frontend-only
+// concern (backend only speaks the key). Unknown keys fall back to the first
+// letter of the display name via resolveSeatAvatar() below — never an empty
+// square.
+const BOT_AVATAR_GLYPHS: Record<string, string> = {
+  spade: '♠',
+  club: '♣',
+  hat: '🎩',
+  fire: '🔥',
+  bolt: '⚡',
+  skull: '💀',
+  owl: '🦉',
+  moon: '🌙',
+  leaf: '🍃',
+};
+
+// Maps a profile to a short PT-BR label shown as a subdued tag under the bot
+// name. Kept tiny on purpose so it never competes with match state.
+const BOT_PROFILE_LABELS: Record<string, string> = {
+  balanced: 'Equilibrado',
+  aggressive: 'Agressivo',
+  cautious: 'Cauteloso',
+};
+
+type SeatAvatar = {
+  content: string;
+  kind: 'glyph' | 'initial';
+};
+
+function resolveSeatAvatar(seat: TableSeatView, displayName: string): SeatAvatar {
+  if (seat.botIdentity) {
+    const glyph = BOT_AVATAR_GLYPHS[seat.botIdentity.avatarKey];
+
+    if (glyph) {
+      return { content: glyph, kind: 'glyph' };
+    }
+  }
+
+  const initial = displayName.charAt(0).toUpperCase() || '?';
+  return { content: initial, kind: 'initial' };
+}
+
+function resolveProfileLabel(profile: string): string {
+  return BOT_PROFILE_LABELS[profile] ?? profile;
+}
+
 function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent: boolean }) {
   const isCurrentTurn = seat.isCurrentTurn;
-  const displayName = seat.isMine ? 'Você' : seat.seatId;
-  const initial = displayName.charAt(0).toUpperCase();
+  const displayName = seat.isMine
+    ? 'Você'
+    : seat.botIdentity?.displayName ?? seat.seatId;
+  const avatar = resolveSeatAvatar(seat, displayName);
+  const profileLabel =
+    seat.isBot && seat.botIdentity ? resolveProfileLabel(seat.botIdentity.profile) : null;
 
   return (
     <div className="flex flex-col items-center gap-2.5">
@@ -297,16 +353,18 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         }}
       >
         <div
-          className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-black"
+          className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-black"
           style={{
             background: 'linear-gradient(135deg, #3a4a62 0%, #1a2234 55%, #0d141f 100%)',
             border: '1px solid rgba(255,255,255,0.16)',
             color: 'rgba(235,220,180,0.92)',
             fontFamily: 'Georgia, serif',
+            fontSize: avatar.kind === 'glyph' ? 16 : 13,
             boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 4px 10px rgba(0,0,0,0.42)',
           }}
+          aria-hidden
         >
-          {initial}
+          {avatar.content}
         </div>
 
         <span
@@ -332,6 +390,21 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
           }}
         />
       </motion.div>
+
+      {/* Tiny profile tag, only for bots with a resolved identity. Kept
+          subdued (low alpha, small caps, no background) so it reads as
+          metadata and never competes with match state. */}
+      {profileLabel ? (
+        <span
+          className="text-[9px] font-bold uppercase leading-none tracking-[0.22em]"
+          style={{
+            color: 'rgba(232,213,160,0.52)',
+            fontFamily: 'Georgia, serif',
+          }}
+        >
+          {profileLabel}
+        </span>
+      ) : null}
 
       <div className="flex items-center gap-3">
         {[0, 1, 2].map((index) => (

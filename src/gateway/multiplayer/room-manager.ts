@@ -1,8 +1,8 @@
+import { type BotProfile } from '@game/application/ports/bot-decision.port';
 import {
-  DEFAULT_BOT_PROFILE_BY_SEAT,
-  type BotProfile,
-  type BotSeatId,
-} from '@game/application/ports/bot-decision.port';
+  pickRandomBotIdentityAny,
+  type BotIdentity,
+} from '@game/application/ports/bot-identity.catalog';
 
 export type MatchMode = '1v1' | '2v2';
 export type TeamId = 'T1' | 'T2';
@@ -38,6 +38,7 @@ type RoomStatePlayer = {
   domainPlayerId: 'P1' | 'P2';
   isBot: boolean;
   botProfile: BotProfile | null;
+  botIdentity: BotIdentity | null;
 };
 
 type InternalRoomState = {
@@ -167,6 +168,7 @@ export class RoomManager {
           userId: reconnectedSession.userId,
           isBot: false,
           botProfile: null,
+          botIdentity: null,
         };
       }
 
@@ -211,6 +213,7 @@ export class RoomManager {
       domainPlayerId,
       isBot: false,
       botProfile: null,
+      botIdentity: null,
     });
 
     this.sortPlayers(room);
@@ -531,7 +534,15 @@ export class RoomManager {
   private createBotSession(matchId: string, seatId: SeatId): RoomStatePlayer {
     const teamId = TEAM_BY_SEAT[seatId];
     const domainPlayerId = DOMAIN_PLAYER_BY_TEAM[teamId];
-    const botProfile = this.resolveBotProfile(seatId);
+    // NOTE: Identity is sampled once here — at the moment the bot is first
+    // placed into the seat — and lives with the room player for the rest of
+    // the match. No re-sampling between hands. The bot's profile is derived
+    // from the sampled identity, NOT from the seatId: otherwise a 1v1 match
+    // (where the bot always takes the same seat) would always end up with
+    // the same profile. Identity is cosmetic; the profile is what feeds the
+    // decision port, so the two must agree by construction.
+    const botIdentity = pickRandomBotIdentityAny();
+    const botProfile: BotProfile = botIdentity.profile;
 
     return {
       seatId,
@@ -543,11 +554,8 @@ export class RoomManager {
       domainPlayerId,
       isBot: true,
       botProfile,
+      botIdentity,
     };
-  }
-
-  private resolveBotProfile(seatId: SeatId): BotProfile {
-    return DEFAULT_BOT_PROFILE_BY_SEAT[seatId as BotSeatId];
   }
 
   private buildTokenMatchKey(matchId: string, playerToken: string): string {
