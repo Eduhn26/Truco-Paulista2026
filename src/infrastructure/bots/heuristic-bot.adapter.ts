@@ -3,7 +3,9 @@ import { Injectable } from '@nestjs/common';
 import type {
   BotDecision,
   BotDecisionContext,
+  BotDecisionMetadata,
   BotDecisionPort,
+  BotDecisionStrategy,
   BotProfile,
   BotRoundView,
 } from '@game/application/ports/bot-decision.port';
@@ -43,6 +45,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return {
         action: 'pass',
         reason: 'empty-hand',
+        metadata: this.buildMetadata('empty-hand'),
       };
     }
 
@@ -50,6 +53,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return {
         action: 'pass',
         reason: 'missing-round',
+        metadata: this.buildMetadata('missing-round'),
       };
     }
 
@@ -59,20 +63,24 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
     const opponentCard = this.getOpponentCard(context.currentRound, context.player.playerId);
 
-    const selectedCard = opponentCard
+    const selection = opponentCard
       ? this.pickResponseCard(orderedHand, opponentCard, context.viraRank, context.profile)
       : this.pickOpeningCard(orderedHand, context.profile);
 
-    if (!selectedCard) {
+    if (!selection) {
       return {
         action: 'pass',
         reason: 'unsupported-state',
+        metadata: this.buildMetadata('unsupported-state'),
       };
     }
 
     return {
       action: 'play-card',
-      card: selectedCard,
+      card: selection.card,
+      // NOTE (22.A): handStrength is intentionally omitted on play-card paths to avoid running
+      // calculateHandStrength on every bot turn. It is only populated on bet-response decisions.
+      metadata: this.buildMetadata(selection.strategy),
     };
   }
 
@@ -104,42 +112,50 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (strongestRaise && handStrength >= thresholds.raise) {
       return {
         action: strongestRaise,
+        metadata: this.buildMetadata('bet-raise', handStrength),
       };
     }
 
     if (availableActions.canAcceptBet && handStrength >= thresholds.accept) {
       return {
         action: 'accept-bet',
+        metadata: this.buildMetadata('bet-accept', handStrength),
       };
     }
 
     if (availableActions.canDeclineBet) {
       return {
         action: 'decline-bet',
+        metadata: this.buildMetadata('bet-decline', handStrength),
       };
     }
 
     if (availableActions.canAcceptBet) {
       return {
         action: 'accept-bet',
+        metadata: this.buildMetadata('bet-no-response', handStrength),
       };
     }
 
     return null;
   }
 
+  // 22.B: thresholds widened between profiles to make bet behaviour perceptibly distinct.
+  // - aggressive: accepts earlier (0.28) and raises on solid — not just excellent — hands (0.65).
+  // - balanced:   unchanged anchor (0.50 / 0.84) — preserves regression baseline for the default profile.
+  // - cautious:   only raises on near-unbeatable hands (0.97) and demands a strong hand to accept (0.70).
   private resolveBetThresholds(profile: BotProfile): BotBetThresholds {
     if (profile === 'aggressive') {
       return {
-        accept: 0.34,
-        raise: 0.72,
+        accept: 0.28,
+        raise: 0.65,
       };
     }
 
     if (profile === 'cautious') {
       return {
-        accept: 0.64,
-        raise: 0.94,
+        accept: 0.7,
+        raise: 0.97,
       };
     }
 
@@ -203,12 +219,24 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return playerId === 'P1' ? currentRound.playerTwoCard : currentRound.playerOneCard;
   }
 
-  private pickOpeningCard(hand: string[], profile: BotProfile): string {
-    return this.pickCardByProfile(hand, profile, {
+  private pickOpeningCard(
+    hand: string[],
+    profile: BotProfile,
+  ): { card: string; strategy: BotDecisionStrategy } {
+    const card = this.pickCardByProfile(hand, profile, {
       aggressive: 'strongest',
       balanced: 'middle',
       cautious: 'weakest',
     });
+
+    const strategy: BotDecisionStrategy =
+      profile === 'aggressive'
+        ? 'opening-strongest'
+        : profile === 'cautious'
+          ? 'opening-weakest'
+          : 'opening-middle';
+
+    return { card, strategy };
   }
 
   private pickResponseCard(
@@ -216,23 +244,47 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     opponentCard: string,
     viraRank: Rank,
     profile: BotProfile,
-  ): string {
+  ): { card: string; strategy: BotDecisionStrategy } {
     const winningCards = hand.filter((candidate) => this.beats(candidate, opponentCard, viraRank));
 
     if (winningCards.length === 0) {
-      return this.pickLosingCard(hand, profile);
+      const card = this.pickLosingCard(hand, profile);
+      // 22.B: aggressive on a losing round no longer burns its strongest card.
+      // Losing-round strategy labels after the adjustment:
+      //  - aggressive: 'response-losing-middle' (was 'response-losing-strongest')
+      //  - balanced:   'response-losing-middle' (unchanged)
+      //  - cautious:   'response-losing-weakest' (unchanged)
+      const strategy: BotDecisionStrategy =
+        profile === 'cautious' ? 'response-losing-weakest' : 'response-losing-middle';
+
+      return { card, strategy };
     }
 
-    return this.pickCardByProfile(winningCards, profile, {
+    // 22.B: balanced no longer collides with cautious here. Now:
+    //  - aggressive: plays the strongest winning card (crush the opponent).
+    //  - balanced:   plays the middle winning card (economical but not stingy).
+    //  - cautious:   plays the weakest winning card (save high cards for later rounds).
+    // Strategy label for balanced reuses 'response-winning-weakest' — the closest existing label
+    // in the shared whitelist (the port / python adapter do not define a 'response-winning-middle'
+    // value and this step's scope forbids touching them). The behavioural difference is real; only
+    // the telemetry label is approximated.
+    const card = this.pickCardByProfile(winningCards, profile, {
       aggressive: 'strongest',
-      balanced: 'weakest',
+      balanced: 'middle',
       cautious: 'weakest',
     });
+
+    const strategy: BotDecisionStrategy =
+      profile === 'aggressive' ? 'response-winning-strongest' : 'response-winning-weakest';
+
+    return { card, strategy };
   }
 
   private pickLosingCard(hand: string[], profile: BotProfile): string {
+    // 22.B: aggressive switched from 'strongest' to 'middle' to stop wasting top cards on lost rounds.
+    // cautious stays on 'weakest' (correct tactically: preserve strength for following rounds).
     return this.pickCardByProfile(hand, profile, {
-      aggressive: 'strongest',
+      aggressive: 'middle',
       balanced: 'middle',
       cautious: 'weakest',
     });
@@ -272,5 +324,14 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (result === 'A') return 1;
     if (result === 'B') return -1;
     return 0;
+  }
+
+  private buildMetadata(strategy: BotDecisionStrategy, handStrength?: number): BotDecisionMetadata {
+    const rationale = handStrength !== undefined ? { strategy, handStrength } : { strategy };
+
+    return {
+      source: 'heuristic',
+      rationale,
+    };
   }
 }

@@ -34,6 +34,35 @@ export type PlayerAssignedPayload = {
   profileId?: string;
 };
 
+export type BotProfilePayload = 'balanced' | 'aggressive' | 'cautious' | string;
+
+export type BotIdentityPayload = {
+  id: string;
+  displayName: string;
+  avatarKey: string;
+  profile: BotProfilePayload;
+};
+
+export type BotDecisionSourcePayload =
+  | 'heuristic'
+  | 'python-remote'
+  | 'heuristic-fallback'
+  | 'unknown'
+  | string;
+
+export type BotDecisionTelemetryPayload = {
+  seatId: SeatId;
+  teamId: 'T1' | 'T2' | string;
+  playerId: PlayerId;
+  profile: BotProfilePayload;
+  action: string;
+  source: BotDecisionSourcePayload;
+  strategy?: string;
+  handStrength?: number;
+  reason?: string;
+  occurredAt?: string;
+};
+
 export type RoomStatePayload = {
   matchId: string;
   mode?: '1v1' | '2v2' | string;
@@ -42,9 +71,11 @@ export type RoomStatePayload = {
     teamId: string;
     ready: boolean;
     isBot?: boolean;
+    botIdentity?: BotIdentityPayload;
   }>;
   canStart: boolean;
   currentTurnSeatId: SeatId | null;
+  lastBotDecision?: BotDecisionTelemetryPayload | null;
 };
 
 export type MatchAvailableActionsPayload = {
@@ -325,6 +356,8 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
 
   const mode = asOptionalString(input.mode);
 
+  const lastBotDecision = normalizeBotDecisionTelemetryPayload(input.lastBotDecision);
+
   return {
     matchId: asString(input.matchId),
     ...(mode !== undefined ? { mode } : {}),
@@ -332,17 +365,91 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       ? input.players.map((player) => {
           const item = asObject(player);
           const isBot = typeof item.isBot === 'boolean' ? item.isBot : undefined;
+          const botIdentity = normalizeBotIdentityPayload(item.botIdentity);
 
           return {
             seatId: asString(item.seatId),
             teamId: asString(item.teamId),
             ready: asBoolean(item.ready),
             ...(isBot !== undefined ? { isBot } : {}),
+            ...(botIdentity !== undefined ? { botIdentity } : {}),
           };
         })
       : [],
     canStart: asBoolean(input.canStart),
     currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+    ...(lastBotDecision !== undefined ? { lastBotDecision } : {}),
+  };
+}
+
+function normalizeBotDecisionTelemetryPayload(
+  value: unknown,
+): BotDecisionTelemetryPayload | undefined {
+  if (value === null) {
+    return null as unknown as BotDecisionTelemetryPayload | undefined;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const seatId = asOptionalString(input.seatId);
+  const teamId = asOptionalString(input.teamId);
+  const playerId = asOptionalString(input.playerId);
+  const profile = asOptionalString(input.profile);
+  const action = asOptionalString(input.action);
+  const source = asOptionalString(input.source);
+  const strategy = asOptionalString(input.strategy);
+  const reason = asOptionalString(input.reason);
+  const occurredAt = asOptionalString(input.occurredAt);
+  const handStrength = typeof input.handStrength === 'number' ? input.handStrength : undefined;
+
+  if (
+    seatId === undefined ||
+    teamId === undefined ||
+    playerId === undefined ||
+    profile === undefined ||
+    action === undefined ||
+    source === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    seatId,
+    teamId,
+    playerId,
+    profile,
+    action,
+    source,
+    ...(strategy !== undefined ? { strategy } : {}),
+    ...(handStrength !== undefined ? { handStrength } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(occurredAt !== undefined ? { occurredAt } : {}),
+  };
+}
+
+function normalizeBotIdentityPayload(value: unknown): BotIdentityPayload | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const id = asOptionalString(input.id);
+  const displayName = asOptionalString(input.displayName);
+  const avatarKey = asOptionalString(input.avatarKey);
+  const profile = asOptionalString(input.profile);
+
+  if (id === undefined || displayName === undefined || avatarKey === undefined || profile === undefined) {
+    return undefined;
+  }
+
+  return {
+    id,
+    displayName,
+    avatarKey,
+    profile,
   };
 }
 

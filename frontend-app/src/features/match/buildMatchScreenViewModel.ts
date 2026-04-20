@@ -4,6 +4,7 @@ import { MatchLiveStatePanel } from './matchLiveStatePanel';
 import { MatchPageHeader } from './matchPageHeader';
 import { MatchRoundsHistoryPanel } from './matchRoundsHistoryPanel';
 import { MatchTableShell } from './matchTableShell';
+import type { TableSeatView } from './useMatchPageViewModel';
 import type {
   CardPayload,
   MatchStatePayload,
@@ -15,14 +16,6 @@ type HeaderProps = ComponentProps<typeof MatchPageHeader>;
 type TableShellProps = ComponentProps<typeof MatchTableShell>;
 type LiveStatePanelProps = ComponentProps<typeof MatchLiveStatePanel>;
 type RoundsHistoryProps = ComponentProps<typeof MatchRoundsHistoryPanel>;
-
-type TableSeatView = {
-  seatId: string;
-  ready: boolean;
-  isBot: boolean;
-  isCurrentTurn: boolean;
-  isMine: boolean;
-};
 
 type MatchScreenSourceViewModel = {
   resolvedMatchId: string;

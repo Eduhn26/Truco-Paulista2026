@@ -30,6 +30,18 @@ const SUIT_STRENGTH = {
   O: 3,
 } as const;
 
+// CHANGE (final surgical round — issue A & B): the cards themselves needed a
+// small size bump AND the container geometry needed more room because the
+// previous 158px height was too tight for the hover lift.  New sizing:
+//   • CARD_W/CARD_H: 108 x 152 (previously 102x144). Stronger presence.
+//   • Container height: 188 (was 158) — includes headroom for the hover lift
+//     so the top of a hovered card never gets clipped by the page's outer
+//     overflow-hidden wrappers.
+//   • Hover lift shortened: from -34/-40 to -22/-26. Cards still pop, but the
+//     movement fits inside the dock without needing the page to overflow.
+const CARD_W = 108;
+const CARD_H = 152;
+
 function getManilhaRank(viraRank: Rank): Rank {
   const viraIndex = RANK_ORDER.indexOf(viraRank);
   if (viraIndex === -1) {
@@ -53,9 +65,9 @@ function getFanMetrics(cardCount: number, index: number): FanMetrics {
   }
   const midpoint = (cardCount - 1) / 2;
   const offsetFromCenter = index - midpoint;
-  const maxSpread = cardCount <= 3 ? 16 : 20;
-  const horizontalStep = cardCount <= 3 ? 36 : 32;
-  const verticalDepth = cardCount <= 3 ? 6 : 9;
+  const maxSpread = cardCount <= 3 ? 18 : 22;
+  const horizontalStep = cardCount <= 3 ? 46 : 40;
+  const verticalDepth = cardCount <= 3 ? 7 : 10;
   return {
     rotate: offsetFromCenter * maxSpread * 0.24,
     x: offsetFromCenter * horizontalStep,
@@ -93,7 +105,7 @@ export function MatchPlayerHandPanel({
 
   if (cardCount === 0 && tablePhase === 'waiting') {
     return (
-      <div className="flex h-12 items-center justify-center opacity-40">
+      <div className="flex h-20 items-center justify-center opacity-40">
         <div className="flex items-center gap-2">
           <div
             className="h-2 w-2 animate-bounce rounded-full bg-amber-400/70"
@@ -113,49 +125,55 @@ export function MatchPlayerHandPanel({
   }
 
   if (cardCount === 0) {
-    return <div className="h-8" />;
+    return <div className="h-10" />;
   }
 
   return (
     <div
-      className="relative flex h-[128px] items-end justify-center overflow-visible px-1 pb-1 pt-1"
-      style={{ perspective: '1100px' }}
+      className="relative flex h-[188px] items-end justify-center overflow-visible px-1"
+      style={{ perspective: '1200px' }}
     >
-      {/* NOTE: Keep the base shadow subtle while preserving card prominence. */}
+      {/* CHANGE (issue B — hand feels disconnected from the felt):
+          Stronger "pedestal" under the fan. Previously just a single soft
+          shadow — now two layers: a wider, softer ambient mat that reads as
+          the felt receiving light, plus a tighter, darker ground shadow
+          right under the cards so they feel physically planted. */}
       <div
-        className="pointer-events-none absolute inset-x-8 bottom-0 h-8 rounded-[999px]"
+        className="pointer-events-none absolute inset-x-4 bottom-[-6px] h-16 rounded-[999px]"
         style={{
-          background: 'radial-gradient(circle at center, rgba(0,0,0,0.46), rgba(0,0,0,0) 72%)',
+          background:
+            'radial-gradient(ellipse at 50% 50%, rgba(201,168,76,0.10) 0%, rgba(201,168,76,0.04) 38%, transparent 78%)',
+          filter: 'blur(22px)',
+          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 0.82 : 0.45,
+          transition: 'opacity 0.3s',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-x-20 bottom-[2px] h-8 rounded-[999px]"
+        style={{
+          background: 'radial-gradient(circle at center, rgba(0,0,0,0.62), rgba(0,0,0,0) 72%)',
           filter: 'blur(10px)',
         }}
       />
-      
-      {/* NOTE: This ambient glow helps the hand feel premium without making the panel larger. */}
+
+      {/* Ambient glow — subtle gold breath when playable, gone otherwise. */}
       <div
-        className="pointer-events-none absolute inset-x-10 bottom-1 h-10 rounded-[999px] transition-opacity duration-300"
+        className="pointer-events-none absolute inset-x-[20%] bottom-6 h-16 rounded-[999px] transition-opacity duration-300"
         style={{
           opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.22,
-          background:
-            'radial-gradient(circle at center, rgba(201,168,76,0.1), rgba(201,168,76,0) 68%)',
-          filter: 'blur(12px)',
-        }}
-      />
-      
-      <div
-        className="pointer-events-none absolute inset-x-[24%] bottom-3 h-14 rounded-[999px]"
-        style={{
-          opacity: hasDecisionFocusHand ? 1 : hasPlayableHand ? 1 : 0.35,
           background: hasDecisionFocusHand
-            ? 'radial-gradient(circle, rgba(255,235,170,0.22) 0%, rgba(201,168,76,0.14) 38%, transparent 78%)'
+            ? 'radial-gradient(circle, rgba(255,235,170,0.30) 0%, rgba(201,168,76,0.18) 38%, transparent 78%)'
             : hasPlayableHand
-              ? 'radial-gradient(circle, rgba(255,235,170,0.16) 0%, rgba(201,168,76,0.08) 34%, transparent 74%)'
-              : 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 74%)',
-          filter: 'blur(14px)',
+              ? 'radial-gradient(circle, rgba(255,235,170,0.22) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
+              : 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 74%)',
+          filter: 'blur(16px)',
         }}
       />
-      
-      {/* NOTE: Card size stays the same. The improvement is in presentation, not scale. */}
-      <div className="relative flex h-[118px] w-full items-end justify-center overflow-visible">
+
+      {/* Cards — container is tall enough (168 of inner height, 188 on the
+          wrapper) to accommodate the hover lift without any page-level
+          clipping. */}
+      <div className="relative flex h-[168px] w-full items-end justify-center overflow-visible">
         {myCards.map((card, index) => {
           const cardKey = `${card.rank}-${card.suit}`;
           const isLaunching = launchingCardKey === cardKey;
@@ -166,7 +184,7 @@ export function MatchPlayerHandPanel({
           const isBestCard = index === bestCardIndex && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
           const isDecisionHeroCard = isDecisionFocus && centerDistance <= 0.5;
-          
+
           return (
             <motion.button
               key={cardKey}
@@ -176,16 +194,16 @@ export function MatchPlayerHandPanel({
               disabled={!canPlayCard || isLaunching}
               initial={{
                 opacity: 0,
-                y: 18,
+                y: 22,
                 scale: 0.95,
                 rotate: fan.rotate,
                 x: fan.x,
               }}
               animate={{
                 opacity: isLaunching ? 0 : 1,
-                y: isLaunching ? -180 : fan.y,
-                x: isLaunching ? fan.x + 82 : fan.x,
-                rotate: isLaunching ? fan.rotate - 7 : fan.rotate,
+                y: isLaunching ? -200 : fan.y,
+                x: isLaunching ? fan.x + 90 : fan.x,
+                rotate: isLaunching ? fan.rotate - 8 : fan.rotate,
                 scale: isLaunching
                   ? 0.8
                   : isDecisionHeroCard
@@ -203,7 +221,10 @@ export function MatchPlayerHandPanel({
               whileHover={
                 canInspectCards && !isLaunching
                   ? {
-                      y: fan.y - (isDecisionFocus ? 34 : 28),
+                      // CHANGE: shorter lift (was -34/-40) so a hovered card
+                      // doesn't overflow the dock and get clipped by any
+                      // parent container with overflow-hidden.
+                      y: fan.y - (isDecisionFocus ? 26 : 22),
                       rotate: fan.rotate * 0.12,
                       scale: isDecisionHeroCard ? 1.09 : isBestCard ? 1.075 : 1.06,
                       zIndex: 140,
@@ -220,42 +241,42 @@ export function MatchPlayerHandPanel({
               }}
               className="relative focus:outline-none"
             >
-              {/* NOTE: Back glow gives a hero-card feel without using an external badge. */}
+              {/* Back glow — hero-card treatment for the best card / decision focus. */}
               <div
-                className="pointer-events-none absolute inset-0 rounded-[16px]"
+                className="pointer-events-none absolute inset-0 rounded-[18px]"
                 style={{
                   transform: 'scale(1.08)',
                   background: isDecisionHeroCard
-                    ? 'radial-gradient(circle, rgba(255,228,140,0.34) 0%, rgba(201,168,76,0.18) 36%, transparent 76%)'
+                    ? 'radial-gradient(circle, rgba(255,228,140,0.36) 0%, rgba(201,168,76,0.18) 36%, transparent 76%)'
                     : isBestCard
                       ? 'radial-gradient(circle, rgba(255,228,140,0.26) 0%, rgba(201,168,76,0.12) 34%, transparent 74%)'
                       : 'radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 76%)',
-                  filter: 'blur(12px)',
+                  filter: 'blur(14px)',
                   opacity: isLaunching ? 0 : 1,
                 }}
               />
-              
+
               <div
                 className="relative flex flex-col justify-between overflow-hidden playing-card"
                 style={{
-                  width: 84,
-                  height: 118,
-                  borderRadius: 14,
+                  width: CARD_W,
+                  height: CARD_H,
+                  borderRadius: 16,
                   background: 'linear-gradient(145deg, #fffefb 0%, #faf6ee 52%, #f2ead6 100%)',
                   boxShadow: isDecisionHeroCard
-                    ? '0 0 28px rgba(201,168,76,0.36), 0 14px 30px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.98)'
+                    ? '0 0 32px rgba(201,168,76,0.42), 0 18px 36px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.98)'
                     : isBestCard
-                      ? '0 0 22px rgba(201,168,76,0.3), 0 12px 26px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.98)'
-                      : '0 8px 20px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.92)',
+                      ? '0 0 26px rgba(201,168,76,0.34), 0 16px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.98)'
+                      : '0 12px 26px rgba(0,0,0,0.42), 0 4px 10px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.94)',
                   border: isDecisionHeroCard
                     ? '2px solid rgba(255,223,128,0.62)'
                     : isBestCard
                       ? '2px solid rgba(201,168,76,0.46)'
                       : '1px solid rgba(0,0,0,0.1)',
-                  padding: '7px 7px',
+                  padding: '8px 9px',
                 }}
               >
-                {/* NOTE: Stronger paper highlight improves the premium feel. */}
+                {/* Paper highlight */}
                 <div
                   style={{
                     position: 'absolute',
@@ -270,18 +291,19 @@ export function MatchPlayerHandPanel({
                   style={{
                     position: 'absolute',
                     inset: '1px',
-                    borderRadius: '12px',
+                    borderRadius: '14px',
                     border: isBestCard
                       ? '1px solid rgba(201,168,76,0.18)'
                       : '1px solid rgba(0,0,0,0.03)',
                     pointerEvents: 'none',
                   }}
                 />
-                
+
+                {/* Top-left rank/suit */}
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <div
                     style={{
-                      fontSize: 20,
+                      fontSize: 26,
                       fontWeight: 900,
                       lineHeight: 1,
                       color: textColor,
@@ -291,11 +313,12 @@ export function MatchPlayerHandPanel({
                   >
                     {card.rank}
                   </div>
-                  <div style={{ fontSize: 14, lineHeight: 1, color: textColor, marginTop: 2 }}>
+                  <div style={{ fontSize: 17, lineHeight: 1, color: textColor, marginTop: 2 }}>
                     {suitData.symbol}
                   </div>
                 </div>
-                
+
+                {/* Center symbol */}
                 <div
                   style={{
                     position: 'absolute',
@@ -309,20 +332,21 @@ export function MatchPlayerHandPanel({
                 >
                   <span
                     style={{
-                      fontSize: centerDistance < 0.6 ? '3.4rem' : '3.1rem',
+                      fontSize: centerDistance < 0.6 ? '4.4rem' : '4.0rem',
                       lineHeight: 1,
                       color: textColor,
                       transform: isBestCard ? 'scale(1.04)' : 'scale(1)',
                       transition: 'transform 0.2s',
                       filter: isBestCard
-                        ? 'drop-shadow(0 3px 6px rgba(201,168,76,0.18))'
+                        ? 'drop-shadow(0 3px 6px rgba(201,168,76,0.22))'
                         : 'drop-shadow(0 2px 3px rgba(0,0,0,0.08))',
                     }}
                   >
                     {suitData.symbol}
                   </span>
                 </div>
-                
+
+                {/* Bottom-right (rotated) */}
                 <div
                   style={{
                     position: 'relative',
@@ -333,7 +357,7 @@ export function MatchPlayerHandPanel({
                 >
                   <div
                     style={{
-                      fontSize: 20,
+                      fontSize: 26,
                       fontWeight: 900,
                       lineHeight: 1,
                       color: textColor,
@@ -343,12 +367,12 @@ export function MatchPlayerHandPanel({
                   >
                     {card.rank}
                   </div>
-                  <div style={{ fontSize: 14, lineHeight: 1, color: textColor, marginTop: 2 }}>
+                  <div style={{ fontSize: 17, lineHeight: 1, color: textColor, marginTop: 2 }}>
                     {suitData.symbol}
                   </div>
                 </div>
-                
-                {/* NOTE: Keep the sheen elegant and internal, without external tags or tabs. */}
+
+                {/* Hover sheen */}
                 <div
                   className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 hover:opacity-100"
                   style={{

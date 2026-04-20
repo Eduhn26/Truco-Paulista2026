@@ -47,17 +47,13 @@ describe('StartHandUseCase', () => {
     const repo = new FakeMatchRepository();
     const useCase = new StartHandUseCase(repo);
 
-    await expect(useCase.execute({ matchId: 'missing' })).rejects.toThrow(
-      'match not found',
-    );
+    await expect(useCase.execute({ matchId: 'missing' })).rejects.toThrow('match not found');
   });
 
   it('throws when matchId is empty', async () => {
     const repo = new FakeMatchRepository();
     const useCase = new StartHandUseCase(repo);
 
-    await expect(useCase.execute({ matchId: '   ' })).rejects.toThrow(
-      'matchId is required',
-    );
+    await expect(useCase.execute({ matchId: '   ' })).rejects.toThrow('matchId is required');
   });
 });
