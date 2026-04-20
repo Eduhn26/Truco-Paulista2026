@@ -161,7 +161,7 @@ function CardShape({
     // matches the reference image's opponent card backs).
     return (
       <div
-        className={`relative rounded-[14px] border ${compact ? 'h-[96px] w-[68px]' : 'h-[120px] w-[86px]'}`}
+        className={`relative rounded-[16px] border ${compact ? 'h-[112px] w-[80px]' : 'h-[148px] w-[106px]'}`}
         style={{
           background: 'linear-gradient(180deg, #132643 0%, #0b1a32 50%, #091528 100%)',
           borderColor: 'rgba(230,195,100,0.32)',
@@ -170,7 +170,7 @@ function CardShape({
         }}
       >
         <div
-          className="absolute inset-[4px] rounded-[10px]"
+          className="absolute inset-[5px] rounded-[12px]"
           style={{
             background:
               'repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 4px)',
@@ -182,7 +182,7 @@ function CardShape({
           className="absolute inset-0 flex items-center justify-center font-black"
           style={{
             fontFamily: 'Georgia, serif',
-            fontSize: compact ? 20 : 26,
+            fontSize: compact ? 24 : 32,
             letterSpacing: '0.02em',
             color: 'transparent',
             background: 'linear-gradient(180deg, #f2d488 0%, #c9a84c 55%, #8a6a28 100%)',
@@ -197,8 +197,8 @@ function CardShape({
         <div
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
           style={{
-            width: compact ? 42 : 54,
-            height: compact ? 42 : 54,
+            width: compact ? 50 : 68,
+            height: compact ? 50 : 68,
             border: '1px solid rgba(230,195,100,0.24)',
             boxShadow: 'inset 0 0 12px rgba(230,195,100,0.12)',
           }}
@@ -217,8 +217,8 @@ function CardShape({
             : {}
       }
       transition={{ duration: 1.1, repeat: winner || highlight ? Infinity : 0 }}
-      className={`relative rounded-[16px] border ${
-        compact ? 'h-[86px] w-[62px]' : 'h-[132px] w-[94px]'
+      className={`relative rounded-[18px] border ${
+        compact ? 'h-[100px] w-[72px]' : 'h-[162px] w-[116px]'
       }`}
       style={{
         background: 'linear-gradient(180deg, #fefdf8 0%, #f8f5ec 50%, #f5f0e4 100%)',
@@ -242,15 +242,15 @@ function CardShape({
         />
       ) : null}
 
-      <div className="absolute left-2 top-1.5 flex flex-col items-start leading-none">
+      <div className="absolute left-2.5 top-2 flex flex-col items-start leading-none">
         <span
-          className={`${compact ? 'text-[16px]' : 'text-[22px]'} font-black`}
+          className={`${compact ? 'text-[18px]' : 'text-[28px]'} font-black`}
           style={{ color: isRed ? '#b91c1c' : '#0f172a' }}
         >
           {rank}
         </span>
         <span
-          className={`${compact ? 'text-[12px]' : 'text-[16px]'} font-black leading-none`}
+          className={`${compact ? 'text-[14px]' : 'text-[20px]'} font-black leading-none`}
           style={{ color: isRed ? '#ef4444' : '#111827' }}
         >
           {symbol}
@@ -259,16 +259,16 @@ function CardShape({
 
       <div
         className={`absolute inset-0 flex items-center justify-center ${
-          compact ? 'text-[22px]' : 'text-[36px]'
+          compact ? 'text-[26px]' : 'text-[48px]'
         } font-black`}
         style={{ color: isRed ? '#ef4444' : '#111827', opacity: 0.92 }}
       >
         {symbol}
       </div>
 
-      <div className="absolute bottom-1.5 right-2 rotate-180 leading-none">
+      <div className="absolute bottom-2 right-2.5 rotate-180 leading-none">
         <span
-          className={`${compact ? 'text-[12px]' : 'text-[16px]'} font-black`}
+          className={`${compact ? 'text-[14px]' : 'text-[20px]'} font-black`}
           style={{ color: isRed ? '#ef4444' : '#111827' }}
         >
           {symbol}
@@ -278,13 +278,9 @@ function CardShape({
   );
 }
 
-// CHANGE: Opponent group — avatar pill sits IMMEDIATELY above the 3 face-down
+// Opponent group — avatar pill sits IMMEDIATELY above the 3 face-down
 // cards, tight coupling. Matches the reference where T2A + cards are one
 // visual unit. Adds a subtle ground shadow under the cards to anchor them.
-// Maps a short backend-owned avatarKey to a tiny visual glyph. Frontend-only
-// concern (backend only speaks the key). Unknown keys fall back to the first
-// letter of the display name via resolveSeatAvatar() below — never an empty
-// square.
 const BOT_AVATAR_GLYPHS: Record<string, string> = {
   spade: '♠',
   club: '♣',
@@ -297,8 +293,6 @@ const BOT_AVATAR_GLYPHS: Record<string, string> = {
   leaf: '🍃',
 };
 
-// Maps a profile to a short PT-BR label shown as a subdued tag under the bot
-// name. Kept tiny on purpose so it never competes with match state.
 const BOT_PROFILE_LABELS: Record<string, string> = {
   balanced: 'Equilibrado',
   aggressive: 'Agressivo',
@@ -329,19 +323,17 @@ function resolveProfileLabel(profile: string): string {
 
 function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent: boolean }) {
   const isCurrentTurn = seat.isCurrentTurn;
-  const displayName = seat.isMine
-    ? 'Você'
-    : seat.botIdentity?.displayName ?? seat.seatId;
+  const displayName = seat.isMine ? 'Você' : (seat.botIdentity?.displayName ?? seat.seatId);
   const avatar = resolveSeatAvatar(seat, displayName);
   const profileLabel =
     seat.isBot && seat.botIdentity ? resolveProfileLabel(seat.botIdentity.profile) : null;
 
   return (
-    <div className="flex flex-col items-center gap-2.5">
+    <div className="flex flex-col items-center gap-1.5">
       <motion.div
         animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
         transition={{ duration: 2.2, repeat: isCurrentTurn ? Infinity : 0 }}
-        className="relative flex items-center gap-3 rounded-full px-4 py-1.5 backdrop-blur-xl"
+        className="relative flex items-center gap-2.5 rounded-full px-3.5 py-1.5 backdrop-blur-xl"
         style={{
           background: 'linear-gradient(180deg, rgba(20,30,48,0.92), rgba(10,18,32,0.86))',
           border: isCurrentTurn
@@ -353,7 +345,7 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         }}
       >
         <div
-          className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-black"
+          className="relative z-10 flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-full font-black"
           style={{
             background: 'linear-gradient(135deg, #3a4a62 0%, #1a2234 55%, #0d141f 100%)',
             border: '1px solid rgba(255,255,255,0.16)',
@@ -368,7 +360,7 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         </div>
 
         <span
-          className="relative z-10 text-[18px] font-black leading-none"
+          className="relative z-10 text-[15px] font-black leading-none"
           style={{
             color: '#e8d5a0',
             fontFamily: 'Georgia, serif',
@@ -391,9 +383,6 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         />
       </motion.div>
 
-      {/* Tiny profile tag, only for bots with a resolved identity. Kept
-          subdued (low alpha, small caps, no background) so it reads as
-          metadata and never competes with match state. */}
       {profileLabel ? (
         <span
           className="text-[9px] font-bold uppercase leading-none tracking-[0.22em]"
@@ -406,7 +395,7 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         </span>
       ) : null}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {[0, 1, 2].map((index) => (
           <motion.div
             key={index}
@@ -414,61 +403,107 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
             animate={{ opacity: 1, y: 0, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
             transition={{ delay: index * 0.06 }}
           >
-            <CardShape faceDown />
+            <CardShape faceDown compact />
           </motion.div>
         ))}
       </div>
 
-      {/* Ground shadow under the opponent cluster so it reads as "sitting on
-          the table", not floating. */}
       <div
         aria-hidden
-        className="pointer-events-none h-3 w-40 rounded-full"
+        className="pointer-events-none h-3 w-48 rounded-full"
         style={{
-          background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.40) 0%, transparent 72%)',
-          filter: 'blur(6px)',
+          background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.44) 0%, transparent 72%)',
+          filter: 'blur(7px)',
         }}
       />
     </div>
   );
 }
 
-// CHANGE: Vira with the reference's treatment — just "Vira" in a fine gold
-// caps label above the card. No wrapper, no caption. Voiddddd clean.
+// CHANGE (issue E — Vira needs to read "special", not like a normal card):
+// Upgraded treatment. The old version had just a gold-caps "Vira" label on
+// top with a faint radial glow and the `highlight` floaty animation — too
+// close to a regular played card. New treatment:
+//   • A compact gold "V" medallion on the top-left corner of the card —
+//     like a wax seal. This is the dead giveaway that it's the Vira.
+//   • A stronger, tighter gold ring-glow around the card (not the wide
+//     ambient radial which was too diffuse).
+//   • A tiny "MANILHA DEFINIDA" caption under the label so the player
+//     understands *why* this card is special at a glance.
+//   • Kept the subdued float animation — doesn't compete with the WIN state.
 function ViraCard({ rank, suit }: { rank: string; suit: string }) {
   return (
     <div className="relative flex flex-col items-center gap-1.5">
       <span
-        className="text-[11px] font-bold tracking-[0.26em]"
+        className="text-[11px] font-bold tracking-[0.28em]"
         style={{
           color: '#e8c76a',
           fontFamily: 'Georgia, serif',
           textShadow: '0 2px 4px rgba(0,0,0,0.50)',
         }}
       >
-        Vira
+        VIRA
       </span>
 
       <div className="relative">
+        {/* Tight gold ring-glow — immediate visual separator from common cards. */}
         <div
-          className="pointer-events-none absolute -inset-3 rounded-full"
+          className="pointer-events-none absolute -inset-[6px] rounded-[24px]"
           style={{
-            background:
-              'radial-gradient(circle, rgba(230,195,100,0.28) 0%, rgba(230,195,100,0.08) 36%, transparent 70%)',
-            filter: 'blur(12px)',
+            border: '1px solid rgba(230,195,100,0.42)',
+            boxShadow: '0 0 0 1px rgba(255,223,128,0.10), 0 0 24px rgba(201,168,76,0.22)',
           }}
         />
+        {/* Soft radial under-glow, kept but tightened. */}
+        <div
+          className="pointer-events-none absolute -inset-2 rounded-full"
+          style={{
+            background:
+              'radial-gradient(circle, rgba(230,195,100,0.22) 0%, rgba(230,195,100,0.06) 42%, transparent 72%)',
+            filter: 'blur(10px)',
+          }}
+        />
+
         <div className="relative">
           <CardShape rank={rank} suit={suit} highlight />
+
+          {/* "V" wax-seal medallion on the top-right of the card, above the
+              rank. Reads as an official mark, not a sticker. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-2 -top-2 z-20 flex h-7 w-7 items-center justify-center rounded-full"
+            style={{
+              background:
+                'radial-gradient(circle at 35% 30%, #f2d488 0%, #c9a84c 58%, #7b5a1d 100%)',
+              border: '1px solid rgba(255,223,128,0.76)',
+              boxShadow:
+                '0 4px 12px rgba(0,0,0,0.42), 0 0 12px rgba(201,168,76,0.38), inset 0 1px 0 rgba(255,255,255,0.38)',
+              fontFamily: 'Georgia, serif',
+              color: '#1a1204',
+              fontWeight: 900,
+              fontSize: 12,
+              letterSpacing: '0.02em',
+            }}
+          >
+            V
+          </div>
         </div>
       </div>
+
+      <span
+        className="text-[8px] font-bold uppercase tracking-[0.28em]"
+        style={{
+          color: 'rgba(232,213,160,0.48)',
+          fontFamily: 'Georgia, serif',
+        }}
+      >
+        Manilha definida
+      </span>
     </div>
   );
 }
 
-// CHANGE: NEW — Context column on the LEFT. Absorbs "pressure" notifications
-// ("Aguardando Truco", "Truco pedido", "Resposta pendente") so they no longer
-// need to float over the cards. Modeled after the reference's
+// Absorbs "pressure" notifications — modeled after the reference's
 // "VALOR ATUAL / ESTADO" column.
 function LeftContextColumn({
   currentValue,
@@ -495,7 +530,7 @@ function LeftContextColumn({
   const valeVisuals = getTierVisuals(valeTier);
 
   return (
-    <div className="flex w-[150px] shrink-0 flex-col gap-5 self-center">
+    <div className="flex w-[108px] shrink-0 flex-col gap-3 self-center">
       <div>
         <div
           className="text-[10px] font-bold uppercase tracking-[0.22em]"
@@ -505,7 +540,7 @@ function LeftContextColumn({
         </div>
         <div className="mt-1 flex items-baseline gap-2">
           <span
-            className="text-[34px] font-black leading-none"
+            className="text-[26px] font-black leading-none"
             style={{
               color: valeTier === 'muted' ? '#e8d5a0' : 'transparent',
               background: valeTier === 'muted' ? 'none' : valeVisuals.background,
@@ -547,7 +582,7 @@ function LeftContextColumn({
           initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="mt-1 text-[16px] font-black leading-tight"
+          className="mt-1 text-[14px] font-black leading-tight"
           style={{
             color: accentColor,
             fontFamily: 'Georgia, serif',
@@ -560,10 +595,18 @@ function LeftContextColumn({
   );
 }
 
-// CHANGE: NEW — Right column with compact score + round chips (2/3 dots from
-// the reference). Absorbs "round result" notifications — when a round is
-// decided, the corresponding chip lights up gold/red and this IS the
-// notification. No central overlay needed.
+// CHANGE (issue F — score has too little weight):
+// Previously the score lived in a small card as "T1 3  x  T2 1" — legible but
+// flat, and too close to the Vale chip. New treatment:
+//   • Taller, more opinionated plate with a gold top-border accent and a
+//     stronger inner gradient.
+//   • Numbers now in a bigger, more confident size with a gold gradient fill
+//     (text-gradient-gold vocabulary) — reads as "official scoreboard",
+//     not a stat chip.
+//   • The "T1/T2" captions stay quiet; the numbers do all the talking.
+//   • Leading team gets a subtle gold glow on its number — a quiet signal,
+//     not a banner. If tied, both stay neutral.
+//   • Round chips below now get bigger taps (6px → 7px dots with more gap).
 function RightScoreColumn({
   scoreT1,
   scoreT2,
@@ -577,48 +620,75 @@ function RightScoreColumn({
   const chips = Array.from({ length: maxChips }, (_, index) => rounds[index] ?? null);
   const playedCount = rounds.filter((round) => round.finished).length;
 
+  const t1Leading = scoreT1 > scoreT2;
+  const t2Leading = scoreT2 > scoreT1;
+
   return (
-    <div className="flex w-[170px] shrink-0 flex-col items-end gap-4 self-center">
+    <div className="flex w-[124px] shrink-0 flex-col items-end gap-3 self-center">
+      {/* CHANGE: more prominent scoreboard plate */}
       <div
-        className="flex items-center gap-3 rounded-[14px] px-4 py-2"
+        className="relative flex items-center gap-3 rounded-[16px] px-4 py-2.5"
         style={{
-          background: 'linear-gradient(180deg, rgba(12,22,38,0.94), rgba(6,14,26,0.88))',
-          border: '1px solid rgba(230,195,100,0.28)',
-          boxShadow: '0 10px 22px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)',
+          background:
+            'linear-gradient(180deg, rgba(18,28,46,0.96) 0%, rgba(10,18,32,0.94) 55%, rgba(4,10,20,0.92) 100%)',
+          border: '1px solid rgba(230,195,100,0.34)',
+          boxShadow:
+            '0 14px 30px rgba(0,0,0,0.52), 0 0 18px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,223,128,0.12)',
         }}
       >
+        {/* gold top-line accent */}
+        <div
+          className="pointer-events-none absolute inset-x-4 top-0 h-px"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.58) 50%, transparent 100%)',
+          }}
+        />
+
         <div className="flex flex-col items-center">
           <span
-            className="text-[9px] font-bold uppercase tracking-[0.22em]"
-            style={{ color: 'rgba(232,213,160,0.54)' }}
+            className="text-[9px] font-black uppercase tracking-[0.24em]"
+            style={{ color: 'rgba(232,213,160,0.58)' }}
           >
             T1
           </span>
           <span
-            className="text-[26px] font-black leading-none"
-            style={{ color: '#e8d5a0', fontFamily: 'Georgia, serif' }}
+            className="text-[28px] font-black leading-none"
+            style={{
+              color: t1Leading ? '#f2d488' : '#d7c18b',
+              fontFamily: 'Georgia, serif',
+              textShadow: t1Leading
+                ? '0 0 8px rgba(201,168,76,0.38), 0 1px 2px rgba(0,0,0,0.42)'
+                : '0 1px 2px rgba(0,0,0,0.4)',
+            }}
           >
             {scoreT1}
           </span>
         </div>
 
         <span
-          className="text-[18px] font-black leading-none"
-          style={{ color: 'rgba(232,213,160,0.30)', fontFamily: 'Georgia, serif' }}
+          className="text-[16px] font-black leading-none"
+          style={{ color: 'rgba(232,213,160,0.26)', fontFamily: 'Georgia, serif' }}
         >
-          x
+          ×
         </span>
 
         <div className="flex flex-col items-center">
           <span
-            className="text-[9px] font-bold uppercase tracking-[0.22em]"
-            style={{ color: 'rgba(232,213,160,0.54)' }}
+            className="text-[9px] font-black uppercase tracking-[0.24em]"
+            style={{ color: 'rgba(232,213,160,0.58)' }}
           >
             T2
           </span>
           <span
-            className="text-[26px] font-black leading-none"
-            style={{ color: '#e8d5a0', fontFamily: 'Georgia, serif' }}
+            className="text-[28px] font-black leading-none"
+            style={{
+              color: t2Leading ? '#f2d488' : '#d7c18b',
+              fontFamily: 'Georgia, serif',
+              textShadow: t2Leading
+                ? '0 0 8px rgba(201,168,76,0.38), 0 1px 2px rgba(0,0,0,0.42)'
+                : '0 1px 2px rgba(0,0,0,0.4)',
+            }}
           >
             {scoreT2}
           </span>
@@ -626,7 +696,7 @@ function RightScoreColumn({
       </div>
 
       <div className="flex flex-col items-end gap-1.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           {chips.map((round, index) => {
             const result = round?.result ?? null;
             const finished = round?.finished ?? false;
@@ -662,7 +732,7 @@ function RightScoreColumn({
                 initial={false}
                 animate={{ scale: finished ? 1 : 0.88 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 22 }}
-                className="h-5 w-5 rounded-full"
+                className="h-[22px] w-[22px] rounded-full"
                 style={{
                   background,
                   border,
@@ -697,6 +767,17 @@ type PlayedSlotProps = {
   isTieHighlight?: boolean;
 };
 
+// CHANGE (issues C & D):
+//  C — WIN badge was sitting at `-right-2 top-2` on a 190×164 wrapper that
+//      was much larger than the 162×116 card inside. Result: the badge was
+//      floating in the wrapper's padding, NOT anchored to the card corner.
+//      The fix anchors the badge directly on the card's top-right corner
+//      (same relative parent as the card), using a tight negative offset
+//      so it reads as a ribbon on the card itself.
+//  D — Tie rounds had no visual equivalent to the WIN badge. Added an
+//      "EMPATE" badge in silver/slate tones, same mechanical placement as
+//      WIN but on BOTH played cards simultaneously so the player sees that
+//      neither card won.
 function PlayedSlot({
   label = '',
   card,
@@ -711,65 +792,31 @@ function PlayedSlot({
 }: PlayedSlotProps) {
   const shouldRenderCard = Boolean(card) || !hideEmpty;
   const showWinnerBadge = Boolean(card && isWinner && winnerBadgeLabel);
-  const showTieHighlight = Boolean(card && isTieHighlight && !isWinner);
+  const showTieBadge = Boolean(card && isTieHighlight && !isWinner);
+  void label;
 
   return (
-    <div className="relative flex min-w-[132px] flex-col items-center gap-3">
-      <span
-        className="text-[10px] font-black uppercase tracking-[0.24em]"
-        style={{
-          color: isWinner
-            ? 'rgba(242,212,136,0.96)'
-            : showTieHighlight
-              ? 'rgba(203,213,225,0.86)'
-              : 'rgba(255,255,255,0.42)',
-          textShadow: isWinner ? '0 0 10px rgba(201,168,76,0.32)' : 'none',
-        }}
-      >
-        {label}
-      </span>
-
-      <div className="relative flex h-[164px] w-[116px] items-center justify-center">
-        {showWinnerBadge ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.82, y: 6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="pointer-events-none absolute -right-2 top-0 z-30 rounded-full px-3 py-1"
-            style={{
-              background: 'linear-gradient(135deg, #f2d488 0%, #c9a84c 58%, #7b5a1d 100%)',
-              border: '1px solid rgba(255,223,128,0.84)',
-              boxShadow: '0 8px 18px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.34)',
-            }}
-          >
-            <span
-              className="text-[9px] font-black uppercase tracking-[0.2em]"
-              style={{ color: '#1a1204' }}
-            >
-              {winnerBadgeLabel}
-            </span>
-          </motion.div>
-        ) : null}
-
-        {showTieHighlight ? (
+    <div className="relative flex min-w-[188px] flex-col items-center">
+      <div className="relative flex h-[190px] w-[164px] items-center justify-center">
+        {isTieHighlight && !isWinner ? (
           <div
-            className="pointer-events-none absolute inset-x-3 top-3 z-10 h-12 rounded-full"
+            className="pointer-events-none absolute inset-x-2 top-5 z-10 h-16 rounded-full"
             style={{
               background:
-                'radial-gradient(circle at 50% 50%, rgba(203,213,225,0.18) 0%, transparent 72%)',
-              filter: 'blur(8px)',
+                'radial-gradient(circle at 50% 50%, rgba(203,213,225,0.22) 0%, transparent 72%)',
+              filter: 'blur(10px)',
             }}
           />
         ) : null}
 
         {shouldRenderCard ? (
           <motion.div
-            key={`${label}-${card?.rank ?? 'empty'}${card?.suit ?? ''}-${revealKey}`}
-            initial={{ opacity: 0, y: isLaunching ? 26 : 10, scale: 0.92, rotate: rotation }}
+            key={`${card?.rank ?? 'empty'}${card?.suit ?? ''}-${revealKey}`}
+            initial={{ opacity: 0, y: isLaunching ? 34 : 12, scale: 0.92, rotate: rotation }}
             animate={{
-              opacity: isFading ? 0.78 : 1,
-              y: isWinner ? -6 : 0,
-              scale: isWinner ? 1.04 : 1,
+              opacity: isFading ? 0.72 : 1,
+              y: isWinner ? -8 : 0,
+              scale: isWinner ? 1.08 : 1.04,
               rotate: rotation,
             }}
             transition={{
@@ -779,21 +826,21 @@ function PlayedSlot({
             className="relative"
             style={{
               filter: isWinner
-                ? 'drop-shadow(0 0 22px rgba(201,168,76,0.42))'
-                : showTieHighlight
-                  ? 'drop-shadow(0 0 12px rgba(148,163,184,0.22))'
-                  : 'none',
+                ? 'drop-shadow(0 0 32px rgba(201,168,76,0.52))'
+                : isTieHighlight
+                  ? 'drop-shadow(0 0 14px rgba(148,163,184,0.24))'
+                  : 'drop-shadow(0 14px 22px rgba(0,0,0,0.26))',
             }}
           >
             {card ? (
               <>
                 {isWinner ? (
                   <div
-                    className="pointer-events-none absolute -inset-2 rounded-[22px]"
+                    className="pointer-events-none absolute -inset-3 rounded-[24px]"
                     style={{
                       background:
-                        'radial-gradient(circle at 50% 42%, rgba(242,212,136,0.28) 0%, rgba(201,168,76,0.12) 42%, transparent 78%)',
-                      filter: 'blur(10px)',
+                        'radial-gradient(circle at 50% 42%, rgba(242,212,136,0.34) 0%, rgba(201,168,76,0.16) 42%, transparent 78%)',
+                      filter: 'blur(12px)',
                     }}
                   />
                 ) : null}
@@ -802,9 +849,9 @@ function PlayedSlot({
                   className="relative rounded-[18px]"
                   style={{
                     boxShadow: isWinner
-                      ? '0 0 0 1px rgba(255,223,128,0.58), 0 0 24px rgba(201,168,76,0.24)'
-                      : showTieHighlight
-                        ? '0 0 0 1px rgba(203,213,225,0.28)'
+                      ? '0 0 0 1px rgba(255,223,128,0.64), 0 0 28px rgba(201,168,76,0.28)'
+                      : isTieHighlight
+                        ? '0 0 0 1px rgba(203,213,225,0.30)'
                         : 'none',
                   }}
                 >
@@ -812,15 +859,94 @@ function PlayedSlot({
                     rank={card.rank}
                     suit={card.suit}
                     winner={isWinner}
-                    highlight={showTieHighlight}
+                    highlight={isTieHighlight}
                   />
+
+                  {/* CHANGE (issue C): WIN badge anchored to the card's
+                      top-right corner, with a small negative offset so it
+                      sits as a ribbon on the card itself (not floating in
+                      wrapper padding). Uses absolute positioning relative to
+                      the card's own relative parent, so it travels with the
+                      card through its rotation/scale animation. */}
+                  {showWinnerBadge ? (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.7, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      transition={{
+                        duration: 0.24,
+                        delay: 0.08,
+                        type: 'spring',
+                        stiffness: 420,
+                        damping: 22,
+                      }}
+                      className="pointer-events-none absolute -right-3 -top-3 z-30 rounded-full"
+                      style={{
+                        padding: '4px 11px',
+                        background:
+                          'linear-gradient(135deg, #f2d488 0%, #c9a84c 58%, #7b5a1d 100%)',
+                        border: '1px solid rgba(255,223,128,0.92)',
+                        boxShadow:
+                          '0 4px 10px rgba(0,0,0,0.44), 0 0 16px rgba(201,168,76,0.44), inset 0 1px 0 rgba(255,255,255,0.46)',
+                      }}
+                    >
+                      <span
+                        className="text-[10px] font-black uppercase leading-none tracking-[0.22em]"
+                        style={{
+                          color: '#1a1204',
+                          fontFamily: 'Georgia, serif',
+                          textShadow: '0 1px 0 rgba(255,255,255,0.28)',
+                        }}
+                      >
+                        {winnerBadgeLabel}
+                      </span>
+                    </motion.div>
+                  ) : null}
+
+                  {/* CHANGE (issue D): symmetric TIE badge — same mechanics
+                      as WIN but silver/slate palette, so the player gets
+                      equivalent feedback. Appears on both tied cards. */}
+                  {showTieBadge ? (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.7, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      transition={{
+                        duration: 0.24,
+                        delay: 0.08,
+                        type: 'spring',
+                        stiffness: 420,
+                        damping: 22,
+                      }}
+                      className="pointer-events-none absolute -right-3 -top-3 z-30 rounded-full"
+                      style={{
+                        padding: '4px 10px',
+                        background:
+                          'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 58%, #475569 100%)',
+                        border: '1px solid rgba(226,232,240,0.82)',
+                        boxShadow:
+                          '0 4px 10px rgba(0,0,0,0.44), 0 0 14px rgba(148,163,184,0.38), inset 0 1px 0 rgba(255,255,255,0.56)',
+                      }}
+                    >
+                      <span
+                        className="text-[10px] font-black uppercase leading-none tracking-[0.22em]"
+                        style={{
+                          color: '#0f172a',
+                          fontFamily: 'Georgia, serif',
+                          textShadow: '0 1px 0 rgba(255,255,255,0.36)',
+                        }}
+                      >
+                        Empate
+                      </span>
+                    </motion.div>
+                  ) : null}
                 </div>
               </>
             ) : (
               <div
-                className="h-[132px] w-[94px] rounded-[18px] border border-white/8"
+                className="h-[162px] w-[116px] rounded-[18px] border border-dashed"
                 style={{
-                  background: 'rgba(255,255,255,0.02)',
+                  background:
+                    'radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.025) 0%, transparent 72%)',
+                  borderColor: 'rgba(255,255,255,0.07)',
                   opacity: hideEmpty ? 0 : 1,
                 }}
               />
@@ -875,7 +1001,7 @@ function CenterActionBar({
         : 'Aumentar';
 
   return (
-    <div className="flex items-center justify-center gap-3">
+    <div className="flex items-center justify-center gap-2.5">
       <motion.button
         type="button"
         onClick={() => canTruco && onAction('request-truco')}
@@ -885,10 +1011,10 @@ function CenterActionBar({
         className="relative overflow-hidden"
         style={{
           borderRadius: 999,
-          minHeight: 44,
-          minWidth: 112,
-          padding: '10px 22px',
-          fontSize: 13,
+          minHeight: 36,
+          minWidth: 96,
+          padding: '7px 15px',
+          fontSize: 11,
           fontWeight: 900,
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
@@ -920,10 +1046,10 @@ function CenterActionBar({
         whileTap={canAccept ? { scale: 0.97 } : {}}
         style={{
           borderRadius: 999,
-          minHeight: 44,
-          minWidth: 112,
-          padding: '10px 22px',
-          fontSize: 13,
+          minHeight: 36,
+          minWidth: 96,
+          padding: '7px 15px',
+          fontSize: 11,
           fontWeight: 900,
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
@@ -958,10 +1084,10 @@ function CenterActionBar({
         whileTap={canRaise || canDecline ? { scale: 0.97 } : {}}
         style={{
           borderRadius: 999,
-          minHeight: 44,
-          minWidth: 112,
-          padding: '10px 22px',
-          fontSize: 13,
+          minHeight: 36,
+          minWidth: 96,
+          padding: '7px 15px',
+          fontSize: 11,
           fontWeight: 900,
           letterSpacing: '0.14em',
           textTransform: 'uppercase',
@@ -987,14 +1113,6 @@ function CenterActionBar({
   );
 }
 
-// CHANGE: NEW — Climax card with auto-dismiss. This is the fix for the
-// "modal travado" bug. The card:
-//   1. Is a motion.div with proper exit animation
-//   2. Auto-dismisses after CLIMAX_AUTO_DISMISS_MS via internal state
-//   3. The parent's AnimatePresence still wraps it, so if the parent unmounts
-//      it (tablePhase changes), it fades out correctly too.
-// The underlying tablePhase may stay 'hand_finished' indefinitely (backend
-// authoritative), but the visual takeover always lifts after ~2.8s.
 function HandClimaxStage({
   isMyHand,
   awardedPoints,
@@ -1008,8 +1126,6 @@ function HandClimaxStage({
   isMatchFinished: boolean;
   onDismiss: () => void;
 }) {
-  // CHANGE: auto-dismiss timer. Match finished stays 1s longer so the player
-  // has time to absorb the final verdict.
   useEffect(() => {
     const timeout = window.setTimeout(
       onDismiss,
@@ -1151,8 +1267,6 @@ function HandClimaxStage({
   );
 }
 
-
-
 function MaoDeOnzeDecisionStage({
   isVisible,
   onPlay,
@@ -1177,8 +1291,7 @@ function MaoDeOnzeDecisionStage({
       <div
         className="overflow-hidden rounded-[26px] border px-4 py-3.5 md:px-5 md:py-4 backdrop-blur-xl"
         style={{
-          background:
-            'linear-gradient(180deg, rgba(18,22,30,0.94) 0%, rgba(10,12,18,0.90) 100%)',
+          background: 'linear-gradient(180deg, rgba(18,22,30,0.94) 0%, rgba(10,12,18,0.90) 100%)',
           borderColor: 'rgba(255,223,128,0.34)',
           boxShadow:
             '0 28px 54px rgba(0,0,0,0.42), 0 0 36px rgba(201,168,76,0.16), inset 0 1px 0 rgba(255,255,255,0.06)',
@@ -1198,7 +1311,10 @@ function MaoDeOnzeDecisionStage({
             >
               Analise sua mão antes de decidir
             </h3>
-            <p className="mt-2 text-[13px] leading-relaxed" style={{ color: 'rgba(255,248,225,0.72)' }}>
+            <p
+              className="mt-2 text-[13px] leading-relaxed"
+              style={{ color: 'rgba(255,248,225,0.72)' }}
+            >
               Você ainda não pode jogar carta. Primeiro escolha se vai seguir na mão ou correr.
             </p>
           </div>
@@ -1227,8 +1343,7 @@ function MaoDeOnzeDecisionStage({
               whileTap={{ scale: 0.98 }}
               className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
               style={{
-                background:
-                  'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))',
+                background: 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))',
                 color: '#d6dde8',
                 border: '1px solid rgba(148,163,184,0.26)',
                 boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
@@ -1303,8 +1418,7 @@ function MatchResultModal({
   const title = isVictory ? 'Vitória' : 'Derrota';
   const subtitle = isVictory
     ? 'Você fechou a partida. Belo fechamento de mesa.'
-    : 'A partida terminou. Vale revisar o placar e voltar preparado para a próxima.'
-    ;
+    : 'A partida terminou. Vale revisar o placar e voltar preparado para a próxima.';
   const accentBackground = isVictory
     ? 'linear-gradient(135deg, #f2d488 0%, #c9a84c 55%, #7b5a1d 100%)'
     : 'linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%)';
@@ -1336,8 +1450,7 @@ function MatchResultModal({
         transition={{ type: 'spring', stiffness: 230, damping: 24 }}
         className="relative w-full max-w-xl overflow-hidden rounded-[30px] border px-6 py-6"
         style={{
-          background:
-            'linear-gradient(180deg, rgba(16,20,30,0.96) 0%, rgba(8,10,18,0.96) 100%)',
+          background: 'linear-gradient(180deg, rgba(16,20,30,0.96) 0%, rgba(8,10,18,0.96) 100%)',
           borderColor: isVictory ? 'rgba(255,223,128,0.36)' : 'rgba(252,165,165,0.28)',
           boxShadow:
             '0 34px 64px rgba(0,0,0,0.48), 0 0 42px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05)',
@@ -1456,7 +1569,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     closingTableCards,
   } = props;
 
-  // CHANGE: alias so the RightScoreColumn round-chips logic reads clearly.
   const publicHandForRounds = currentPublicHand;
 
   const { play } = useGameSound();
@@ -1535,10 +1647,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     availableActions.canAcceptMaoDeOnze ||
     availableActions.canDeclineMaoDeOnze;
 
-  // CHANGE: climax dismissal is now a local state controlled by the Stage
-  // component itself. Once the user clicks OR 2.8s pass, the climax is
-  // hidden even if tablePhase remains 'hand_finished'. Reset when the phase
-  // transitions away from hand_finished so the next climax can fire.
   const [climaxDismissed, setClimaxDismissed] = useState(false);
   const lastClimaxPhaseRef = useRef<TablePhase | null>(null);
 
@@ -1547,16 +1655,11 @@ export function MatchTableShell(props: MatchTableShellProps) {
       setClimaxDismissed(false);
       lastClimaxPhaseRef.current = tablePhase;
     } else if (lastClimaxPhaseRef.current !== tablePhase) {
-      // New climax-eligible phase → reset dismissal so the stage fires again.
       setClimaxDismissed(false);
       lastClimaxPhaseRef.current = tablePhase;
     }
   }, [tablePhase]);
 
-  // CHANGE: stateLabel derives from the actual hand state and feeds the
-  // LeftContextColumn. This is the main "notification absorber" — we stopped
-  // floating banners over the cards and instead write the semantic state
-  // into the left column.
   const stateInfo = useMemo<{
     label: string;
     accent: 'neutral' | 'pressure' | 'escalate' | 'win' | 'loss';
@@ -1620,7 +1723,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     winner,
   ]);
 
-  // Round chips for the RightScoreColumn.
   const roundsForChips = useMemo(() => {
     const rounds = publicHandForRounds?.rounds ?? [];
     return rounds.map((round) => ({
@@ -1629,7 +1731,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     }));
   }, [publicHandForRounds]);
 
-  // Score from scoreLabel (same parsing as the header).
   const scoreT1 = Number(props.scoreLabel?.match(/T1\s+(\d+)/)?.[1] ?? '0');
   const scoreT2 = Number(props.scoreLabel?.match(/T2\s+(\d+)/)?.[1] ?? '0');
 
@@ -1662,9 +1763,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
     }
   }, [isShowingResolvedRoundCards, play, resolvedRoundResult]);
 
-  // CHANGE: confetti + sound fire ONCE when the climax first becomes visible.
-  // Previously this could re-fire because it depended on the full `climax`
-  // object identity. Now we key off a stable signature.
   const climaxFiredRef = useRef<string | null>(null);
   useEffect(() => {
     if (!climax) {
@@ -1710,102 +1808,109 @@ export function MatchTableShell(props: MatchTableShellProps) {
   }, [climax]);
 
   return (
+    // CHANGE (issue A — cards still being clipped at the bottom):
+    // The root container used `overflow-hidden` so the felt grain/stars wouldn't
+    // spill past the rounded corners. But that ALSO clipped the player's hand
+    // when a card hover-lifted beyond the container bottom edge. Split that
+    // into two layers:
+    //   1. A decorative background wrapper (inset absolute) keeps overflow-hidden
+    //      and hosts grain, stars, arch outline, ambient pulses.
+    //   2. The content wrapper uses overflow-visible so the hand can breathe.
+    // The rounded-corner clip-path stays on the background only.
     <div
-      className="relative flex h-full min-h-0 w-full flex-col overflow-hidden"
+      className="relative flex min-h-[calc(100vh-220px)] w-full flex-col xl:min-h-[720px]"
       style={{
-        // CHANGE: felt — the reference has a dark navy with a soft curved
-        // highlight at the TOP and deepening toward the bottom. Keep the
-        // navy tone, but add a visible top arch highlight (reference has
-        // this clearly in the first third of the screen).
-        background:
-          'radial-gradient(ellipse 120% 90% at 50% -5%, rgba(70,95,128,0.32) 0%, rgba(40,58,88,0.16) 22%, transparent 42%), radial-gradient(ellipse at 50% 55%, #132036 0%, #0c1828 36%, #06101c 64%, #030810 100%)',
         borderRadius: 28,
-        // CHANGE: the outer bezel returns as a thin steel border reminiscent
-        // of the monitor frame in the reference. Not a gold ring.
         border: '1px solid rgba(120,140,170,0.16)',
         boxShadow:
           '0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), inset 0 0 200px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
-      {/* Felt grain */}
+      {/* CHANGE: decorative background layer — clipped to the rounded corners,
+          hosts all the felt/stars/arch/pulse elements so they don't leak. */}
       <div
-        className="pointer-events-none absolute inset-0"
+        aria-hidden
+        className="pointer-events-none absolute inset-0 overflow-hidden"
         style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.030'/%3E%3C/svg%3E\")",
           borderRadius: 28,
+          background:
+            'radial-gradient(ellipse 120% 90% at 50% -5%, rgba(70,95,128,0.32) 0%, rgba(40,58,88,0.16) 22%, transparent 42%), radial-gradient(ellipse at 50% 55%, #132036 0%, #0c1828 36%, #06101c 64%, #030810 100%)',
         }}
-      />
+      >
+        {/* Felt grain */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.030'/%3E%3C/svg%3E\")",
+          }}
+        />
 
-      {/* CHANGE: subtle starfield — the reference image has minute specks of
-          light on the felt. Kept low density. */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage:
-            'radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,0.20) 50%, transparent 100%), radial-gradient(1px 1px at 76% 18%, rgba(255,255,255,0.14) 50%, transparent 100%), radial-gradient(1px 1px at 14% 74%, rgba(255,255,255,0.10) 50%, transparent 100%), radial-gradient(1px 1px at 84% 72%, rgba(255,255,255,0.16) 50%, transparent 100%), radial-gradient(1px 1px at 44% 86%, rgba(255,255,255,0.08) 50%, transparent 100%), radial-gradient(1px 1px at 56% 14%, rgba(255,255,255,0.12) 50%, transparent 100%)',
-          backgroundRepeat: 'no-repeat',
-          borderRadius: 28,
-          opacity: 0.5,
-        }}
-      />
+        {/* Starfield */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,0.20) 50%, transparent 100%), radial-gradient(1px 1px at 76% 18%, rgba(255,255,255,0.14) 50%, transparent 100%), radial-gradient(1px 1px at 14% 74%, rgba(255,255,255,0.10) 50%, transparent 100%), radial-gradient(1px 1px at 84% 72%, rgba(255,255,255,0.16) 50%, transparent 100%), radial-gradient(1px 1px at 44% 86%, rgba(255,255,255,0.08) 50%, transparent 100%), radial-gradient(1px 1px at 56% 14%, rgba(255,255,255,0.12) 50%, transparent 100%)',
+            backgroundRepeat: 'no-repeat',
+            opacity: 0.5,
+          }}
+        />
 
-      {/* CHANGE: top arch outline — the reference image has an open curve at
-          the top of the mesa that reads like a console bezel. Reproduced as
-          a very soft arc outline. */}
-      <div
-        className="pointer-events-none absolute inset-x-[3%] top-[2%] h-[36%]"
-        style={{
-          borderTopLeftRadius: '46%',
-          borderTopRightRadius: '46%',
-          borderTop: '1px solid rgba(160,180,210,0.14)',
-          borderLeft: '1px solid rgba(160,180,210,0.08)',
-          borderRight: '1px solid rgba(160,180,210,0.08)',
-        }}
-      />
+        {/* Top arch outline */}
+        <div
+          className="absolute inset-x-[3%] top-[2%] h-[36%]"
+          style={{
+            borderTopLeftRadius: '46%',
+            borderTopRightRadius: '46%',
+            borderTop: '1px solid rgba(160,180,210,0.14)',
+            borderLeft: '1px solid rgba(160,180,210,0.08)',
+            borderRight: '1px solid rgba(160,180,210,0.08)',
+          }}
+        />
 
-      {/* Centre ambient — much more subtle than before, just a breath. */}
-      <div
-        className="felt-breathe-anim pointer-events-none absolute inset-x-[22%] top-[28%] h-[44%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, rgba(180,200,230,0.035) 0%, transparent 68%)',
-          filter: 'blur(24px)',
-        }}
-      />
+        {/* Centre ambient */}
+        <div
+          className="felt-breathe-anim absolute inset-x-[22%] top-[28%] h-[44%] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(180,200,230,0.035) 0%, transparent 68%)',
+            filter: 'blur(24px)',
+          }}
+        />
 
-      {/* CHANGE: central reactive pulse — kept, but intensity scaled down
-          when any side-column notification is active, so it doesn't compete. */}
-      <motion.div
-        key={`centre-pulse-${isAwaitingBet}-${isResolvingRound}`}
-        className="pointer-events-none absolute left-1/2 top-[46%] z-[1] h-[220px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-        initial={{ opacity: 0.12, scale: 0.94 }}
-        animate={{
-          opacity: isResolvingRound
-            ? [0.22, 0.4, 0.22]
-            : isAwaitingBet
-              ? [0.16, 0.3, 0.16]
-              : isMyTurn && canPlayCard
-                ? [0.1, 0.18, 0.1]
-                : [0.06, 0.1, 0.06],
-          scale: isResolvingRound ? [0.96, 1.03, 0.98] : [0.98, 1.01, 0.98],
-        }}
-        transition={{ duration: isResolvingRound ? 1.0 : 1.9, repeat: Infinity }}
-        style={{
-          background: isResolvingRound
-            ? 'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(201,168,76,0.10) 40%, transparent 72%)'
-            : isAwaitingBet
-              ? 'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.08) 40%, transparent 72%)'
-              : isMyTurn && canPlayCard
-                ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)'
-                : 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)',
-          filter: 'blur(24px)',
-        }}
-      />
+        {/* Central reactive pulse */}
+        <motion.div
+          key={`centre-pulse-${isAwaitingBet}-${isResolvingRound}`}
+          className="absolute left-1/2 top-[46%] z-[1] h-[220px] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+          initial={{ opacity: 0.12, scale: 0.94 }}
+          animate={{
+            opacity: isResolvingRound
+              ? [0.22, 0.4, 0.22]
+              : isAwaitingBet
+                ? [0.16, 0.3, 0.16]
+                : isMyTurn && canPlayCard
+                  ? [0.1, 0.18, 0.1]
+                  : [0.06, 0.1, 0.06],
+            scale: isResolvingRound ? [0.96, 1.03, 0.98] : [0.98, 1.01, 0.98],
+          }}
+          transition={{ duration: isResolvingRound ? 1.0 : 1.9, repeat: Infinity }}
+          style={{
+            background: isResolvingRound
+              ? 'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(201,168,76,0.10) 40%, transparent 72%)'
+              : isAwaitingBet
+                ? 'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.08) 40%, transparent 72%)'
+                : isMyTurn && canPlayCard
+                  ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)'
+                  : 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)',
+            filter: 'blur(24px)',
+          }}
+        />
+      </div>
 
-      {/* Main composition: 3-column arena — LEFT context | CENTER play | RIGHT score */}
-      <div className="relative flex min-h-0 flex-1 flex-col px-6 pb-3 pt-5">
-        <div className="flex flex-1 items-stretch gap-6">
-          {/* LEFT column — absorbs the pressure / state notifications */}
+      {/* Content layer — overflow-visible so the player's hand can breathe
+          past the pixel-perfect container bottom during hover-lift. */}
+      <div className="relative z-[2] flex min-h-0 flex-1 flex-col px-4 pb-5 pt-3">
+        <div className="flex flex-1 items-stretch gap-3">
           <LeftContextColumn
             currentValue={currentValue}
             valeTier={activeTier}
@@ -1813,54 +1918,45 @@ export function MatchTableShell(props: MatchTableShellProps) {
             stateAccent={stateInfo.accent}
           />
 
-          {/* CENTER — opponent cluster, played cards, vira */}
-          <div className="flex min-w-0 flex-1 flex-col items-center justify-between gap-3 py-2">
+          <div className="flex min-w-0 flex-1 flex-col items-center justify-between gap-3 py-1">
             {opponentSeatView ? <OpponentCluster seat={opponentSeatView} isOpponent /> : null}
 
-            {/* CHANGE: Vira + played cards in one horizontal row, just like
-                the reference. No labels on the slots, no separator line — the
-                cards ARE the story. */}
-            <div className="flex items-center justify-center gap-5">
+            <div className="flex items-center justify-center gap-8">
               <ViraCard rank={effectiveViraRank} suit="C" />
 
               <PlayedSlot
-                label="Oponente"
                 card={opponentCard}
                 revealKey={opponentRevealKey}
                 isWinner={opponentCardWon}
                 isFading={shouldFadeOpponentCard}
-                rotation={-7}
+                rotation={-6}
                 winnerBadgeLabel="WIN"
                 isTieHighlight={isTieRound}
               />
 
               <PlayedSlot
-                label="Você"
                 card={myCard}
                 revealKey={myRevealKey}
                 isWinner={myCardWon}
                 isFading={shouldFadeMyCard}
-                rotation={7}
+                rotation={6}
                 isLaunching={myCardLaunching}
                 winnerBadgeLabel="WIN"
                 isTieHighlight={isTieRound}
               />
             </div>
 
-            {/* CHANGE: action bar — horizontal, centered, always visible.
-                Replaces the heavy bottom dock wrapper. */}
-            <div className="mt-1">
+            <div className="mt-0">
               <CenterActionBar availableActions={availableActions} onAction={onAction} />
             </div>
           </div>
 
-          {/* RIGHT column — absorbs the round-result notifications via chips */}
           <RightScoreColumn scoreT1={scoreT1} scoreT2={scoreT2} rounds={roundsForChips} />
         </div>
 
-        {/* Bottom: player's hand. No wrapper/dock — cards sit directly on the
-            felt, matching the reference. */}
-        <div className="relative mt-2 shrink-0">
+        {/* Player hand — shrink-0 so it doesn't squeeze, with a bit more
+            vertical air. */}
+        <div className="relative mt-3 shrink-0 pb-2">
           <MatchPlayerHandDock
             myCards={myCards}
             canPlayCard={shouldBlockHandDock ? false : canPlayCard}
@@ -1878,8 +1974,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
         </div>
       </div>
 
-      {/* CHANGE: climax — now dismissable on click and auto-dismisses in
-          2.8s. This is the fix for the "modal travado" bug. */}
       <AnimatePresence>
         {climax ? (
           <HandClimaxStage
@@ -1916,9 +2010,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
         ) : null}
       </AnimatePresence>
 
-      {/* Use the legacy MatchActionSurface reference so the file still
-          imports/tree-shakes correctly even though the center uses the new
-          CenterActionBar. This avoids adding a non-functional dead import. */}
       <div className="hidden">
         <MatchActionSurface
           availableActions={availableActions}

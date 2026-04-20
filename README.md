@@ -27,9 +27,9 @@
 
 ---
 
-Estudo prático de engenharia de software construído em 21 fases incrementais. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis.
+Estudo prático de engenharia de software construído em **22 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
 
-O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial.
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: mesa premium, HUD legível, observabilidade lateral, identidade de bots e match surface defensável como hero screen de portfólio.
 
 ---
 
@@ -89,39 +89,48 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 19 | Frontend environment / OAuth / runtime hardening + product consistency | ✅ |
 | 20 | Frontend gameplay surface closure + truco core visible hardening | ✅ |
 | 21 | Match table productization + HUD / game-feel consolidation | ✅ |
+| 22 | Bot identity productization + match observability / premium surface finalization | ✅ |
 
 ---
 
-## Fase 21 — O que mudou
+## Fase 22 — O que mudou
 
-A Fase 21 fechou a **productização da mesa principal**. Depois de a Fase 20 estabilizar o core visível de gameplay, o problema deixou de ser coerência semântica sob pressão de jogo real e passou a ser presença de produto, clareza de HUD e game-feel útil.
+A Fase 22 fechou a **identidade visual dos bots, a observabilidade lateral e o refinamento final da mesa premium**. Depois de a Fase 21 transformar a `MatchPage` em uma hero screen muito mais forte, o próximo gap passou a ser refinamento sistêmico: identidade do oponente, leitura lateral de estado, equilíbrio entre centro da jogada e hand dock, diferenciação de Vira, placar, feedback de vitória/empate e composição final da mesa.
 
-**Match table productization:**
-- `MatchPage` passa a ler como mesa real e não como shell funcional
-- Feltro, HUD, cards, colunas, hand dock e action surface consolidados em linguagem visual premium
-- Tela principal ganhou mais força como hero screen de portfólio
+**Bot identity productization:**
+- Bots ganharam identidade visível de mesa — nome, avatar e perfil compõem a leitura do oponente
+- Oponente deixou de parecer apenas um seat placeholder genérico
+- A partida 1v1 ganhou mais variedade e mais presença de produto
 
-**HUD / state clarity:**
-- Valor atual, estado da mão, score e progresso de rodadas mais legíveis
-- Mesa absorve melhor estados de pressão, resultado e transição sem banners soltos
-- Special states com comunicação mais intencional e menos improvisada
+**Observability side panel:**
+- A partida agora possui uma superfície lateral secundária para leitura técnica
+- Rounds history, live state, bot telemetry e event log ganharam espaço próprio
+- O centro da mesa deixou de precisar carregar toda a observabilidade
 
-**Mão de 11 como produto:**
-- Deixou de ser apenas funcional e passou a ter tratamento visual dedicado
-- Jogador consegue analisar a própria mão antes de decidir
-- Pós-aceite usa comunicação mais contextual sem sequestrar o centro da mesa
+**Rounds / side-history refinement:**
+- Histórico de rodadas adaptado ao espaço lateral, mais legível e compatível com a dock técnica
+- A leitura deixou de parecer debug espremido
 
-**Fim de partida:**
-- Encerramento ganhou clímax visual e modal terminal
-- Vitória/derrota têm mais peso de produto e próxima ação mais clara
-- Fim de partida deixou de parecer "estado parado" e passou a comunicar conclusão real
+**Final premium table balancing:**
+- Centro da jogada, Vira, score, hand dock e side panel reequilibrados
+- Played cards recuperaram protagonismo como principal beat visual da rodada
+- A mesa ficou mais consistente como sistema visual e não como soma de componentes
 
-**Game-feel útil:**
-- Cards, turn flow e context transitions mais claros e agradáveis sem mascarar bugs
-- Mesa sustenta melhor leitura em estados intensos e em idle
-- Resultado mais defensável como produto e como screenshot de portfólio
+**Player-hand / dock refinement:**
+- Hand dock recebeu ajustes finos de presença, grounding e visibilidade
+- A mão passou a ler melhor como parte da mesa e não como bloco desconectado
 
-→ [`docs/phases/phase-21.md`](docs/phases/phase-21.md)
+**Vira / score / round feedback refinement:**
+- A Vira ganhou tratamento visual próprio e mais distinguível
+- Placar ficou mais premium e mais legível
+- Badge de vitória e feedback de empate comunicam melhor o resultado de rodada
+
+**Portfolio-grade match surface finalization:**
+- `MatchPage` mais defensável como hero screen premium
+- Identidade visual, leitura de estado, observabilidade e ergonomia convivem melhor
+- O projeto fecha esta fase com uma mesa mais coesa, legível e madura como produto
+
+→ [`docs/phases/phase-22.md`](docs/phases/phase-22.md)
 
 ---
 
@@ -168,6 +177,7 @@ curl http://localhost:8000/health/live
 | [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
 | [`docs/api.md`](docs/api.md) | Eventos WebSocket Client↔Server |
 | [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
+| [`docs/phases/phase-22.md`](docs/phases/phase-22.md) | Bot identity productization + match observability / premium surface finalization |
 | [`docs/phases/phase-21.md`](docs/phases/phase-21.md) | Match table productization + HUD / game-feel consolidation |
 | [`docs/frontend-deploy.md`](docs/frontend-deploy.md) | Contrato de env e frontend deploy |
 | [`python-bot-service/README.md`](python-bot-service/README.md) | Contrato HTTP, exemplos, health |

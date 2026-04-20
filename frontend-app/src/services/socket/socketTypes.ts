@@ -43,6 +43,26 @@ export type BotIdentityPayload = {
   profile: BotProfilePayload;
 };
 
+export type BotDecisionSourcePayload =
+  | 'heuristic'
+  | 'python-remote'
+  | 'heuristic-fallback'
+  | 'unknown'
+  | string;
+
+export type BotDecisionTelemetryPayload = {
+  seatId: SeatId;
+  teamId: 'T1' | 'T2' | string;
+  playerId: PlayerId;
+  profile: BotProfilePayload;
+  action: string;
+  source: BotDecisionSourcePayload;
+  strategy?: string;
+  handStrength?: number;
+  reason?: string;
+  occurredAt?: string;
+};
+
 export type RoomStatePayload = {
   matchId: string;
   mode?: '1v1' | '2v2' | string;
@@ -55,6 +75,7 @@ export type RoomStatePayload = {
   }>;
   canStart: boolean;
   currentTurnSeatId: SeatId | null;
+  lastBotDecision?: BotDecisionTelemetryPayload | null;
 };
 
 export type MatchAvailableActionsPayload = {
@@ -335,6 +356,8 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
 
   const mode = asOptionalString(input.mode);
 
+  const lastBotDecision = normalizeBotDecisionTelemetryPayload(input.lastBotDecision);
+
   return {
     matchId: asString(input.matchId),
     ...(mode !== undefined ? { mode } : {}),
@@ -355,6 +378,55 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       : [],
     canStart: asBoolean(input.canStart),
     currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+    ...(lastBotDecision !== undefined ? { lastBotDecision } : {}),
+  };
+}
+
+function normalizeBotDecisionTelemetryPayload(
+  value: unknown,
+): BotDecisionTelemetryPayload | undefined {
+  if (value === null) {
+    return null as unknown as BotDecisionTelemetryPayload | undefined;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const seatId = asOptionalString(input.seatId);
+  const teamId = asOptionalString(input.teamId);
+  const playerId = asOptionalString(input.playerId);
+  const profile = asOptionalString(input.profile);
+  const action = asOptionalString(input.action);
+  const source = asOptionalString(input.source);
+  const strategy = asOptionalString(input.strategy);
+  const reason = asOptionalString(input.reason);
+  const occurredAt = asOptionalString(input.occurredAt);
+  const handStrength = typeof input.handStrength === 'number' ? input.handStrength : undefined;
+
+  if (
+    seatId === undefined ||
+    teamId === undefined ||
+    playerId === undefined ||
+    profile === undefined ||
+    action === undefined ||
+    source === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    seatId,
+    teamId,
+    playerId,
+    profile,
+    action,
+    source,
+    ...(strategy !== undefined ? { strategy } : {}),
+    ...(handStrength !== undefined ? { handStrength } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(occurredAt !== undefined ? { occurredAt } : {}),
   };
 }
 

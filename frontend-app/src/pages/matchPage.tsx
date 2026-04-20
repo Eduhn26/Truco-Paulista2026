@@ -13,6 +13,7 @@ import { useMatchTableTransition } from '../features/match/useMatchTableTransiti
 import { useGameSound } from '../hooks/useGameSound';
 import { cardStringToPayload } from '../services/socket/socketTypes';
 import type {
+  BotDecisionTelemetryPayload,
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
@@ -99,6 +100,7 @@ type MatchViewModel = {
   playedRoundsCount: number;
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
+  lastBotDecision: BotDecisionTelemetryPayload | null;
 };
 
 type PendingVisualState = {
@@ -200,8 +202,7 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
       ? {
           chip: 'rgba(134, 239, 172, 0.9)',
           border: '1px solid rgba(74,222,128,0.20)',
-          background:
-            'linear-gradient(180deg, rgba(5, 40, 26, 0.97), rgba(5, 18, 14, 0.94) 100%)',
+          background: 'linear-gradient(180deg, rgba(5, 40, 26, 0.97), rgba(5, 18, 14, 0.94) 100%)',
           glow: '0 0 28px rgba(34,197,94,0.12), 0 22px 52px rgba(0,0,0,0.42)',
         }
       : feedback.tone === 'warning'
@@ -412,30 +413,30 @@ export function MatchPage() {
     [],
   );
 
-  const handleRealtimeHandStarted = useCallback((payload: {
-    matchId?: string;
-    viraRank?: Rank | null;
-  }) => {
-    if (payload.viraRank) {
-      setViraRank(payload.viraRank);
-    }
+  const handleRealtimeHandStarted = useCallback(
+    (payload: { matchId?: string; viraRank?: Rank | null }) => {
+      if (payload.viraRank) {
+        setViraRank(payload.viraRank);
+      }
 
-    if (autoNextHandTimeoutRef.current !== null) {
-      window.clearTimeout(autoNextHandTimeoutRef.current);
-      autoNextHandTimeoutRef.current = null;
-    }
+      if (autoNextHandTimeoutRef.current !== null) {
+        window.clearTimeout(autoNextHandTimeoutRef.current);
+        autoNextHandTimeoutRef.current = null;
+      }
 
-    pendingAutoNextHandKeyRef.current = null;
-    lastAutoNextHandKeyRef.current = null;
-    lastAutoNextHandWaitLogKeyRef.current = null;
-    lastHandStartedAtRef.current = Date.now();
-    startHandLockRef.current = true;
-    setIsStartHandPending(false);
-    setIsAutoNextHandArmed(false);
-    setVisualBeat('hand_intro');
-    bufferedCardsDuringIntroRef.current = [];
-    pendingBetCycleRef.current = null;
-  }, []);
+      pendingAutoNextHandKeyRef.current = null;
+      lastAutoNextHandKeyRef.current = null;
+      lastAutoNextHandWaitLogKeyRef.current = null;
+      lastHandStartedAtRef.current = Date.now();
+      startHandLockRef.current = true;
+      setIsStartHandPending(false);
+      setIsAutoNextHandArmed(false);
+      setVisualBeat('hand_intro');
+      bufferedCardsDuringIntroRef.current = [];
+      pendingBetCycleRef.current = null;
+    },
+    [],
+  );
 
   const handleRealtimeCardPlayed = useCallback(
     (payload: { matchId?: string; playerId?: string | null; card?: string | null }) => {
@@ -550,8 +551,8 @@ export function MatchPage() {
 
       const authoritativeHandInProgress = Boolean(
         publicMatchState?.state === 'in_progress' &&
-          publicMatchState.currentHand &&
-          !publicMatchState.currentHand.finished,
+        publicMatchState.currentHand &&
+        !publicMatchState.currentHand.finished,
       );
 
       if (!authoritativeHandInProgress) {
@@ -772,6 +773,7 @@ export function MatchPage() {
     const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
     const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
     const myCards = getViewerCards(currentPrivateHand);
+    const lastBotDecision = visualRoomState?.lastBotDecision ?? null;
 
     const rawAvailableActions =
       currentPrivateHand?.availableActions ??
@@ -816,13 +818,13 @@ export function MatchPage() {
     const isMyTurn = Boolean(mySeat && visualRoomState?.currentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-        !handFinished &&
-        nextDecisionType === 'play-card' &&
-        viewerCanActNow &&
-        isMyTurn &&
-        resolvedAvailableActions.canAttemptPlayCard &&
-        myCards.length > 0 &&
-        !pendingBotAction,
+      !handFinished &&
+      nextDecisionType === 'play-card' &&
+      viewerCanActNow &&
+      isMyTurn &&
+      resolvedAvailableActions.canAttemptPlayCard &&
+      myCards.length > 0 &&
+      !pendingBotAction,
     );
 
     const contractPresentation = buildMatchContractPresentation({
@@ -876,6 +878,7 @@ export function MatchPage() {
       playedRoundsCount: contractPresentation.playedRoundsCount,
       currentPublicHand,
       currentPrivateHand,
+      lastBotDecision,
     };
   }, [
     effectiveMatchId,
@@ -1209,10 +1212,13 @@ export function MatchPage() {
       window.clearTimeout(startHandPendingTimeoutRef.current);
     }
 
-    startHandPendingTimeoutRef.current = window.setTimeout(() => {
-      setIsStartHandPending(false);
-      startHandPendingTimeoutRef.current = null;
-    }, HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200);
+    startHandPendingTimeoutRef.current = window.setTimeout(
+      () => {
+        setIsStartHandPending(false);
+        startHandPendingTimeoutRef.current = null;
+      },
+      HAND_INTRO_HOLD_MS + HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS + 1200,
+    );
 
     handleStartHand();
   }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand]);
@@ -1342,8 +1348,8 @@ export function MatchPage() {
   useEffect(() => {
     const authoritativeHandInProgress = Boolean(
       publicMatchState?.state === 'in_progress' &&
-        publicMatchState.currentHand &&
-        !publicMatchState.currentHand.finished,
+      publicMatchState.currentHand &&
+      !publicMatchState.currentHand.finished,
     );
 
     if (authoritativeHandInProgress) {
@@ -1568,84 +1574,127 @@ export function MatchPage() {
             </div>
           ) : null}
 
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="relative min-h-0 flex-1">
-              <MatchTableShell
-                handStatusLabel={viewModel.handStatusLabel}
-                handStatusTone={viewModel.handStatusTone}
-                betState={viewModel.betState}
-                currentValue={viewModel.currentValue}
-                pendingValue={viewModel.pendingValue}
-                requestedBy={viewModel.requestedBy}
-                specialState={viewModel.specialState}
-                specialDecisionPending={viewModel.specialDecisionPending}
-                specialDecisionBy={viewModel.specialDecisionBy}
-                winner={viewModel.winner}
-                awardedPoints={viewModel.awardedPoints}
-                latestRound={viewModel.latestRound}
-                latestRoundMyPlayedCard={viewModel.myPlayedCard}
-                latestRoundOpponentPlayedCard={viewModel.opponentPlayedCard}
-                displayedResolvedRoundFinished={liveTableTransition.resolvedRoundFinished}
-                displayedResolvedRoundResult={liveTableTransition.resolvedRoundResult}
-                tablePhase={viewModel.tablePhase}
-                canStartHand={
-                  viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
-                }
-                scoreLabel={viewModel.scoreLabel}
-                opponentSeatView={viewModel.opponentSeatView}
-                mySeatView={viewModel.mySeatView}
-                isOneVsOne={viewModel.isOneVsOne}
-                roomMode={visualRoomState?.mode ?? null}
-                currentTurnSeatId={viewModel.currentTurnSeatId}
-                displayedOpponentPlayedCard={displayedOpponentPlayedCard}
-                displayedMyPlayedCard={displayedMyPlayedCard}
-                opponentRevealKey={liveTableTransition.opponentRevealKey}
-                myRevealKey={
-                  liveTableTransition.pendingPlayedCard?.owner === 'mine'
-                    ? liveTableTransition.pendingPlayedCard.id
-                    : (displayedMyPlayedCard?.length ?? 0)
-                }
-                myCardLaunching={Boolean(
-                  liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="pointer-events-none absolute right-3 top-3 z-40 hidden xl:block">
+                <button
+                  type="button"
+                  onClick={() => setShowSecondary((state) => !state)}
+                  className="pointer-events-auto rounded-full border border-white/10 bg-[#08111c]/92 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300 transition hover:border-white/15 hover:bg-[#0b1522] hover:text-white"
+                >
+                  {showSecondary ? 'Ocultar painel técnico' : 'Abrir painel técnico'}
+                </button>
+              </div>
+
+              <div className="relative min-h-0 flex-1">
+                <MatchTableShell
+                  handStatusLabel={viewModel.handStatusLabel}
+                  handStatusTone={viewModel.handStatusTone}
+                  betState={viewModel.betState}
+                  currentValue={viewModel.currentValue}
+                  pendingValue={viewModel.pendingValue}
+                  requestedBy={viewModel.requestedBy}
+                  specialState={viewModel.specialState}
+                  specialDecisionPending={viewModel.specialDecisionPending}
+                  specialDecisionBy={viewModel.specialDecisionBy}
+                  winner={viewModel.winner}
+                  awardedPoints={viewModel.awardedPoints}
+                  latestRound={viewModel.latestRound}
+                  latestRoundMyPlayedCard={viewModel.myPlayedCard}
+                  latestRoundOpponentPlayedCard={viewModel.opponentPlayedCard}
+                  displayedResolvedRoundFinished={liveTableTransition.resolvedRoundFinished}
+                  displayedResolvedRoundResult={liveTableTransition.resolvedRoundResult}
+                  tablePhase={viewModel.tablePhase}
+                  canStartHand={
+                    viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
+                  }
+                  scoreLabel={viewModel.scoreLabel}
+                  opponentSeatView={viewModel.opponentSeatView}
+                  mySeatView={viewModel.mySeatView}
+                  isOneVsOne={viewModel.isOneVsOne}
+                  roomMode={visualRoomState?.mode ?? null}
+                  currentTurnSeatId={viewModel.currentTurnSeatId}
+                  displayedOpponentPlayedCard={displayedOpponentPlayedCard}
+                  displayedMyPlayedCard={displayedMyPlayedCard}
+                  opponentRevealKey={liveTableTransition.opponentRevealKey}
+                  myRevealKey={
+                    liveTableTransition.pendingPlayedCard?.owner === 'mine'
+                      ? liveTableTransition.pendingPlayedCard.id
+                      : (displayedMyPlayedCard?.length ?? 0)
+                  }
+                  myCardLaunching={Boolean(
+                    liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
                     !viewModel.myPlayedCard,
-                )}
-                roundIntroKey={liveTableTransition.roundIntroKey}
-                roundResolvedKey={liveTableTransition.roundResolvedKey}
-                isResolvingRound={liveTableTransition.isResolvingRound}
-                closingTableCards={liveTableTransition.closingTableCards}
-                currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
-                currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
-                viraRank={viraRank}
-                availableActions={viewModel.availableActions}
-                onAction={handleMatchActionWithSound}
-                myCards={effectiveMyCards}
-                canPlayCard={viewModel.canPlayCard}
-                launchingCardKey={liveTableTransition.launchingCardKey}
-                currentPrivateHand={viewModel.currentPrivateHand}
-                currentPublicHand={viewModel.currentPublicHand}
-                onPlayCard={playCardWithSound}
-                playedRoundsCount={viewModel.playedRoundsCount}
-                isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
-                suppressHandOutcomeModal={
-                  suppressHandOutcomeModal || shouldDelayHandOutcomeModal
-                }
-                onHandClimaxDismissed={handleHandClimaxDismissed}
-              />
-
-              <BetFeedbackBanner feedback={betFeedback} />
-
-              {shouldRenderTrucoDebugBadge ? (
-                <TrucoDebugBadge
-                  publicMatchState={visualPublicMatchState}
-                  privateMatchState={visualPrivateMatchState}
+                  )}
+                  roundIntroKey={liveTableTransition.roundIntroKey}
+                  roundResolvedKey={liveTableTransition.roundResolvedKey}
+                  isResolvingRound={liveTableTransition.isResolvingRound}
+                  closingTableCards={liveTableTransition.closingTableCards}
+                  currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
+                  currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
+                  viraRank={viraRank}
+                  availableActions={viewModel.availableActions}
+                  onAction={handleMatchActionWithSound}
+                  myCards={effectiveMyCards}
+                  canPlayCard={viewModel.canPlayCard}
+                  launchingCardKey={liveTableTransition.launchingCardKey}
+                  currentPrivateHand={viewModel.currentPrivateHand}
+                  currentPublicHand={viewModel.currentPublicHand}
+                  onPlayCard={playCardWithSound}
+                  playedRoundsCount={viewModel.playedRoundsCount}
+                  isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
+                  suppressHandOutcomeModal={suppressHandOutcomeModal || shouldDelayHandOutcomeModal}
+                  onHandClimaxDismissed={handleHandClimaxDismissed}
                 />
-              ) : null}
+
+                <BetFeedbackBanner feedback={betFeedback} />
+
+                {shouldRenderTrucoDebugBadge ? (
+                  <TrucoDebugBadge
+                    publicMatchState={visualPublicMatchState}
+                    privateMatchState={visualPrivateMatchState}
+                  />
+                ) : null}
+              </div>
             </div>
 
-            <div className="shrink-0 px-2 pb-2 pt-1 md:px-3 md:pb-3">
+            {showSecondary ? (
+              <div className="hidden xl:block xl:w-[320px] xl:shrink-0 xl:pl-3">
+                <MatchSecondaryPanelSection
+                  variant="docked"
+                  eventLog={eventLog}
+                  connectionStatus={connectionStatus}
+                  resolvedMatchId={viewModel.resolvedMatchId}
+                  publicState={visualPublicMatchState?.state || '-'}
+                  privateState={visualPrivateMatchState?.state || '-'}
+                  mySeat={viewModel.mySeat}
+                  currentTurnSeatId={viewModel.currentTurnSeatId}
+                  canStartHand={
+                    viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
+                  }
+                  canPlayCard={viewModel.canPlayCard}
+                  betState={viewModel.betState}
+                  specialState={viewModel.specialState}
+                  availableActions={viewModel.availableActions}
+                  canRenderLiveState={canRenderLiveState}
+                  botDecisionSource={viewModel.lastBotDecision?.source ?? null}
+                  botDecisionProfile={viewModel.lastBotDecision?.profile ?? null}
+                  botLastAction={viewModel.lastBotDecision?.action ?? null}
+                  botDecisionStrategy={viewModel.lastBotDecision?.strategy ?? null}
+                  botHandStrength={viewModel.lastBotDecision?.handStrength ?? null}
+                  botReason={viewModel.lastBotDecision?.reason ?? null}
+                  botDecisionAt={viewModel.lastBotDecision?.occurredAt ?? null}
+                  rounds={viewModel.rounds}
+                  latestRound={viewModel.latestRound}
+                  playedRoundsCount={viewModel.playedRoundsCount}
+                />
+              </div>
+            ) : null}
+
+            {showSecondary ? (
               <MatchSecondaryPanelSection
-                showSecondary={showSecondary}
-                onToggle={() => setShowSecondary((state) => !state)}
+                variant="overlay"
+                onClose={() => setShowSecondary(false)}
                 eventLog={eventLog}
                 connectionStatus={connectionStatus}
                 resolvedMatchId={viewModel.resolvedMatchId}
@@ -1661,11 +1710,18 @@ export function MatchPage() {
                 specialState={viewModel.specialState}
                 availableActions={viewModel.availableActions}
                 canRenderLiveState={canRenderLiveState}
+                botDecisionSource={viewModel.lastBotDecision?.source ?? null}
+                botDecisionProfile={viewModel.lastBotDecision?.profile ?? null}
+                botLastAction={viewModel.lastBotDecision?.action ?? null}
+                botDecisionStrategy={viewModel.lastBotDecision?.strategy ?? null}
+                botHandStrength={viewModel.lastBotDecision?.handStrength ?? null}
+                botReason={viewModel.lastBotDecision?.reason ?? null}
+                botDecisionAt={viewModel.lastBotDecision?.occurredAt ?? null}
                 rounds={viewModel.rounds}
                 latestRound={viewModel.latestRound}
                 playedRoundsCount={viewModel.playedRoundsCount}
               />
-            </div>
+            ) : null}
           </div>
         </div>
       </main>

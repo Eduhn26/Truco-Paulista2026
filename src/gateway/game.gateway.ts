@@ -31,6 +31,7 @@ import {
   BOT_DECISION_PORT,
   type BotDecision,
   type BotDecisionContext,
+  type BotDecisionMetadata,
   type BotDecisionPort,
   type BotProfile,
   type BotRoundView,
@@ -295,6 +296,19 @@ type BotTurnDecisionContext = BotTurnDecisionActor & {
   context: BotDecisionContext;
 };
 
+type BotDecisionTelemetry = {
+  seatId: string;
+  teamId: 'T1' | 'T2';
+  playerId: 'P1' | 'P2';
+  profile: BotProfile;
+  action: BotDecision['action'];
+  source: 'heuristic' | 'python-remote' | 'heuristic-fallback' | 'unknown';
+  strategy?: string;
+  handStrength?: number;
+  reason?: string;
+  occurredAt: string;
+};
+
 type RoundTransitionPhase = 'round-resolved' | 'next-round-opened';
 
 type RoundTransitionPayload = {
@@ -338,6 +352,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(GameGateway.name);
   private readonly scheduledBotTurns = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingStartHands = new Set<string>();
+  private readonly lastBotDecisionByMatch = new Map<string, BotDecisionTelemetry>();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -570,7 +585,55 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private emitRoomState(matchId: string): void {
-    this.server.to(matchId).emit('room-state', this.roomManager.getState(matchId));
+    this.server
+      .to(matchId)
+      .emit(
+        'room-state',
+        this.withBotDecisionTelemetry(matchId, this.roomManager.getState(matchId)),
+      );
+  }
+
+  private withBotDecisionTelemetry<T extends object>(
+    matchId: string,
+    roomState: T,
+  ): T & { lastBotDecision: BotDecisionTelemetry | null } {
+    return {
+      ...roomState,
+      lastBotDecision: this.lastBotDecisionByMatch.get(matchId) ?? null,
+    };
+  }
+
+  private clearBotDecisionTelemetry(matchId: string): void {
+    this.lastBotDecisionByMatch.delete(matchId);
+  }
+
+  private resolveDecisionSource(
+    metadata?: BotDecisionMetadata,
+  ): 'heuristic' | 'python-remote' | 'heuristic-fallback' | 'unknown' {
+    return metadata?.source ?? 'unknown';
+  }
+
+  private rememberBotDecision(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+    decision: BotDecision,
+  ): void {
+    const metadata = decision.metadata;
+
+    this.lastBotDecisionByMatch.set(matchId, {
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+      profile: botTurnContext.context.profile,
+      action: decision.action,
+      source: this.resolveDecisionSource(metadata),
+      ...(metadata?.rationale?.strategy ? { strategy: metadata.rationale.strategy } : {}),
+      ...(metadata?.rationale?.handStrength !== undefined
+        ? { handStrength: metadata.rationale.handStrength }
+        : {}),
+      ...(decision.action === 'pass' ? { reason: decision.reason } : {}),
+      occurredAt: new Date().toISOString(),
+    });
   }
 
   private async emitSyncedMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
@@ -1343,6 +1406,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     botTurnContext: BotTurnDecisionContext,
     decision: BotDecision,
   ): Promise<boolean> {
+    this.rememberBotDecision(matchId, botTurnContext, decision);
+
     const action =
       decision.action === 'pass' || decision.action === 'play-card'
         ? 'accept-bet'
@@ -1459,6 +1524,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const decision = this.botDecisionPort.decide(botTurnContext.context);
+    this.rememberBotDecision(matchId, botTurnContext, decision);
 
     if (
       currentHand.betState === 'awaiting_response' &&
@@ -1506,7 +1572,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       botTurnContext.seatId as SeatId,
     );
 
-    this.server.to(matchId).emit('room-state', nextRoomState);
+    this.server
+      .to(matchId)
+      .emit('room-state', this.withBotDecisionTelemetry(matchId, nextRoomState));
 
     this.server.to(matchId).emit('card-played', {
       matchId,
@@ -2221,7 +2289,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const roomState = this.roomManager.setReady(socket.id, readyRaw);
 
-      this.server.to(session.matchId).emit('room-state', roomState);
+      this.server
+        .to(session.matchId)
+        .emit('room-state', this.withBotDecisionTelemetry(session.matchId, roomState));
       socket.emit('ready-updated', { ready: readyRaw });
 
       this.logGateway('debug', {
@@ -2351,8 +2421,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const dto: StartHandRequestDto = { matchId };
         const result = await this.startHandUseCase.execute(dto);
 
+        this.clearBotDecisionTelemetry(matchId);
+
         const roomState = this.roomManager.beginHand(matchId);
-        this.server.to(matchId).emit('room-state', roomState);
+        this.server
+          .to(matchId)
+          .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
 
         const startedMatchState = await this.getAuthoritativeMatchState(matchId);
         const startedViraRank = startedMatchState.currentHand?.viraRank ?? null;
@@ -2464,7 +2538,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         session.seatId,
       );
 
-      this.server.to(matchId).emit('room-state', roomState);
+      this.server.to(matchId).emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
 
       this.server.to(matchId).emit('card-played', {
         matchId,
@@ -3152,7 +3226,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // and emitting the turn pointer here, the table can remain visually stuck
       // in a non-playable state even though match-state already says play-card.
       const resumedRoomState = this.roomManager.setCurrentTurnSeat(matchId, session.seatId);
-      this.server.to(matchId).emit('room-state', resumedRoomState);
+      this.server
+        .to(matchId)
+        .emit('room-state', this.withBotDecisionTelemetry(matchId, resumedRoomState));
 
       const state = await this.emitSyncedMatchState(matchId);
       await this.finalizeMatchIfFinished(matchId, state);
@@ -3289,7 +3365,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         ? await this.viewMatchStateUseCase.execute({ matchId, viewerPlayerId })
         : null;
 
-      socket.emit('room-state', roomState);
+      socket.emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
       socket.emit('match-state', this.toPublicMatchState(publicState));
 
       if (privateState) {
