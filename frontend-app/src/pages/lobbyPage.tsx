@@ -288,6 +288,7 @@ export function LobbyPage() {
     connectionStatus,
     roomState,
     playerAssigned,
+    ranking,
     derivedMatchId,
     roomPlayers,
     currentReady,
@@ -311,6 +312,23 @@ export function LobbyPage() {
   const playerCount = roomPlayers.length;
   const isOnline = connectionStatus === 'online';
   const displayName = session?.user?.displayName ?? session?.user?.email ?? 'Jogador';
+  const currentUserId = session?.user?.id;
+
+  const rankingEntries = useMemo(() => {
+    return ranking.slice(0, 5).map((entry, index) => {
+      const normalizedName =
+        entry.displayName?.trim() || (entry.userId === currentUserId ? displayName : 'Jogador');
+      const ratingValue = typeof entry.rating === 'number' ? entry.rating : 0;
+      const isCurrentUser = currentUserId !== undefined && entry.userId === currentUserId;
+
+      return {
+        position: index + 1,
+        name: normalizedName,
+        ratingLabel: ratingValue.toLocaleString('pt-BR'),
+        isCurrentUser,
+      };
+    });
+  }, [currentUserId, displayName, ranking]);
 
   const heroAction: HeroAction = useMemo(() => {
     if (!isSocketOnline) {
@@ -948,59 +966,111 @@ export function LobbyPage() {
                 border: '1px solid rgba(201,168,76,0.2)',
               }}
             >
-              <h3
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.2em',
-                  color: 'rgba(201,168,76,0.8)',
-                  textTransform: 'uppercase',
-                  marginBottom: 12,
-                }}
-              >
-                Ranking Semanal
-              </h3>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.2em',
+                    color: 'rgba(201,168,76,0.8)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Ranking Semanal
+                </h3>
 
-              <div className="space-y-2">
-                {[
-                  { p: '1', n: 'Diego', v: '12.4K' },
-                  { p: '2', n: 'Camila', v: '9.8K' },
-                  { p: '3', n: displayName, v: '8.1K' },
-                ].map((r) => (
-                  <div
-                    key={r.p}
-                    className="flex items-center justify-between rounded-xl px-3 py-2"
-                    style={{ background: 'rgba(0,0,0,0.22)' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        style={{
-                          fontFamily: 'Georgia, serif',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          background: 'linear-gradient(135deg, #e8c76a, #c9a84c)',
-                          WebkitBackgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          backgroundClip: 'text',
-                          width: 16,
-                        }}
-                      >
-                        {r.p}
-                      </span>
-                      <span style={{ fontSize: 13, color: '#f0e6d3' }}>{r.n}</span>
-                    </div>
-                    <span
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.12em',
+                    color: 'rgba(255,255,255,0.35)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Top 5
+                </span>
+              </div>
+
+              {rankingEntries.length > 0 ? (
+                <div className="space-y-2">
+                  {rankingEntries.map((entry) => (
+                    <div
+                      key={`${entry.position}-${entry.name}`}
+                      className="flex items-center justify-between rounded-xl px-3 py-2"
                       style={{
-                        fontSize: 11,
-                        color: 'rgba(201,168,76,0.8)',
-                        fontWeight: 700,
+                        background: entry.isCurrentUser
+                          ? 'rgba(201,168,76,0.12)'
+                          : 'rgba(0,0,0,0.22)',
+                        border: entry.isCurrentUser
+                          ? '1px solid rgba(201,168,76,0.24)'
+                          : '1px solid transparent',
                       }}
                     >
-                      🪙 {r.v}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <div className="flex items-center gap-3">
+                        <span
+                          style={{
+                            fontFamily: 'Georgia, serif',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            background: 'linear-gradient(135deg, #e8c76a, #c9a84c)',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            backgroundClip: 'text',
+                            width: 16,
+                          }}
+                        >
+                          {entry.position}
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                          <span style={{ fontSize: 13, color: '#f0e6d3' }}>{entry.name}</span>
+                          {entry.isCurrentUser ? (
+                            <span
+                              className="rounded-full px-2 py-0.5 text-[9px] font-black"
+                              style={{
+                                background: 'rgba(201,168,76,0.16)',
+                                color: '#e8c76a',
+                                letterSpacing: '0.08em',
+                              }}
+                            >
+                              VOCÊ
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: 'rgba(201,168,76,0.85)',
+                          fontWeight: 700,
+                        }}
+                      >
+                        ⭐ {entry.ratingLabel}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="rounded-xl px-3 py-4"
+                  style={{
+                    background: 'rgba(0,0,0,0.22)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: 'rgba(255,255,255,0.52)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Conecte-se ao lobby para carregar o ranking real da semana.
+                  </p>
+                </div>
+              )}
             </div>
           </aside>
         </div>

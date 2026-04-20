@@ -6,6 +6,7 @@ import type { FrontendSession } from '../auth/authStorage';
 import type {
   MatchStatePayload,
   PlayerAssignedPayload,
+  RankingPayload,
   RoomStatePayload,
   ServerErrorPayload,
 } from '../../services/socket/socketTypes';
@@ -16,6 +17,7 @@ type UseLobbyRealtimeSessionResult = {
   publicMatchState: MatchStatePayload | null;
   privateMatchState: MatchStatePayload | null;
   playerAssigned: PlayerAssignedPayload | null;
+  ranking: RankingPayload['ranking'];
   eventLog: string[];
   derivedMatchId: string;
   roomPlayers: RoomStatePayload['players'];
@@ -36,6 +38,48 @@ type UseLobbyRealtimeSessionResult = {
   handleGetState: () => void;
 };
 
+const LOBBY_RANKING_STORAGE_KEY = 'truco:lobby:ranking';
+const DEFAULT_RANKING_LIMIT = 10;
+
+function readStoredRanking(): RankingPayload['ranking'] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(LOBBY_RANKING_STORAGE_KEY);
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(rawValue) as unknown;
+
+    if (!Array.isArray(parsedValue)) {
+      return [];
+    }
+
+    return parsedValue.filter((entry): entry is RankingPayload['ranking'][number] => {
+      return entry !== null && typeof entry === 'object';
+    });
+  } catch {
+    return [];
+  }
+}
+
+function persistStoredRanking(ranking: RankingPayload['ranking']): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(LOBBY_RANKING_STORAGE_KEY, JSON.stringify(ranking));
+  } catch {
+    // NOTE: Ranking persistence is a resilience layer for the lobby only.
+    // Storage failures must never break the realtime flow.
+  }
+}
+
 export function useLobbyRealtimeSession(
   session: FrontendSession | null,
   matchIdInput: string,
@@ -47,6 +91,7 @@ export function useLobbyRealtimeSession(
   const [publicMatchState, setPublicMatchState] = useState<MatchStatePayload | null>(null);
   const [privateMatchState, setPrivateMatchState] = useState<MatchStatePayload | null>(null);
   const [playerAssigned, setPlayerAssigned] = useState<PlayerAssignedPayload | null>(null);
+  const [ranking, setRanking] = useState<RankingPayload['ranking']>(() => readStoredRanking());
   const [eventLog, setEventLog] = useState<string[]>([]);
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
@@ -63,6 +108,11 @@ export function useLobbyRealtimeSession(
     setEventLog((current) =>
       [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30),
     );
+  }
+
+  function requestRanking(reason: 'connect' | 'create-match' | 'join-match' | 'get-state'): void {
+    clientRef.current?.emitGetRanking(DEFAULT_RANKING_LIMIT);
+    appendLog(`Emitted get-ranking (${DEFAULT_RANKING_LIMIT}) [${reason}].`);
   }
 
   function persistSnapshot(next: {
@@ -111,6 +161,7 @@ export function useLobbyRealtimeSession(
         onConnect: (socketId) => {
           setConnectionStatus('online');
           appendLog(`Socket connected (${socketId}).`);
+          requestRanking('connect');
         },
         onDisconnect: (reason) => {
           setConnectionStatus('offline');
@@ -143,6 +194,11 @@ export function useLobbyRealtimeSession(
           persistSnapshot({ nextPrivateMatchState: payload });
           appendLog('Received private match-state.');
         },
+        onRanking: (payload) => {
+          setRanking(payload.ranking);
+          persistStoredRanking(payload.ranking);
+          appendLog(`Received ranking (${payload.ranking.length}).`);
+        },
       },
     );
   }
@@ -156,6 +212,7 @@ export function useLobbyRealtimeSession(
   function handleCreateMatch(): void {
     clientRef.current?.emitCreateMatch('1v1', 12);
     appendLog('Emitted create-match (1v1, 12).');
+    requestRanking('create-match');
   }
 
   function handleJoinMatch(nextMatchIdInput: string): void {
@@ -168,6 +225,7 @@ export function useLobbyRealtimeSession(
 
     clientRef.current?.emitJoinMatch(nextMatchId);
     appendLog(`Emitted join-match (${nextMatchId}).`);
+    requestRanking('join-match');
   }
 
   function handleReady(): void {
@@ -186,6 +244,7 @@ export function useLobbyRealtimeSession(
 
     clientRef.current?.emitGetState(derivedMatchId);
     appendLog(`Emitted get-state (${derivedMatchId}).`);
+    requestRanking('get-state');
   }
 
   const roomPlayers = useMemo(() => roomState?.players ?? [], [roomState]);
@@ -201,6 +260,7 @@ export function useLobbyRealtimeSession(
     publicMatchState,
     privateMatchState,
     playerAssigned,
+    ranking,
     eventLog,
     derivedMatchId,
     roomPlayers,

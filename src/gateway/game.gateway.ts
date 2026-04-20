@@ -2623,14 +2623,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         limit,
       });
 
-      return { event: 'ranking', data: { ok: true } };
+      // NOTE: The ranking payload is already delivered explicitly through
+      // socket.emit('ranking', ...). The ack must use a different event name
+      // to avoid overwriting the frontend ranking state with an incompatible
+      // payload shape like { ok: true }.
+      return { event: 'ranking-ack', data: { ok: true } };
     } catch (error) {
       return this.rejectFromError('get_ranking_rejected', error, {
         socketId: socket.id,
       });
     }
   }
-
   @SubscribeMessage('get-match-history')
   async handleGetMatchHistory(
     @ConnectedSocket() socket: Socket,
