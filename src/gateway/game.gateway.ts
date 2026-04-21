@@ -27,6 +27,12 @@ import type { RaiseToSixRequestDto } from '@game/application/dtos/requests/raise
 import type { RaiseToTwelveRequestDto } from '@game/application/dtos/requests/raise-to-twelve.request.dto';
 import type { RequestTrucoRequestDto } from '@game/application/dtos/requests/request-truco.request.dto';
 import type { StartHandRequestDto } from '@game/application/dtos/requests/start-hand.request.dto';
+import type {
+  CreateMatchRecordInputDto,
+  HistoricalMatchMode,
+  HistoricalPlayerId,
+  MatchReplayEventDto,
+} from '@game/application/dtos/match-record.dto';
 import {
   BOT_DECISION_PORT,
   type BotDecision,
@@ -52,6 +58,7 @@ import { RaiseToNineUseCase } from '@game/application/use-cases/raise-to-nine.us
 import { RaiseToSixUseCase } from '@game/application/use-cases/raise-to-six.use-case';
 import { RaiseToTwelveUseCase } from '@game/application/use-cases/raise-to-twelve.use-case';
 import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
+import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
@@ -245,6 +252,8 @@ type GatewayLogContext = {
     | 'decline_mao_de_onze_succeeded'
     | 'decline_mao_de_onze_rejected'
     | 'match_finished'
+    | 'save_match_record_succeeded'
+    | 'save_match_record_rejected'
     | 'get_ranking_requested'
     | 'get_ranking_succeeded'
     | 'get_ranking_rejected'
@@ -367,6 +376,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly raiseToNineUseCase: RaiseToNineUseCase,
     private readonly raiseToTwelveUseCase: RaiseToTwelveUseCase,
     private readonly viewMatchStateUseCase: ViewMatchStateUseCase,
+    private readonly saveMatchRecordUseCase: SaveMatchRecordUseCase,
     private readonly getOrCreatePlayerProfileUseCase: GetOrCreatePlayerProfileUseCase,
     private readonly updateRatingUseCase: UpdateRatingUseCase,
     private readonly getRankingUseCase: GetRankingUseCase,
@@ -1341,6 +1351,116 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+
+  private resolveHistoricalMode(matchId: string): HistoricalMatchMode {
+    const roomState = this.roomManager.getState(matchId);
+
+    return roomState.mode === '2v2' ? '2v2' : '1v1';
+  }
+
+  private resolvePointsToWin(state: ViewMatchStateResponseDto): number {
+    const candidate = (state as { pointsToWin?: unknown }).pointsToWin;
+
+    if (typeof candidate === 'number' && Number.isInteger(candidate) && candidate > 0) {
+      return candidate;
+    }
+
+    // NOTE: The current gateway projection does not expose pointsToWin
+    // consistently yet. We persist the current product default until that
+    // field becomes explicit in the authoritative DTO.
+    return 12;
+  }
+
+  private resolveHistoricalWinnerPlayerId(
+    state: ViewMatchStateResponseDto,
+  ): HistoricalPlayerId | null {
+    if (state.score.playerOne > state.score.playerTwo) {
+      return 'P1';
+    }
+
+    if (state.score.playerTwo > state.score.playerOne) {
+      return 'P2';
+    }
+
+    return null;
+  }
+
+  private buildHistoricalParticipants(
+    matchId: string,
+  ): CreateMatchRecordInputDto['participants'] {
+    const roomState = this.roomManager.getState(matchId);
+
+    return roomState.players.map((player) => ({
+      seatId: player.seatId,
+      userId: player.userId ?? null,
+      displayName: player.botIdentity?.displayName ?? (player.isBot ? 'Bot' : null),
+      isBot: player.isBot,
+      botProfile: player.botProfile ?? null,
+    }));
+  }
+
+  private buildHistoricalReplayEvents(
+    state: ViewMatchStateResponseDto,
+    finishedAt: string,
+  ): MatchReplayEventDto[] {
+    const winnerPlayerId = this.resolveHistoricalWinnerPlayerId(state);
+    const mode = this.resolveHistoricalMode(state.matchId);
+    const pointsToWin = this.resolvePointsToWin(state);
+
+    return [
+      {
+        sequence: 0,
+        occurredAt: finishedAt,
+        payload: {
+          type: 'match-created',
+          pointsToWin,
+          mode,
+        },
+      },
+      {
+        sequence: 1,
+        occurredAt: finishedAt,
+        payload: {
+          type: 'match-finished',
+          winnerPlayerId,
+          score: {
+            playerOne: state.score.playerOne,
+            playerTwo: state.score.playerTwo,
+          },
+          finalState: state.state,
+        },
+      },
+    ];
+  }
+
+  private buildHistoricalMatchRecordInput(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+  ): CreateMatchRecordInputDto {
+    const finishedAt = new Date().toISOString();
+
+    return {
+      matchId,
+      mode: this.resolveHistoricalMode(matchId),
+      status: 'completed',
+      pointsToWin: this.resolvePointsToWin(state),
+      startedAt: null,
+      finishedAt,
+      participants: this.buildHistoricalParticipants(matchId),
+      finalState: {
+        state: state.state,
+        viraRank: state.currentHand?.viraRank ?? null,
+        score: {
+          playerOne: state.score.playerOne,
+          playerTwo: state.score.playerTwo,
+        },
+        roundsPlayed: state.currentHand?.rounds.length ?? 0,
+        winnerPlayerId: this.resolveHistoricalWinnerPlayerId(state),
+      },
+      replayEvents: this.buildHistoricalReplayEvents(state, finishedAt),
+    };
+  }
+
   private async finalizeMatchIfFinished(
     matchId: string,
     state: ViewMatchStateResponseDto,
@@ -1349,28 +1469,65 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const score = state.score;
+    const matchRecord = this.buildHistoricalMatchRecordInput(matchId, state);
 
-    if (score.playerOne === score.playerTwo) {
-      return;
+    try {
+      await this.saveMatchRecordUseCase.execute(matchRecord);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'save_match_record_succeeded',
+        status: 'succeeded',
+        matchId,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown error while saving match record';
+
+      this.logGateway('warn', {
+        layer: 'gateway',
+        event: 'save_match_record_rejected',
+        status: 'rejected',
+        matchId,
+        errorType: 'unexpected_error',
+        errorMessage: message,
+      });
     }
 
-    const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
-    const teamUserIds = this.roomManager.getTeamUserIds(matchId);
+    const score = state.score;
 
-    const winnerUserIds = (winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2).filter(Boolean);
-    const loserUserIds = (winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1).filter(Boolean);
+    if (score.playerOne !== score.playerTwo) {
+      const winnerTeamId = score.playerOne > score.playerTwo ? 'T1' : 'T2';
+      const teamUserIds = this.roomManager.getTeamUserIds(matchId);
 
-    // NOTE: In human vs bot matches one side can legitimately have no human userIds.
-    // We skip rating updates in that case instead of breaking match finalization.
-    if (winnerUserIds.length > 0 && loserUserIds.length > 0) {
-      await this.updateRatingUseCase.execute({
-        winnerUserIds,
-        loserUserIds,
+      const winnerUserIds = (winnerTeamId === 'T1' ? teamUserIds.T1 : teamUserIds.T2).filter(
+        Boolean,
+      );
+      const loserUserIds = (winnerTeamId === 'T1' ? teamUserIds.T2 : teamUserIds.T1).filter(
+        Boolean,
+      );
+
+      // NOTE: In human vs bot matches one side can legitimately have no human userIds.
+      // We skip rating updates in that case instead of breaking match finalization.
+      if (winnerUserIds.length > 0 && loserUserIds.length > 0) {
+        await this.updateRatingUseCase.execute({
+          winnerUserIds,
+          loserUserIds,
+        });
+
+        const ranking = await this.getRankingUseCase.execute({ limit: 20 });
+        this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
+      }
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'match_finished',
+        status: 'succeeded',
+        matchId,
+        teamId: winnerTeamId,
       });
 
-      const ranking = await this.getRankingUseCase.execute({ limit: 20 });
-      this.server.to(matchId).emit('rating-updated', { ranking: ranking.ranking });
+      return;
     }
 
     this.logGateway('log', {
@@ -1378,7 +1535,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       event: 'match_finished',
       status: 'succeeded',
       matchId,
-      teamId: winnerTeamId,
     });
   }
 
@@ -2679,7 +2835,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         limit,
       });
 
-      return { event: 'match-history', data: { ok: true } };
+      return { event: 'match-history-ack', data: { ok: true } };
     } catch (error) {
       return this.rejectFromError('get_match_history_rejected', error, {
         socketId: socket.id,

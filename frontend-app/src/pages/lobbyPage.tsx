@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+
 import { useAuth } from '../features/auth/authStore';
-import { useLobbyRealtimeSession } from '../features/lobby/useLobbyRealtimeSession';
+import {
+  useLobbyRealtimeSession,
+  type MatchHistoryListItemPayload,
+} from '../features/lobby/useLobbyRealtimeSession';
 
 type HeroAction = {
   label: string;
@@ -279,6 +283,61 @@ function GoldButton({
   );
 }
 
+function resolveRecentMatchViewModel(
+  historyItem: MatchHistoryListItemPayload,
+  currentUserId: string | undefined,
+): {
+  resultLabel: string;
+  resultTone: string;
+  opponentLabel: string;
+  scoreLabel: string;
+  finishedAtLabel: string;
+} {
+  const myParticipant =
+    historyItem.participants.find((participant) => participant.userId === currentUserId) ?? null;
+
+  const didCurrentUserWin =
+    (historyItem.winnerPlayerId === 'P1' && myParticipant?.seatId.startsWith('T1')) ||
+    (historyItem.winnerPlayerId === 'P2' && myParticipant?.seatId.startsWith('T2'));
+
+  const opponentParticipant =
+    historyItem.participants.find((participant) => {
+      if (!myParticipant) {
+        return participant.userId !== currentUserId;
+      }
+
+      return participant.seatId !== myParticipant.seatId;
+    }) ?? null;
+
+  const finishedAtLabel = historyItem.finishedAt
+    ? new Date(historyItem.finishedAt).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'Agora';
+
+  return {
+    resultLabel:
+      historyItem.status !== 'completed'
+        ? 'Encerrada'
+        : didCurrentUserWin
+          ? 'Vitória'
+          : 'Derrota',
+    resultTone:
+      historyItem.status !== 'completed'
+        ? 'rgba(255,255,255,0.65)'
+        : didCurrentUserWin
+          ? '#4ade80'
+          : '#f87171',
+    opponentLabel:
+      opponentParticipant?.displayName ?? (opponentParticipant?.isBot ? 'Bot' : '—'),
+    scoreLabel: `${historyItem.finalScore.playerOne} × ${historyItem.finalScore.playerTwo}`,
+    finishedAtLabel,
+  };
+}
+
 export function LobbyPage() {
   const { session } = useAuth();
   const [matchId, setMatchId] = useState('');
@@ -289,6 +348,7 @@ export function LobbyPage() {
     roomState,
     playerAssigned,
     ranking,
+    latestHistoryItem,
     derivedMatchId,
     roomPlayers,
     currentReady,
@@ -304,6 +364,7 @@ export function LobbyPage() {
     handleJoinMatch,
     handleReady,
     handleGetState,
+    handleRefreshHistory,
   } = useLobbyRealtimeSession(session, matchId);
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
@@ -329,6 +390,14 @@ export function LobbyPage() {
       };
     });
   }, [currentUserId, displayName, ranking]);
+
+  const recentMatchViewModel = useMemo(() => {
+    if (!latestHistoryItem) {
+      return null;
+    }
+
+    return resolveRecentMatchViewModel(latestHistoryItem, currentUserId);
+  }, [currentUserId, latestHistoryItem]);
 
   const heroAction: HeroAction = useMemo(() => {
     if (!isSocketOnline) {
@@ -467,8 +536,8 @@ export function LobbyPage() {
                   lineHeight: 1.5,
                 }}
               >
-                Entre em uma mesa, crie uma sala privada ou use a fila inteligente
-                para jogar rápido.
+                Entre em uma mesa, crie uma sala privada ou use a fila inteligente para jogar
+                rápido.
               </p>
             </div>
 
@@ -480,7 +549,7 @@ export function LobbyPage() {
               <GoldButton
                 size="lg"
                 variant="outline"
-                onClick={() => setShowJoinPanel((v) => !v)}
+                onClick={() => setShowJoinPanel((value) => !value)}
               >
                 Entrar em sala
               </GoldButton>
@@ -588,7 +657,7 @@ export function LobbyPage() {
                 }}
               />
 
-              {derivedMatchId && (
+              {derivedMatchId ? (
                 <div className="relative z-10 pt-4 text-center">
                   <span
                     className="rounded-full px-3 py-1 font-mono text-[10px]"
@@ -601,14 +670,14 @@ export function LobbyPage() {
                     #{derivedMatchId}
                   </span>
                 </div>
-              )}
+              ) : null}
 
               <div className="relative z-10 flex flex-col items-center justify-center gap-6 py-8 sm:gap-8">
                 <div className="flex flex-col items-center gap-2">
                   <SeatAvatar
-                    isBot={roomPlayers.find((p) => p.seatId === 'T2A')?.isBot ?? false}
+                    isBot={roomPlayers.find((player) => player.seatId === 'T2A')?.isBot ?? false}
                     isMe={playerAssigned?.seatId === 'T2A'}
-                    ready={roomPlayers.find((p) => p.seatId === 'T2A')?.ready ?? false}
+                    ready={roomPlayers.find((player) => player.seatId === 'T2A')?.ready ?? false}
                   />
                   <div className="text-center">
                     <p
@@ -649,9 +718,9 @@ export function LobbyPage() {
 
                 <div className="flex flex-col items-center gap-2">
                   <SeatAvatar
-                    isBot={roomPlayers.find((p) => p.seatId === 'T1A')?.isBot ?? false}
+                    isBot={roomPlayers.find((player) => player.seatId === 'T1A')?.isBot ?? false}
                     isMe={playerAssigned?.seatId === 'T1A'}
-                    ready={roomPlayers.find((p) => p.seatId === 'T1A')?.ready ?? false}
+                    ready={roomPlayers.find((player) => player.seatId === 'T1A')?.ready ?? false}
                   />
                   <div className="text-center">
                     <p
@@ -677,7 +746,7 @@ export function LobbyPage() {
                 </div>
               </div>
 
-              {playerCount === 0 && (
+              {playerCount === 0 ? (
                 <div
                   className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 backdrop-blur-sm"
                   style={{ background: 'rgba(4,8,14,0.65)' }}
@@ -702,7 +771,7 @@ export function LobbyPage() {
                     </span>
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div
@@ -748,19 +817,11 @@ export function LobbyPage() {
               </div>
 
               <div className="mt-3 grid grid-cols-2 gap-3">
-                <GoldButton
-                  variant="ghost"
-                  onClick={handleGetState}
-                  disabled={!canRequestState}
-                >
+                <GoldButton variant="ghost" onClick={handleGetState} disabled={!canRequestState}>
                   Obter Estado
                 </GoldButton>
 
-                <GoldButton
-                  variant="ghost"
-                  onClick={handleDisconnect}
-                  disabled={!isSocketOnline}
-                >
+                <GoldButton variant="ghost" onClick={handleDisconnect} disabled={!isSocketOnline}>
                   Desconectar
                 </GoldButton>
               </div>
@@ -822,7 +883,7 @@ export function LobbyPage() {
               </div>
             </div>
 
-            {showJoinPanel && (
+            {showJoinPanel ? (
               <div
                 className="rounded-2xl p-5"
                 style={{ background: CARD_BG, border: CARD_BORDER }}
@@ -843,7 +904,7 @@ export function LobbyPage() {
                 <div className="flex gap-3">
                   <input
                     value={matchId}
-                    onChange={(e) => setMatchId(e.target.value)}
+                    onChange={(event) => setMatchId(event.target.value)}
                     placeholder="Cole o Match ID aqui..."
                     className="flex-1 rounded-xl px-4 py-3 text-sm outline-none"
                     style={{
@@ -857,11 +918,11 @@ export function LobbyPage() {
                   </GoldButton>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
 
           <aside className="space-y-4">
-            {!hasMinimumSession && (
+            {!hasMinimumSession ? (
               <div
                 className="rounded-2xl p-5"
                 style={{
@@ -905,7 +966,142 @@ export function LobbyPage() {
                   Ir para Login
                 </Link>
               </div>
-            )}
+            ) : null}
+
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(10,18,30,0.88), rgba(7,13,23,0.74))',
+                border: CARD_BORDER,
+              }}
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.2em',
+                    color: 'rgba(201,168,76,0.8)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Última Partida
+                </h3>
+
+                <GoldButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleRefreshHistory}
+                  disabled={!isSocketOnline}
+                >
+                  Atualizar
+                </GoldButton>
+              </div>
+
+              {latestHistoryItem && recentMatchViewModel ? (
+                <div className="space-y-3">
+                  <div
+                    className="rounded-xl px-3 py-3"
+                    style={{
+                      background: 'rgba(0,0,0,0.22)',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: recentMatchViewModel.resultTone,
+                        }}
+                      >
+                        {recentMatchViewModel.resultLabel}
+                      </span>
+
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'rgba(255,255,255,0.35)',
+                          letterSpacing: '0.08em',
+                        }}
+                      >
+                        {recentMatchViewModel.finishedAtLabel}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+                          Oponente
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: '#f0e6d3',
+                          }}
+                        >
+                          {recentMatchViewModel.opponentLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+                          Placar
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: 'rgba(201,168,76,0.85)',
+                          }}
+                        >
+                          {recentMatchViewModel.scoreLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+                          Match ID
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            color: 'rgba(255,255,255,0.58)',
+                          }}
+                        >
+                          #{latestHistoryItem.matchId.slice(-8)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <GoldButton size="md" className="w-full" onClick={handleCreateMatch}>
+                    Jogar Novamente
+                  </GoldButton>
+                </div>
+              ) : (
+                <div
+                  className="rounded-xl px-3 py-4"
+                  style={{
+                    background: 'rgba(0,0,0,0.22)',
+                    border: '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: 'rgba(255,255,255,0.52)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Termine uma partida para começar a montar seu histórico recente aqui.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <div
               className="rounded-2xl p-4"
@@ -940,9 +1136,7 @@ export function LobbyPage() {
                   { label: 'Pronto', value: currentReady ? 'Sim' : 'Não', highlight: currentReady },
                 ].map(({ label, value, highlight, mono }) => (
                   <div key={label} className="flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-                      {label}
-                    </span>
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{label}</span>
                     <span
                       style={{
                         fontSize: 11,
