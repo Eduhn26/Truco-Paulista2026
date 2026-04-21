@@ -31,6 +31,28 @@ type ContinuationDescriptor = {
   action: HeroAction;
 };
 
+type RankingEntryLike = {
+  profileId?: string;
+  userId?: string;
+  displayName?: string;
+  rating?: number;
+  wins?: number;
+  losses?: number;
+  matchesPlayed?: number;
+};
+
+type ProgressSnapshot = {
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  winRateLabel: string;
+  rankingPosition: number | null;
+  ratingLabel: string | null;
+  momentumLabel: string;
+  momentumTone: string;
+  summary: string;
+};
+
 const GOLD_GRAD = 'linear-gradient(135deg, #c9a84c, #8a6a28)';
 const CARD_BG = 'linear-gradient(180deg, rgba(10,18,30,0.85), rgba(6,12,22,0.70))';
 const CARD_BORDER = '1px solid rgba(201,168,76,0.16)';
@@ -389,8 +411,7 @@ function resolveContinuationDescriptor(params: {
         'Abra a sessão em tempo real para recuperar sala ativa, histórico recente e ranking semanal.',
       action: {
         label: 'Conectar ao Lobby',
-        detail:
-          'Abra a sessão em tempo real para recuperar sua sala, histórico e ranking.',
+        detail: 'Abra a sessão em tempo real para recuperar sua sala, histórico e ranking.',
         ctaLabel: 'Conectar Socket',
         disabled: !canConnect,
         onClick: handleConnect,
@@ -498,6 +519,58 @@ function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
   };
 }
 
+function resolveProgressSnapshot(params: {
+  ranking: RankingEntryLike[];
+  currentUserId: string | undefined;
+}): ProgressSnapshot {
+  const currentUserRankingEntry =
+    params.ranking.find((entry) => entry.userId === params.currentUserId) ?? null;
+
+  const rankingPosition = currentUserRankingEntry
+    ? params.ranking.findIndex((entry) => entry.userId === params.currentUserId) + 1
+    : null;
+
+  const matchesPlayed = currentUserRankingEntry?.matchesPlayed ?? 0;
+  const wins = currentUserRankingEntry?.wins ?? 0;
+  const losses = currentUserRankingEntry?.losses ?? 0;
+  const rating = currentUserRankingEntry?.rating ?? null;
+  const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+
+  let momentumLabel = 'Começo de jornada';
+  let momentumTone = 'rgba(201,168,76,0.85)';
+
+  if (matchesPlayed >= 10 && winRate >= 60) {
+    momentumLabel = 'Boa fase';
+    momentumTone = '#4ade80';
+  } else if (matchesPlayed >= 5 && winRate < 40) {
+    momentumLabel = 'Hora da reação';
+    momentumTone = '#f87171';
+  } else if (matchesPlayed > 0) {
+    momentumLabel = 'Em evolução';
+    momentumTone = '#93c5fd';
+  }
+
+  let summary = 'Conecte-se e jogue suas primeiras partidas para montar seu momento competitivo.';
+
+  if (matchesPlayed > 0 && rankingPosition !== null) {
+    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''} e aparece em ${rankingPosition}º no ranking carregado.`;
+  } else if (matchesPlayed > 0) {
+    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''}. Continue para fortalecer seu histórico.`;
+  }
+
+  return {
+    matchesPlayed,
+    wins,
+    losses,
+    winRateLabel: `${winRate}%`,
+    rankingPosition,
+    ratingLabel: rating !== null ? rating.toLocaleString('pt-BR') : null,
+    momentumLabel,
+    momentumTone,
+    summary,
+  };
+}
+
 export function LobbyPage() {
   const { session } = useAuth();
   const [matchId, setMatchId] = useState('');
@@ -591,6 +664,13 @@ export function LobbyPage() {
   );
 
   const heroAction = continuation.action;
+
+  const progressSnapshot = useMemo(() => {
+    return resolveProgressSnapshot({
+      ranking,
+      currentUserId,
+    });
+  }, [currentUserId, ranking]);
 
   const eyebrow = !hasMinimumSession
     ? 'Sessão Obrigatória'
@@ -1111,6 +1191,129 @@ export function LobbyPage() {
                 </Link>
               </div>
             ) : null}
+
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(10,18,30,0.88), rgba(7,13,23,0.74))',
+                border: CARD_BORDER,
+              }}
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.2em',
+                    color: 'rgba(201,168,76,0.8)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Seu Momento
+                </h3>
+
+                <span
+                  className="rounded-full px-2.5 py-1"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    color: progressSnapshot.momentumTone,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                  }}
+                >
+                  {progressSnapshot.momentumLabel}
+                </span>
+              </div>
+
+              <div
+                className="rounded-xl px-3 py-3"
+                style={{
+                  background: 'rgba(0,0,0,0.22)',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                }}
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Partidas</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#f0e6d3' }}>
+                      {progressSnapshot.matchesPlayed}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Win rate</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'rgba(201,168,76,0.88)' }}>
+                      {progressSnapshot.winRateLabel}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Vitórias</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#4ade80' }}>
+                      {progressSnapshot.wins}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Derrotas</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#f87171' }}>
+                      {progressSnapshot.losses}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="mt-3 border-t pt-3"
+                  style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>Ranking</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: progressSnapshot.rankingPosition
+                          ? '#f0e6d3'
+                          : 'rgba(255,255,255,0.55)',
+                      }}
+                    >
+                      {progressSnapshot.rankingPosition
+                        ? `${progressSnapshot.rankingPosition}º`
+                        : 'Fora do top carregado'}
+                    </span>
+                  </div>
+
+                  <div className="mb-2 flex items-center justify-between">
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>Rating</span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: progressSnapshot.ratingLabel
+                          ? 'rgba(201,168,76,0.88)'
+                          : 'rgba(255,255,255,0.55)',
+                      }}
+                    >
+                      {progressSnapshot.ratingLabel ?? '—'}
+                    </span>
+                  </div>
+
+                  <p
+                    style={{
+                      fontSize: 11.5,
+                      color: 'rgba(255,255,255,0.48)',
+                      lineHeight: 1.5,
+                      marginTop: 8,
+                    }}
+                  >
+                    {progressSnapshot.summary}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <div
               className="rounded-2xl p-4"
