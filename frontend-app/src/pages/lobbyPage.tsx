@@ -15,6 +15,22 @@ type HeroAction = {
   onClick: () => void;
 };
 
+type ContinuationState =
+  | 'reconnect'
+  | 'active-room-waiting-ready'
+  | 'active-room-ready'
+  | 'recent-session'
+  | 'first-session';
+
+type ContinuationDescriptor = {
+  state: ContinuationState;
+  badge: string;
+  badgeTone: 'gold' | 'green' | 'blue';
+  title: string;
+  summary: string;
+  action: HeroAction;
+};
+
 const GOLD_GRAD = 'linear-gradient(135deg, #c9a84c, #8a6a28)';
 const CARD_BG = 'linear-gradient(180deg, rgba(10,18,30,0.85), rgba(6,12,22,0.70))';
 const CARD_BORDER = '1px solid rgba(201,168,76,0.16)';
@@ -114,11 +130,11 @@ function TopBar({ displayName }: { displayName: string }) {
             letterSpacing: '0.1em',
             textDecoration: 'none',
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'rgba(201,168,76,0.7)';
+          onMouseEnter={(event) => {
+            event.currentTarget.style.color = 'rgba(201,168,76,0.7)';
           }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'rgba(255,255,255,0.3)';
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = 'rgba(255,255,255,0.3)';
           }}
         >
           Sair
@@ -154,14 +170,14 @@ function SeatAvatar({
           transition: 'all 0.3s ease',
         }}
       >
-        {isMe && (
+        {isMe ? (
           <div
             className="absolute -top-2 -right-2 rounded-full px-1.5 py-0.5 text-[8px] font-black text-black shadow"
             style={{ background: GOLD_GRAD, letterSpacing: '0.08em' }}
           >
             VOCÊ
           </div>
-        )}
+        ) : null}
 
         {isBot ? (
           <svg className="h-7 w-7" fill="rgba(255,255,255,0.35)" viewBox="0 0 24 24">
@@ -184,12 +200,12 @@ function SeatAvatar({
           </svg>
         )}
 
-        {ready && (
+        {ready ? (
           <div
             className="pointer-events-none absolute inset-0 animate-ping rounded-full opacity-20"
             style={{ border: '2px solid rgba(201,168,76,0.6)' }}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -338,6 +354,150 @@ function resolveRecentMatchViewModel(
   };
 }
 
+function resolveContinuationDescriptor(params: {
+  isSocketOnline: boolean;
+  canConnect: boolean;
+  canCreateMatch: boolean;
+  canToggleReady: boolean;
+  derivedMatchId: string;
+  currentReady: boolean;
+  latestHistoryItem: MatchHistoryListItemPayload | null;
+  handleConnect: () => void;
+  handleCreateMatch: () => void;
+  handleReady: () => void;
+}): ContinuationDescriptor {
+  const {
+    isSocketOnline,
+    canConnect,
+    canCreateMatch,
+    canToggleReady,
+    derivedMatchId,
+    currentReady,
+    latestHistoryItem,
+    handleConnect,
+    handleCreateMatch,
+    handleReady,
+  } = params;
+
+  if (!isSocketOnline) {
+    return {
+      state: 'reconnect',
+      badge: 'Reconexão',
+      badgeTone: 'blue',
+      title: 'Reconecte para retomar sua sessão',
+      summary:
+        'Abra a sessão em tempo real para recuperar sala ativa, histórico recente e ranking semanal.',
+      action: {
+        label: 'Conectar ao Lobby',
+        detail:
+          'Abra a sessão em tempo real para recuperar sua sala, histórico e ranking.',
+        ctaLabel: 'Conectar Socket',
+        disabled: !canConnect,
+        onClick: handleConnect,
+      },
+    };
+  }
+
+  if (derivedMatchId) {
+    if (!currentReady) {
+      return {
+        state: 'active-room-waiting-ready',
+        badge: 'Sala Atual',
+        badgeTone: 'gold',
+        title: 'Sua sala atual ainda está aberta',
+        summary:
+          'Você já tem uma mesa em andamento. O próximo passo é confirmar presença para destravar a continuidade da sessão.',
+        action: {
+          label: 'Retomar Sala Atual',
+          detail:
+            'Você já tem uma mesa aberta. Confirme presença para continuar o fluxo da partida.',
+          ctaLabel: 'Marcar como Pronto',
+          disabled: !canToggleReady,
+          onClick: handleReady,
+        },
+      };
+    }
+
+    return {
+      state: 'active-room-ready',
+      badge: 'Mesa Pronta',
+      badgeTone: 'green',
+      title: 'Tudo pronto para voltar ao jogo',
+      summary:
+        'Sua sala já está preparada. O caminho principal agora é retornar direto para a mesa e continuar a partida.',
+      action: {
+        label: 'Voltar para a Mesa',
+        detail: 'Sua sala atual continua ativa. Retorne direto para o centro do jogo.',
+        ctaLabel: 'Ir para Mesa →',
+        disabled: false,
+        onClick: () => {
+          window.location.assign(`/match/${derivedMatchId}`);
+        },
+      },
+    };
+  }
+
+  if (latestHistoryItem) {
+    return {
+      state: 'recent-session',
+      badge: 'Sessão Recente',
+      badgeTone: 'gold',
+      title: 'Sua última partida já está registrada',
+      summary:
+        'O lobby já reconhece sua sessão anterior. Entre rápido em uma nova mesa e mantenha o ritmo da progressão.',
+      action: {
+        label: 'Continuar a Sessão',
+        detail:
+          'Sua última partida já está registrada. Entre rápido em uma nova mesa e mantenha o ritmo.',
+        ctaLabel: 'Jogar Novamente',
+        disabled: !canCreateMatch,
+        onClick: handleCreateMatch,
+      },
+    };
+  }
+
+  return {
+    state: 'first-session',
+    badge: 'Primeira Partida',
+    badgeTone: 'gold',
+    title: 'Tudo pronto para abrir sua próxima mesa',
+    summary:
+      'Você já está autenticado e conectado. O próximo passo natural é criar uma nova partida e entrar no fluxo principal do jogo.',
+    action: {
+      label: 'Criar Primeira Partida',
+      detail:
+        'Você já está pronto para começar. Abra uma sala e entre no fluxo principal do jogo.',
+      ctaLabel: 'Criar Partida',
+      disabled: !canCreateMatch,
+      onClick: handleCreateMatch,
+    },
+  };
+}
+
+function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
+  if (tone === 'green') {
+    return {
+      background: 'rgba(34,197,94,0.1)',
+      border: '1px solid rgba(34,197,94,0.24)',
+      color: '#4ade80',
+    };
+  }
+
+  if (tone === 'blue') {
+    return {
+      background: 'rgba(59,130,246,0.1)',
+      border: '1px solid rgba(59,130,246,0.24)',
+      color: '#93c5fd',
+    };
+  }
+
+  return {
+    background: 'rgba(201,168,76,0.08)',
+    border: '1px solid rgba(201,168,76,0.18)',
+    color: 'rgba(201,168,76,0.85)',
+  };
+}
+
 export function LobbyPage() {
   const { session } = useAuth();
   const [matchId, setMatchId] = useState('');
@@ -369,7 +529,7 @@ export function LobbyPage() {
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
   const roomModeLabel = roomState?.mode === '2v2' ? '2v2' : '1v1';
-  const readyCount = roomPlayers.filter((p) => p.ready).length;
+  const readyCount = roomPlayers.filter((player) => player.ready).length;
   const playerCount = roomPlayers.length;
   const isOnline = connectionStatus === 'online';
   const displayName = session?.user?.displayName ?? session?.user?.email ?? 'Jogador';
@@ -399,46 +559,19 @@ export function LobbyPage() {
     return resolveRecentMatchViewModel(latestHistoryItem, currentUserId);
   }, [currentUserId, latestHistoryItem]);
 
-  const heroAction: HeroAction = useMemo(() => {
-    if (!isSocketOnline) {
-      return {
-        label: 'Conectar ao Lobby',
-        detail: 'Abra a sessão em tempo real para começar a partida.',
-        ctaLabel: 'Conectar Socket',
-        disabled: !canConnect,
-        onClick: handleConnect,
-      };
-    }
-
-    if (!derivedMatchId) {
-      return {
-        label: 'Criar Partida',
-        detail: 'Gere uma nova sala e aguarde o adversário entrar.',
-        ctaLabel: 'Criar Partida',
-        disabled: !canCreateMatch,
-        onClick: handleCreateMatch,
-      };
-    }
-
-    if (!currentReady) {
-      return {
-        label: 'Confirmar Presença',
-        detail: 'Marque-se como pronto para iniciar a partida.',
-        ctaLabel: 'Marcar como Pronto',
-        disabled: !canToggleReady,
-        onClick: handleReady,
-      };
-    }
-
-    return {
-      label: 'Mesa Pronta',
-      detail: 'Todos prontos. Entre na partida agora.',
-      ctaLabel: 'Ir para Mesa →',
-      disabled: !derivedMatchId,
-      onClick: () => {
-        window.location.assign(`/match/${derivedMatchId}`);
-      },
-    };
+  const continuation = useMemo(() => {
+    return resolveContinuationDescriptor({
+      isSocketOnline,
+      canConnect,
+      canCreateMatch,
+      canToggleReady,
+      derivedMatchId,
+      currentReady,
+      latestHistoryItem,
+      handleConnect,
+      handleCreateMatch,
+      handleReady,
+    });
   }, [
     canConnect,
     canCreateMatch,
@@ -449,7 +582,15 @@ export function LobbyPage() {
     handleCreateMatch,
     handleReady,
     isSocketOnline,
+    latestHistoryItem,
   ]);
+
+  const badgeStyles = useMemo(
+    () => toneToStyles(continuation.badgeTone),
+    [continuation.badgeTone],
+  );
+
+  const heroAction = continuation.action;
 
   const eyebrow = !hasMinimumSession
     ? 'Sessão Obrigatória'
@@ -491,18 +632,32 @@ export function LobbyPage() {
 
           <div className="relative grid grid-cols-1 items-center gap-5 lg:grid-cols-[1fr_auto]">
             <div>
-              <p
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: '0.34em',
-                  color: 'rgba(255,255,255,0.38)',
-                  textTransform: 'uppercase',
-                  marginBottom: 6,
-                }}
-              >
-                BEM-VINDO DE VOLTA
-              </p>
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                <p
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.34em',
+                    color: 'rgba(255,255,255,0.38)',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  BEM-VINDO DE VOLTA
+                </p>
+
+                <span
+                  className="rounded-full px-3 py-1"
+                  style={{
+                    ...badgeStyles,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {continuation.badge}
+                </span>
+              </div>
 
               <h1
                 style={{
@@ -512,36 +667,25 @@ export function LobbyPage() {
                   color: '#f0e6d3',
                   lineHeight: 1.05,
                   marginBottom: 10,
+                  maxWidth: 760,
                 }}
               >
-                Pronto para o{' '}
-                <span
-                  style={{
-                    background: 'linear-gradient(135deg, #e8c76a, #c9a84c)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    backgroundClip: 'text',
-                  }}
-                >
-                  truco
-                </span>
-                ?
+                {continuation.title}
               </h1>
 
               <p
                 style={{
                   fontSize: 13,
                   color: 'rgba(255,255,255,0.45)',
-                  maxWidth: 460,
+                  maxWidth: 560,
                   lineHeight: 1.5,
                 }}
               >
-                Entre em uma mesa, crie uma sala privada ou use a fila inteligente para jogar
-                rápido.
+                {continuation.summary}
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 lg:justify-end">
               <GoldButton size="lg" onClick={heroAction.onClick} disabled={heroAction.disabled}>
                 {heroAction.ctaLabel}
               </GoldButton>
@@ -1078,9 +1222,11 @@ export function LobbyPage() {
                     </div>
                   </div>
 
-                  <GoldButton size="md" className="w-full" onClick={handleCreateMatch}>
-                    Jogar Novamente
-                  </GoldButton>
+                  {!derivedMatchId ? (
+                    <GoldButton size="md" className="w-full" onClick={handleCreateMatch}>
+                      Jogar Novamente
+                    </GoldButton>
+                  ) : null}
                 </div>
               ) : (
                 <div
