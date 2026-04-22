@@ -3,6 +3,7 @@ import type { PlayerProfileRepository } from '@game/application/ports/player-pro
 type RankingEntryDto = {
   profileId: string;
   userId: string;
+  displayName: string | null;
   rating: number;
   wins: number;
   losses: number;
@@ -28,6 +29,7 @@ export class GetRankingUseCase {
       ranking: profiles.map((profile) => ({
         profileId: profile.id,
         userId: profile.userId,
+        displayName: profile.displayName,
         rating: profile.rating,
         wins: profile.wins,
         losses: profile.losses,

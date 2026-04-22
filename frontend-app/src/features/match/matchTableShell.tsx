@@ -130,7 +130,7 @@ function getTierVisuals(tier: ValeTier) {
     case 'muted':
     default:
       return {
-        background: 'linear-gradient(135deg, #3a3424, #221f14)',
+        background: 'linear-gradient(135deg, #3a3323, #241f15)',
         border: '1px solid rgba(201,168,76,0.22)',
         textColor: 'rgba(232,199,106,0.82)',
         glow: '0 14px 30px rgba(0,0,0,0.26)',
@@ -163,7 +163,7 @@ function CardShape({
       <div
         className={`relative rounded-[16px] border ${compact ? 'h-[112px] w-[80px]' : 'h-[148px] w-[106px]'}`}
         style={{
-          background: 'linear-gradient(180deg, #132643 0%, #0b1a32 50%, #091528 100%)',
+          background: 'linear-gradient(180deg, #122819 0%, #0d1914 50%, #09120f 100%)',
           borderColor: 'rgba(230,195,100,0.32)',
           boxShadow:
             '0 14px 28px rgba(0,0,0,0.55), inset 0 0 18px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.06)',
@@ -335,7 +335,7 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         transition={{ duration: 2.2, repeat: isCurrentTurn ? Infinity : 0 }}
         className="relative flex items-center gap-2.5 rounded-full px-3.5 py-1.5 backdrop-blur-xl"
         style={{
-          background: 'linear-gradient(180deg, rgba(20,30,48,0.92), rgba(10,18,32,0.86))',
+          background: 'linear-gradient(180deg, rgba(22,30,24,0.92), rgba(10,18,14,0.86))',
           border: isCurrentTurn
             ? '1px solid rgba(230,195,100,0.52)'
             : '1px solid rgba(255,255,255,0.10)',
@@ -347,7 +347,7 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
         <div
           className="relative z-10 flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-full font-black"
           style={{
-            background: 'linear-gradient(135deg, #3a4a62 0%, #1a2234 55%, #0d141f 100%)',
+            background: 'linear-gradient(135deg, #3d3426 0%, #211c14 55%, #11100c 100%)',
             border: '1px solid rgba(255,255,255,0.16)',
             color: 'rgba(235,220,180,0.92)',
             fontFamily: 'Georgia, serif',
@@ -1055,7 +1055,7 @@ function CenterActionBar({
           textTransform: 'uppercase',
           fontFamily: 'Georgia, serif',
           background: canAccept
-            ? 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))'
+            ? 'linear-gradient(180deg, rgba(40,44,34,0.98), rgba(20,24,18,0.98))'
             : 'rgba(255,255,255,0.03)',
           border: canAccept
             ? '1px solid rgba(230,195,100,0.34)'
@@ -1095,7 +1095,7 @@ function CenterActionBar({
           background: canRaise
             ? 'linear-gradient(180deg, #d97706 0%, #92400e 100%)'
             : canDecline
-              ? 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))'
+              ? 'linear-gradient(180deg, rgba(40,44,34,0.98), rgba(20,24,18,0.98))'
               : 'rgba(255,255,255,0.03)',
           border: canRaise
             ? '1px solid rgba(251,191,36,0.44)'
@@ -1450,7 +1450,7 @@ function MatchResultModal({
         transition={{ type: 'spring', stiffness: 230, damping: 24 }}
         className="relative w-full max-w-xl overflow-hidden rounded-[30px] border px-6 py-6"
         style={{
-          background: 'linear-gradient(180deg, rgba(16,20,30,0.96) 0%, rgba(8,10,18,0.96) 100%)',
+          background: 'linear-gradient(180deg, rgba(18,22,18,0.96) 0%, rgba(10,12,10,0.96) 100%)',
           borderColor: isVictory ? 'rgba(255,223,128,0.36)' : 'rgba(252,165,165,0.28)',
           boxShadow:
             '0 34px 64px rgba(0,0,0,0.48), 0 0 42px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05)',
@@ -1821,9 +1821,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
       className="relative flex min-h-[calc(100vh-220px)] w-full flex-col xl:min-h-[720px]"
       style={{
         borderRadius: 28,
-        border: '1px solid rgba(120,140,170,0.16)',
+        border: '1px solid rgba(201,168,76,0.14)',
         boxShadow:
-          '0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), inset 0 0 200px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.04)',
+          '0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), inset 0 0 220px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
       {/* CHANGE: decorative background layer — clipped to the rounded corners,
@@ -1834,7 +1834,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         style={{
           borderRadius: 28,
           background:
-            'radial-gradient(ellipse 120% 90% at 50% -5%, rgba(70,95,128,0.32) 0%, rgba(40,58,88,0.16) 22%, transparent 42%), radial-gradient(ellipse at 50% 55%, #132036 0%, #0c1828 36%, #06101c 64%, #030810 100%)',
+            'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(201,168,76,0.10) 0%, rgba(46,92,53,0.12) 18%, transparent 40%), radial-gradient(ellipse at 50% 55%, #10231a 0%, #0d1a16 34%, #08110f 62%, #04090a 100%)',
         }}
       >
         {/* Felt grain */}
@@ -1851,9 +1851,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
           className="absolute inset-0"
           style={{
             backgroundImage:
-              'radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,0.20) 50%, transparent 100%), radial-gradient(1px 1px at 76% 18%, rgba(255,255,255,0.14) 50%, transparent 100%), radial-gradient(1px 1px at 14% 74%, rgba(255,255,255,0.10) 50%, transparent 100%), radial-gradient(1px 1px at 84% 72%, rgba(255,255,255,0.16) 50%, transparent 100%), radial-gradient(1px 1px at 44% 86%, rgba(255,255,255,0.08) 50%, transparent 100%), radial-gradient(1px 1px at 56% 14%, rgba(255,255,255,0.12) 50%, transparent 100%)',
+              'radial-gradient(1px 1px at 18% 22%, rgba(255,244,214,0.12) 50%, transparent 100%), radial-gradient(1px 1px at 76% 18%, rgba(255,244,214,0.08) 50%, transparent 100%), radial-gradient(1px 1px at 14% 74%, rgba(255,255,255,0.06) 50%, transparent 100%), radial-gradient(1px 1px at 84% 72%, rgba(255,244,214,0.10) 50%, transparent 100%), radial-gradient(1px 1px at 44% 86%, rgba(255,255,255,0.05) 50%, transparent 100%), radial-gradient(1px 1px at 56% 14%, rgba(255,244,214,0.08) 50%, transparent 100%)',
             backgroundRepeat: 'no-repeat',
-            opacity: 0.5,
+            opacity: 0.28,
           }}
         />
 
@@ -1863,9 +1863,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
           style={{
             borderTopLeftRadius: '46%',
             borderTopRightRadius: '46%',
-            borderTop: '1px solid rgba(160,180,210,0.14)',
-            borderLeft: '1px solid rgba(160,180,210,0.08)',
-            borderRight: '1px solid rgba(160,180,210,0.08)',
+            borderTop: '1px solid rgba(201,168,76,0.12)',
+            borderLeft: '1px solid rgba(201,168,76,0.06)',
+            borderRight: '1px solid rgba(201,168,76,0.06)',
           }}
         />
 
@@ -1873,7 +1873,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         <div
           className="felt-breathe-anim absolute inset-x-[22%] top-[28%] h-[44%] rounded-full"
           style={{
-            background: 'radial-gradient(circle, rgba(180,200,230,0.035) 0%, transparent 68%)',
+            background: 'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 36%, transparent 68%)',
             filter: 'blur(24px)',
           }}
         />
@@ -1901,7 +1901,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
                 ? 'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.08) 40%, transparent 72%)'
                 : isMyTurn && canPlayCard
                   ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)'
-                  : 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)',
+                  : 'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 42%, transparent 70%)',
             filter: 'blur(24px)',
           }}
         />
@@ -2021,3 +2021,4 @@ export function MatchTableShell(props: MatchTableShellProps) {
     </div>
   );
 }
+
