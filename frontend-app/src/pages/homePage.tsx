@@ -6,10 +6,7 @@ import {
   normalizeBackendUrl,
   shouldAllowManualBackendOverride,
 } from '../config/appConfig';
-import {
-  savePendingAuthBackendUrl,
-  type FrontendSession,
-} from '../features/auth/authStorage';
+import { savePendingAuthBackendUrl, type FrontendSession } from '../features/auth/authStorage';
 import { useAuth } from '../features/auth/authStore';
 
 // CHANGE: the AppShell already owns the global header (brand, nav, session
@@ -65,14 +62,12 @@ function DecorCard({
       <div
         className="relative flex flex-col items-center justify-between overflow-hidden"
         style={{
-          width: 82,
-          height: 114,
-          borderRadius: 12,
-          background:
-            'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 60%, #f2edd8 100%)',
+          width: 94,
+          height: 130,
+          borderRadius: 14,
+          background: 'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 60%, #f2edd8 100%)',
           border: '1px solid rgba(0,0,0,0.1)',
-          boxShadow:
-            '0 12px 34px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.95)',
+          boxShadow: '0 18px 34px rgba(0,0,0,0.32), 0 10px 22px rgba(0,0,0,0.18)',
           padding: '6px 7px',
         }}
       >
@@ -80,8 +75,7 @@ function DecorCard({
           className="pointer-events-none absolute inset-0"
           style={{
             borderRadius: 'inherit',
-            background:
-              'linear-gradient(150deg, rgba(255,255,255,0.85) 0%, transparent 30%)',
+            background: 'linear-gradient(150deg, rgba(255,255,255,0.85) 0%, transparent 30%)',
           }}
         />
         <div className="relative z-10 self-start">
@@ -128,10 +122,7 @@ export function HomePage() {
   const [manualAuthToken, setManualAuthToken] = useState('');
   const [showDevTools, setShowDevTools] = useState(false);
 
-  const normalizedBackendUrl = useMemo(
-    () => normalizeBackendUrl(backendUrl),
-    [backendUrl],
-  );
+  const normalizedBackendUrl = useMemo(() => normalizeBackendUrl(backendUrl), [backendUrl]);
   const frontendUrl = getFrontendOrigin();
 
   const safeBackendOrigin = useMemo(() => {
@@ -175,8 +166,7 @@ export function HomePage() {
     <div
       className="relative overflow-hidden rounded-3xl"
       style={{
-        background:
-          'radial-gradient(ellipse at 50% -10%, #0d2318 0%, #050d18 40%, #050810 100%)',
+        background: 'radial-gradient(ellipse at 50% -10%, #0d2318 0%, #050d18 40%, #050810 100%)',
         border: '1px solid rgba(201,168,76,0.08)',
       }}
     >
@@ -242,8 +232,7 @@ export function HomePage() {
               <br />
               <span
                 style={{
-                  background:
-                    'linear-gradient(135deg, #e8c76a 0%, #c9a84c 50%, #8a6a28 100%)',
+                  background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 50%, #8a6a28 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   backgroundClip: 'text',
@@ -263,8 +252,8 @@ export function HomePage() {
                 maxWidth: 470,
               }}
             >
-              Truco Paulista online em uma mesa digital feita à mão. Convide a
-              dupla, sente-se e dê o truco — sem distrações, sem ruído.
+              Truco Paulista online em uma mesa digital feita à mão. Convide a dupla, sente-se e dê
+              o truco — sem distrações, sem ruído.
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -277,8 +266,7 @@ export function HomePage() {
                     color: '#1a0800',
                     fontSize: 12,
                     letterSpacing: '0.12em',
-                    boxShadow:
-                      '0 0 28px rgba(201,168,76,0.35), 0 8px 20px rgba(0,0,0,0.3)',
+                    boxShadow: '0 0 28px rgba(201,168,76,0.35), 0 8px 20px rgba(0,0,0,0.3)',
                     textDecoration: 'none',
                   }}
                 >
@@ -436,8 +424,7 @@ export function HomePage() {
               key={f.t}
               className="rounded-2xl p-5 backdrop-blur"
               style={{
-                background:
-                  'linear-gradient(180deg, rgba(10,18,30,0.8), rgba(6,12,22,0.6))',
+                background: 'linear-gradient(180deg, rgba(10,18,30,0.8), rgba(6,12,22,0.6))',
                 border: '1px solid rgba(201,168,76,0.14)',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
               }}

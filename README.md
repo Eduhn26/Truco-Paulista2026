@@ -27,9 +27,9 @@
 
 ---
 
-Estudo prático de engenharia de software construído em **22 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
+Estudo prático de engenharia de software construído em **23 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
 
-O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: mesa premium, HUD legível, observabilidade lateral, identidade de bots e match surface defensável como hero screen de portfólio.
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: Home mais honesta, Lobby com camada de continuidade, mesa premium, HUD legível, observabilidade lateral, identidade de bots e match surface defensável como hero screen de portfólio.
 
 ---
 
@@ -90,47 +90,45 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 20 | Frontend gameplay surface closure + truco core visible hardening | ✅ |
 | 21 | Match table productization + HUD / game-feel consolidation | ✅ |
 | 22 | Bot identity productization + match observability / premium surface finalization | ✅ |
+| 23 | Meta layer / retention foundation + Home / Lobby / Match coherence pass | ✅ |
 
 ---
 
-## Fase 22 — O que mudou
+## Fase 23 — O que mudou
 
-A Fase 22 fechou a **identidade visual dos bots, a observabilidade lateral e o refinamento final da mesa premium**. Depois de a Fase 21 transformar a `MatchPage` em uma hero screen muito mais forte, o próximo gap passou a ser refinamento sistêmico: identidade do oponente, leitura lateral de estado, equilíbrio entre centro da jogada e hand dock, diferenciação de Vira, placar, feedback de vitória/empate e composição final da mesa.
+A Fase 23 fechou a **meta layer / retention foundation** do produto. Depois de a Fase 22 consolidar a identidade dos bots, a observabilidade lateral e a match surface premium, o próximo gap deixou de ser apenas mesa e passou a ser **continuidade de produto**: a entrada pela Home ainda era parcialmente artificial, o Lobby ainda precisava comunicar melhor reconnect / recent-session / active-room, e o fluxo **Home → Lobby → Match** ainda não se sustentava com a mesma coerência de uma aplicação realmente fechada.
 
-**Bot identity productization:**
-- Bots ganharam identidade visível de mesa — nome, avatar e perfil compõem a leitura do oponente
-- Oponente deixou de parecer apenas um seat placeholder genérico
-- A partida 1v1 ganhou mais variedade e mais presença de produto
+**Home truthfulness pass:**
+- A Home deixou de depender de sinais artificiais ou pseudo-métricas
+- O hero e a supporting strip passaram a refletir capacidades reais do produto
+- A landing ficou mais honesta, mais defensável e mais coerente com o estágio atual do projeto
 
-**Observability side panel:**
-- A partida agora possui uma superfície lateral secundária para leitura técnica
-- Rounds history, live state, bot telemetry e event log ganharam espaço próprio
-- O centro da mesa deixou de precisar carregar toda a observabilidade
+**Lobby continuity foundation:**
+- O Lobby deixou de se comportar como waiting room genérica e passou a atuar como superfície real de continuidade
+- Estados de reconnect, first-session, recent-session e active-room ficaram mais claros
+- O hero passou a assumir o papel de guia principal da próxima ação
 
-**Rounds / side-history refinement:**
-- Histórico de rodadas adaptado ao espaço lateral, mais legível e compatível com a dock técnica
-- A leitura deixou de parecer debug espremido
+**Retention-oriented meta layer:**
+- `Seu Momento`, `Última Partida` e ranking passaram a funcionar melhor como camada de retenção leve
+- O produto começou a comunicar com mais clareza o que aconteceu recentemente e o que o jogador deve fazer em seguida
+- A fundação da camada meta foi estabelecida sem simular um sistema maior do que o backend realmente suporta hoje
 
-**Final premium table balancing:**
-- Centro da jogada, Vira, score, hand dock e side panel reequilibrados
-- Played cards recuperaram protagonismo como principal beat visual da rodada
-- A mesa ficou mais consistente como sistema visual e não como soma de componentes
+**Reconnect / idle-state cleanup:**
+- Redundâncias de CTA foram removidas
+- O reconnect ficou mais limpo e menos ruidoso
+- Superfícies operacionais passaram a aparecer quando agregam contexto real, e não só por estarem sempre ligadas
 
-**Player-hand / dock refinement:**
-- Hand dock recebeu ajustes finos de presença, grounding e visibilidade
-- A mão passou a ler melhor como parte da mesa e não como bloco desconectado
+**Cross-surface coherence pass:**
+- Home, Lobby e Match foram harmonizados visualmente como partes do mesmo produto
+- O sistema de ouro / verde / dark premium ficou mais consistente
+- A MatchPage foi refinada para conversar melhor com Home e Lobby sem perder protagonismo da mesa
 
-**Vira / score / round feedback refinement:**
-- A Vira ganhou tratamento visual próprio e mais distinguível
-- Placar ficou mais premium e mais legível
-- Badge de vitória e feedback de empate comunicam melhor o resultado de rodada
+**Portfolio-grade product continuity:**
+- O projeto agora apresenta uma entrada mais honesta, uma continuidade melhor no Lobby e uma MatchPage mais alinhada ao restante da experiência
+- A fase não mudou a autoridade do backend, mas fortaleceu a forma como o produto é entrado, retomado e percebido
+- O resultado é um fluxo mais coeso, mais maduro e mais defensável como produto real de portfólio
 
-**Portfolio-grade match surface finalization:**
-- `MatchPage` mais defensável como hero screen premium
-- Identidade visual, leitura de estado, observabilidade e ergonomia convivem melhor
-- O projeto fecha esta fase com uma mesa mais coesa, legível e madura como produto
-
-→ [`docs/phases/phase-22.md`](docs/phases/phase-22.md)
+→ [`docs/phases/phase-23.md`](docs/phases/phase-23.md)
 
 ---
 
@@ -177,6 +175,7 @@ curl http://localhost:8000/health/live
 | [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
 | [`docs/api.md`](docs/api.md) | Eventos WebSocket Client↔Server |
 | [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
+| [`docs/phases/phase-23.md`](docs/phases/phase-23.md) | Meta layer / retention foundation + Home / Lobby / Match coherence pass |
 | [`docs/phases/phase-22.md`](docs/phases/phase-22.md) | Bot identity productization + match observability / premium surface finalization |
 | [`docs/phases/phase-21.md`](docs/phases/phase-21.md) | Match table productization + HUD / game-feel consolidation |
 | [`docs/frontend-deploy.md`](docs/frontend-deploy.md) | Contrato de env e frontend deploy |
