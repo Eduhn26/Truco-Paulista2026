@@ -44,8 +44,8 @@ function getValeTierVisuals(tier: ValeTier) {
     case 'muted':
     default:
       return {
-        background: 'linear-gradient(180deg, rgba(16,26,44,0.92), rgba(8,16,30,0.84))',
-        border: '1px solid rgba(230,195,100,0.24)',
+        background: 'linear-gradient(180deg, rgba(28,24,16,0.92), rgba(16,14,10,0.86))',
+        border: '1px solid rgba(230,195,100,0.20)',
         textColor: 'rgba(232,199,106,0.86)',
         glow: '0 4px 12px rgba(0,0,0,0.28)',
         pulse: false,
@@ -94,8 +94,8 @@ export function MatchPageHeader({
         // CHANGE: header now sits in the exact same colour family as the
         // mesa below it, so they read as one continuous surface. The bottom
         // hairline is barely there; it separates without creating a seam.
-        background: 'linear-gradient(180deg, rgba(6,12,22,0.98), rgba(8,16,28,0.94))',
-        borderBottom: '1px solid rgba(120,140,170,0.10)',
+        background: 'linear-gradient(180deg, rgba(7,14,20,0.98), rgba(8,16,14,0.94))',
+        borderBottom: '1px solid rgba(201,168,76,0.10)',
         backdropFilter: 'blur(14px)',
       }}
     >
@@ -106,7 +106,7 @@ export function MatchPageHeader({
             className="flex h-9 w-9 items-center justify-center rounded-[10px]"
             style={{
               background:
-                'linear-gradient(180deg, #132643 0%, #0b1a32 55%, #091528 100%)',
+                'linear-gradient(180deg, #102319 0%, #0d1815 55%, #0a1210 100%)',
               border: '1px solid rgba(230,195,100,0.34)',
               boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 10px rgba(0,0,0,0.36)',
             }}
@@ -156,7 +156,7 @@ export function MatchPageHeader({
           <div
             className="flex items-center gap-2 rounded-[12px] px-4 py-1.5"
             style={{
-              background: 'linear-gradient(180deg, rgba(12,22,38,0.94), rgba(6,14,26,0.88))',
+              background: 'linear-gradient(180deg, rgba(18,24,20,0.94), rgba(10,14,12,0.88))',
               border: '1px solid rgba(230,195,100,0.26)',
               boxShadow: '0 6px 14px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.04)',
             }}
@@ -360,3 +360,4 @@ export function MatchPageHeader({
     </div>
   );
 }
+

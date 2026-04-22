@@ -56,16 +56,16 @@ export function MatchLiveStatePanel({
   );
 
   return (
-    <section className="rounded-[20px] border border-white/5 bg-slate-950/50 p-4">
+    <section className="rounded-[22px] border border-amber-300/10 bg-[linear-gradient(180deg,rgba(10,19,19,0.9),rgba(7,12,18,0.84))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <div className="text-sm font-black tracking-tight text-slate-100">Match live state</div>
-          <p className="mt-1 text-xs leading-5 text-slate-400">
+          <div className="text-sm font-black tracking-tight text-[#f0e6d3]">Match live state</div>
+          <p className="mt-1 text-xs leading-5 text-amber-50/45">
             Painel técnico desacoplado da mesa principal.
           </p>
         </div>
 
-        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+        <span className="rounded-full border border-amber-300/10 bg-amber-500/[0.05] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/50">
           server-driven
         </span>
       </div>
@@ -93,13 +93,13 @@ export function MatchLiveStatePanel({
         />
       </div>
 
-      <div className="mt-3 rounded-[18px] border border-amber-400/10 bg-amber-500/[0.035] p-3">
+      <div className="mt-3 rounded-[18px] border border-amber-300/12 bg-[linear-gradient(180deg,rgba(62,46,12,0.18),rgba(40,29,8,0.1))] p-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300/90">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-amber-200/90">
             Bot decision telemetry
           </div>
 
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500">
+          <span className="rounded-full border border-amber-300/10 bg-amber-500/[0.05] px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-amber-100/40">
             {hasBotDecisionTelemetry ? 'live' : 'idle'}
           </span>
         </div>
@@ -151,7 +151,7 @@ export function MatchLiveStatePanel({
       </div>
 
       {!canRenderLiveState ? (
-        <div className="mt-4 rounded-[20px] border border-amber-400/15 bg-amber-500/5 p-4 text-sm leading-6 text-amber-200">
+        <div className="mt-4 rounded-[20px] border border-amber-300/15 bg-amber-500/[0.06] p-4 text-sm leading-6 text-amber-100/80">
           Missing authenticated session or matchId to hydrate the live table.
         </div>
       ) : null}
@@ -182,8 +182,8 @@ function PanelMetric({
           : 'text-slate-100';
 
   return (
-    <div className="rounded-[16px] border border-white/10 bg-white/[0.03] p-2.5">
-      <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-500">{label}</div>
+    <div className="rounded-[16px] border border-amber-300/10 bg-white/[0.025] p-2.5">
+      <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-amber-100/35">{label}</div>
 
       <div
         className={`mt-1 break-words text-[11px] ${
@@ -221,3 +221,4 @@ function formatDecisionTimestamp(value: string | null): string {
     second: '2-digit',
   });
 }
+

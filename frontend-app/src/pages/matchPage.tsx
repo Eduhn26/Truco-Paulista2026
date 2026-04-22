@@ -1534,19 +1534,22 @@ export function MatchPage() {
   }
 
   return (
-    <section className="relative flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#050810]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(201,168,76,0.08),transparent_50%)]" />
+    <section className="relative flex h-screen min-h-0 w-full flex-col overflow-hidden bg-[#04070d]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-12%,rgba(201,168,76,0.12),transparent_42%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(34,110,74,0.16),transparent_34%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_82%_78%,rgba(12,58,34,0.22),transparent_32%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(3,7,12,0.18),rgba(3,7,12,0.72))]" />
 
       <div className="relative z-50 flex shrink-0 items-center justify-between px-5 py-3 md:px-6 md:py-4">
         <div className="flex items-center gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-[2px] text-slate-500">
+          <span className="text-[10px] font-bold uppercase tracking-[2px] text-amber-200/55">
             Truco Paulista
           </span>
         </div>
 
         <Link
           to="/lobby"
-          className="rounded-full border border-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-[2px] text-slate-400 transition-colors hover:border-amber-400/30 hover:text-amber-400"
+          className="rounded-full border border-amber-300/10 bg-[#0b120f]/72 px-4 py-2 text-[10px] font-bold uppercase tracking-[2px] text-amber-100/60 transition-colors hover:border-amber-300/30 hover:bg-[#101914]/82 hover:text-amber-200"
         >
           ← Voltar ao lobby
         </Link>
@@ -1580,7 +1583,7 @@ export function MatchPage() {
                 <button
                   type="button"
                   onClick={() => setShowSecondary((state) => !state)}
-                  className="pointer-events-auto rounded-full border border-white/10 bg-[#08111c]/92 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300 transition hover:border-white/15 hover:bg-[#0b1522] hover:text-white"
+                  className="pointer-events-auto rounded-full border border-amber-300/12 bg-[#0b120f]/94 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/65 transition hover:border-amber-300/28 hover:bg-[#111b15] hover:text-amber-200"
                 >
                   {showSecondary ? 'Ocultar painel técnico' : 'Abrir painel técnico'}
                 </button>
@@ -1659,7 +1662,7 @@ export function MatchPage() {
             </div>
 
             {showSecondary ? (
-              <div className="hidden xl:block xl:w-[320px] xl:shrink-0 xl:pl-3">
+              <div className="hidden xl:block xl:w-[332px] xl:shrink-0 xl:pl-3">
                 <MatchSecondaryPanelSection
                   variant="docked"
                   eventLog={eventLog}
@@ -1846,3 +1849,4 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
+

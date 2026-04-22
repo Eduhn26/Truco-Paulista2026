@@ -21,18 +21,18 @@ export function MatchRoundsHistoryPanel({
   playedRoundsCount: number;
 }) {
   return (
-    <section className="rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
+    <section className="rounded-[22px] border border-amber-300/10 bg-[linear-gradient(180deg,rgba(10,19,19,0.9),rgba(7,12,18,0.84))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[13px] font-black tracking-tight text-slate-100">
+          <div className="text-[13px] font-black tracking-tight text-[#f0e6d3]">
             Rounds played
           </div>
-          <p className="mt-1 text-[11px] leading-5 text-slate-400">
+          <p className="mt-1 text-[11px] leading-5 text-amber-50/42">
             Histórico vindo do `currentHand.rounds`, sem depender de narrativa local.
           </p>
         </div>
 
-        <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
+        <span className="shrink-0 rounded-full border border-amber-300/10 bg-amber-500/[0.05] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-100/60">
           {playedRoundsCount} / 3
         </span>
       </div>
@@ -51,16 +51,16 @@ export function MatchRoundsHistoryPanel({
               transition={{ duration: 1.1 }}
               className={`rounded-[20px] border p-3 ${
                 played
-                  ? 'border-white/10 bg-white/[0.03]'
-                  : 'border-dashed border-white/10 bg-white/[0.02]'
+                  ? 'border-amber-300/10 bg-white/[0.025]'
+                  : 'border-dashed border-amber-300/10 bg-white/[0.018]'
               }`}
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-100/35">
                   Round {index + 1}
                 </div>
 
-                <div className="text-[10px] font-semibold text-slate-400">
+                <div className="text-[10px] font-semibold text-amber-50/45">
                   {formatRoundResult(round?.result ?? null)}
                 </div>
               </div>
@@ -79,8 +79,8 @@ export function MatchRoundsHistoryPanel({
 
 function RoundLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-2 rounded-xl border border-white/10 bg-slate-950/45 px-2.5 py-2 text-slate-200">
-      <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+    <div className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-2 rounded-xl border border-amber-300/10 bg-[#070b11]/72 px-2.5 py-2 text-[#f0e6d3]">
+      <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-100/35">
         {label}
       </span>
 
@@ -104,3 +104,4 @@ function formatRoundResult(result: string | null): string {
 
   return '—';
 }
+

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '../features/auth/authStore';
@@ -8,8 +8,6 @@ import {
 } from '../features/lobby/useLobbyRealtimeSession';
 
 type HeroAction = {
-  label: string;
-  detail: string;
   ctaLabel: string;
   disabled: boolean;
   onClick: () => void;
@@ -25,7 +23,7 @@ type ContinuationState =
 type ContinuationDescriptor = {
   state: ContinuationState;
   badge: string;
-  badgeTone: 'gold' | 'green' | 'blue';
+  badgeTone: 'gold' | 'green' | 'neutral';
   title: string;
   summary: string;
   action: HeroAction;
@@ -53,118 +51,18 @@ type ProgressSnapshot = {
   summary: string;
 };
 
-const GOLD_GRAD = 'linear-gradient(135deg, #c9a84c, #8a6a28)';
-const CARD_BG = 'linear-gradient(180deg, rgba(10,18,30,0.85), rgba(6,12,22,0.70))';
-const CARD_BORDER = '1px solid rgba(201,168,76,0.16)';
+type RecentMatchViewModel = {
+  resultLabel: string;
+  resultTone: string;
+  opponentLabel: string;
+  scoreLabel: string;
+  finishedAtLabel: string;
+  didCurrentUserWin: boolean | null;
+};
 
-function TopBar({ displayName }: { displayName: string }) {
-  const initial = displayName.charAt(0).toUpperCase();
-
-  return (
-    <header
-      className="sticky top-0 z-50 flex items-center justify-between px-6 py-3"
-      style={{
-        background: 'rgba(4,8,16,0.97)',
-        borderBottom: '1px solid rgba(201,168,76,0.14)',
-        backdropFilter: 'blur(16px)',
-      }}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className="flex h-9 w-9 items-center justify-center rounded-lg"
-          style={{
-            background: GOLD_GRAD,
-            boxShadow: '0 0 18px rgba(201,168,76,0.28)',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: 'Georgia, serif',
-              fontSize: 18,
-              fontWeight: 900,
-              color: '#1a0800',
-            }}
-          >
-            T
-          </span>
-        </div>
-
-        <div className="flex flex-col leading-tight">
-          <span
-            style={{
-              fontFamily: 'Georgia, serif',
-              fontSize: 12,
-              fontWeight: 900,
-              letterSpacing: '0.18em',
-              background: 'linear-gradient(135deg, #e8c76a, #c9a84c)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            TRUCO
-          </span>
-          <span
-            style={{
-              fontSize: 8,
-              fontWeight: 700,
-              letterSpacing: '0.3em',
-              color: 'rgba(255,255,255,0.3)',
-            }}
-          >
-            PAULISTA
-          </span>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div
-          className="flex items-center gap-2 rounded-full px-3 py-1.5"
-          style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.07)',
-          }}
-        >
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-black"
-            style={{ background: GOLD_GRAD, color: '#1a0800' }}
-          >
-            {initial}
-          </div>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: 'rgba(255,255,255,0.75)',
-              letterSpacing: '0.04em',
-            }}
-          >
-            {displayName}
-          </span>
-        </div>
-
-        <Link
-          to="/"
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'rgba(255,255,255,0.3)',
-            letterSpacing: '0.1em',
-            textDecoration: 'none',
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.color = 'rgba(201,168,76,0.7)';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.color = 'rgba(255,255,255,0.3)';
-          }}
-        >
-          Sair
-        </Link>
-      </div>
-    </header>
-  );
-}
+const GOLD_GRAD = 'linear-gradient(135deg, #d9b85f, #9c7429)';
+const CARD_BG = 'linear-gradient(180deg, rgba(11,20,21,0.92), rgba(7,12,18,0.82))';
+const CARD_BORDER = '1px solid rgba(201,168,76,0.18)';
 
 function SeatAvatar({
   isBot,
@@ -185,9 +83,7 @@ function SeatAvatar({
           background: ready
             ? 'linear-gradient(135deg, rgba(201,168,76,0.2), rgba(201,168,76,0.08))'
             : 'rgba(255,255,255,0.04)',
-          border: ready
-            ? '2px solid rgba(201,168,76,0.6)'
-            : '2px solid rgba(255,255,255,0.1)',
+          border: ready ? '2px solid rgba(201,168,76,0.6)' : '2px solid rgba(255,255,255,0.1)',
           boxShadow: ready ? '0 0 22px rgba(201,168,76,0.25)' : 'none',
           transition: 'all 0.3s ease',
         }}
@@ -257,7 +153,7 @@ function GoldButton({
   size = 'md',
   className = '',
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   variant?: 'solid' | 'outline' | 'ghost';
@@ -269,20 +165,14 @@ function GoldButton({
 
   const solidStyle = {
     background: disabled ? 'rgba(255,255,255,0.05)' : GOLD_GRAD,
-    border: `1.5px solid ${
-      disabled ? 'rgba(255,255,255,0.06)' : 'rgba(201,168,76,0.5)'
-    }`,
+    border: `1.5px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(201,168,76,0.5)'}`,
     color: disabled ? 'rgba(255,255,255,0.2)' : '#1a0800',
-    boxShadow: disabled
-      ? 'none'
-      : '0 0 22px rgba(201,168,76,0.28), 0 6px 16px rgba(0,0,0,0.3)',
+    boxShadow: disabled ? 'none' : '0 0 22px rgba(201,168,76,0.28), 0 6px 16px rgba(0,0,0,0.3)',
   };
 
   const outlineStyle = {
     background: 'transparent',
-    border: `1.5px solid ${
-      disabled ? 'rgba(255,255,255,0.08)' : 'rgba(201,168,76,0.4)'
-    }`,
+    border: `1.5px solid ${disabled ? 'rgba(255,255,255,0.08)' : 'rgba(201,168,76,0.4)'}`,
     color: disabled ? 'rgba(255,255,255,0.2)' : 'rgba(201,168,76,0.9)',
     boxShadow: 'none',
   };
@@ -321,16 +211,51 @@ function GoldButton({
   );
 }
 
+function SidebarStat({
+  label,
+  value,
+  tone = '#f0e6d3',
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl px-3 py-2"
+      style={{
+        background: 'rgba(0,0,0,0.18)',
+        border: '1px solid rgba(255,255,255,0.05)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 8,
+          color: 'rgba(255,255,255,0.36)',
+          marginBottom: 3,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 15,
+          fontWeight: 800,
+          color: tone,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function resolveRecentMatchViewModel(
   historyItem: MatchHistoryListItemPayload,
   currentUserId: string | undefined,
-): {
-  resultLabel: string;
-  resultTone: string;
-  opponentLabel: string;
-  scoreLabel: string;
-  finishedAtLabel: string;
-} {
+): RecentMatchViewModel {
   const myParticipant =
     historyItem.participants.find((participant) => participant.userId === currentUserId) ?? null;
 
@@ -358,21 +283,17 @@ function resolveRecentMatchViewModel(
 
   return {
     resultLabel:
-      historyItem.status !== 'completed'
-        ? 'Encerrada'
-        : didCurrentUserWin
-          ? 'Vitória'
-          : 'Derrota',
+      historyItem.status !== 'completed' ? 'Encerrada' : didCurrentUserWin ? 'Vitória' : 'Derrota',
     resultTone:
       historyItem.status !== 'completed'
         ? 'rgba(255,255,255,0.65)'
         : didCurrentUserWin
           ? '#4ade80'
           : '#f87171',
-    opponentLabel:
-      opponentParticipant?.displayName ?? (opponentParticipant?.isBot ? 'Bot' : '—'),
+    opponentLabel: opponentParticipant?.displayName ?? (opponentParticipant?.isBot ? 'Bot' : '—'),
     scoreLabel: `${historyItem.finalScore.playerOne} × ${historyItem.finalScore.playerTwo}`,
     finishedAtLabel,
+    didCurrentUserWin: historyItem.status === 'completed' ? (didCurrentUserWin ?? null) : null,
   };
 }
 
@@ -405,13 +326,11 @@ function resolveContinuationDescriptor(params: {
     return {
       state: 'reconnect',
       badge: 'Reconexão',
-      badgeTone: 'blue',
+      badgeTone: 'neutral',
       title: 'Reconecte para retomar sua sessão',
       summary:
         'Abra a sessão em tempo real para recuperar sala ativa, histórico recente e ranking semanal.',
       action: {
-        label: 'Conectar ao Lobby',
-        detail: 'Abra a sessão em tempo real para recuperar sua sala, histórico e ranking.',
         ctaLabel: 'Conectar Socket',
         disabled: !canConnect,
         onClick: handleConnect,
@@ -429,9 +348,6 @@ function resolveContinuationDescriptor(params: {
         summary:
           'Você já tem uma mesa em andamento. O próximo passo é confirmar presença para destravar a continuidade da sessão.',
         action: {
-          label: 'Retomar Sala Atual',
-          detail:
-            'Você já tem uma mesa aberta. Confirme presença para continuar o fluxo da partida.',
           ctaLabel: 'Marcar como Pronto',
           disabled: !canToggleReady,
           onClick: handleReady,
@@ -447,8 +363,6 @@ function resolveContinuationDescriptor(params: {
       summary:
         'Sua sala já está preparada. O caminho principal agora é retornar direto para a mesa e continuar a partida.',
       action: {
-        label: 'Voltar para a Mesa',
-        detail: 'Sua sala atual continua ativa. Retorne direto para o centro do jogo.',
         ctaLabel: 'Ir para Mesa →',
         disabled: false,
         onClick: () => {
@@ -467,9 +381,6 @@ function resolveContinuationDescriptor(params: {
       summary:
         'O lobby já reconhece sua sessão anterior. Entre rápido em uma nova mesa e mantenha o ritmo da progressão.',
       action: {
-        label: 'Continuar a Sessão',
-        detail:
-          'Sua última partida já está registrada. Entre rápido em uma nova mesa e mantenha o ritmo.',
         ctaLabel: 'Jogar Novamente',
         disabled: !canCreateMatch,
         onClick: handleCreateMatch,
@@ -485,9 +396,6 @@ function resolveContinuationDescriptor(params: {
     summary:
       'Você já está autenticado e conectado. O próximo passo natural é criar uma nova partida e entrar no fluxo principal do jogo.',
     action: {
-      label: 'Criar Primeira Partida',
-      detail:
-        'Você já está pronto para começar. Abra uma sala e entre no fluxo principal do jogo.',
       ctaLabel: 'Criar Partida',
       disabled: !canCreateMatch,
       onClick: handleCreateMatch,
@@ -504,17 +412,17 @@ function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
     };
   }
 
-  if (tone === 'blue') {
+  if (tone === 'neutral') {
     return {
-      background: 'rgba(59,130,246,0.1)',
-      border: '1px solid rgba(59,130,246,0.24)',
-      color: '#93c5fd',
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.10)',
+      color: 'rgba(255,255,255,0.62)',
     };
   }
 
   return {
     background: 'rgba(201,168,76,0.08)',
-    border: '1px solid rgba(201,168,76,0.18)',
+    border: '1px solid rgba(201,168,76,0.14)',
     color: 'rgba(201,168,76,0.85)',
   };
 }
@@ -522,6 +430,8 @@ function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
 function resolveProgressSnapshot(params: {
   ranking: RankingEntryLike[];
   currentUserId: string | undefined;
+  latestHistoryItem: MatchHistoryListItemPayload | null;
+  recentMatchViewModel: RecentMatchViewModel | null;
 }): ProgressSnapshot {
   const currentUserRankingEntry =
     params.ranking.find((entry) => entry.userId === params.currentUserId) ?? null;
@@ -530,32 +440,52 @@ function resolveProgressSnapshot(params: {
     ? params.ranking.findIndex((entry) => entry.userId === params.currentUserId) + 1
     : null;
 
-  const matchesPlayed = currentUserRankingEntry?.matchesPlayed ?? 0;
-  const wins = currentUserRankingEntry?.wins ?? 0;
-  const losses = currentUserRankingEntry?.losses ?? 0;
+  const rankingMatchesPlayed = currentUserRankingEntry?.matchesPlayed ?? 0;
+  const rankingWins = currentUserRankingEntry?.wins ?? 0;
+  const rankingLosses = currentUserRankingEntry?.losses ?? 0;
   const rating = currentUserRankingEntry?.rating ?? null;
+
+  const hasRecentMatch = params.latestHistoryItem !== null;
+  const recentWin =
+    hasRecentMatch && params.recentMatchViewModel?.didCurrentUserWin === true ? 1 : 0;
+  const recentLoss =
+    hasRecentMatch && params.recentMatchViewModel?.didCurrentUserWin === false ? 1 : 0;
+
+  const matchesPlayed = Math.max(rankingMatchesPlayed, hasRecentMatch ? 1 : 0);
+  const wins = Math.max(rankingWins, recentWin);
+  const losses = Math.max(rankingLosses, recentLoss);
   const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
 
   let momentumLabel = 'Começo de jornada';
   let momentumTone = 'rgba(201,168,76,0.85)';
+  let summary = 'Conecte-se e jogue suas primeiras partidas para montar seu momento competitivo.';
 
-  if (matchesPlayed >= 10 && winRate >= 60) {
+  if (hasRecentMatch && params.recentMatchViewModel) {
+    if (params.recentMatchViewModel.didCurrentUserWin === true) {
+      momentumLabel = 'Vitória recente';
+      momentumTone = '#4ade80';
+      summary = `Vitória recente contra ${params.recentMatchViewModel.opponentLabel}.`;
+    } else if (params.recentMatchViewModel.didCurrentUserWin === false) {
+      momentumLabel = 'Derrota recente';
+      momentumTone = '#f87171';
+      summary = `Derrota recente contra ${params.recentMatchViewModel.opponentLabel}.`;
+    } else {
+      momentumLabel = 'Sessão recente';
+      momentumTone = '#93c5fd';
+      summary = 'Seu histórico recente já começou a preencher a camada de progresso.';
+    }
+  } else if (matchesPlayed >= 10 && winRate >= 60) {
     momentumLabel = 'Boa fase';
     momentumTone = '#4ade80';
+    summary = `Você já jogou ${matchesPlayed} partidas e mantém um ritmo forte.`;
   } else if (matchesPlayed >= 5 && winRate < 40) {
     momentumLabel = 'Hora da reação';
     momentumTone = '#f87171';
+    summary = `Você já acumulou ${matchesPlayed} partidas. Vale buscar recuperação.`;
   } else if (matchesPlayed > 0) {
     momentumLabel = 'Em evolução';
     momentumTone = '#93c5fd';
-  }
-
-  let summary = 'Conecte-se e jogue suas primeiras partidas para montar seu momento competitivo.';
-
-  if (matchesPlayed > 0 && rankingPosition !== null) {
-    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''} e aparece em ${rankingPosition}º no ranking carregado.`;
-  } else if (matchesPlayed > 0) {
-    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''}. Continue para fortalecer seu histórico.`;
+    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''}.`;
   }
 
   return {
@@ -658,10 +588,7 @@ export function LobbyPage() {
     latestHistoryItem,
   ]);
 
-  const badgeStyles = useMemo(
-    () => toneToStyles(continuation.badgeTone),
-    [continuation.badgeTone],
-  );
+  const badgeStyles = useMemo(() => toneToStyles(continuation.badgeTone), [continuation.badgeTone]);
 
   const heroAction = continuation.action;
 
@@ -669,35 +596,49 @@ export function LobbyPage() {
     return resolveProgressSnapshot({
       ranking,
       currentUserId,
+      latestHistoryItem,
+      recentMatchViewModel,
     });
-  }, [currentUserId, ranking]);
-
-  const eyebrow = !hasMinimumSession
-    ? 'Sessão Obrigatória'
-    : !isSocketOnline
-      ? 'Socket Offline'
-      : !derivedMatchId
-        ? 'Aguardando Sala'
-        : 'Sala Pronta';
+  }, [currentUserId, latestHistoryItem, ranking, recentMatchViewModel]);
+  const hasAnyMatchesPlayed = progressSnapshot.matchesPlayed > 0;
 
   return (
     <div
-      className="min-h-screen"
+      className="relative min-h-screen overflow-hidden rounded-3xl"
       style={{
         background:
-          'radial-gradient(ellipse at 50% -5%, #0d1f2e 0%, #050810 50%, #040610 100%)',
+          'radial-gradient(ellipse at 50% -10%, #173120 0%, #071119 34%, #050810 72%, #04070d 100%)',
+        border: '1px solid rgba(201,168,76,0.10)',
       }}
     >
-      <TopBar displayName={displayName} />
-
-      <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6 lg:px-8">
+      <div className="pointer-events-none absolute inset-0">
         <div
-          className="relative mb-6 overflow-hidden rounded-3xl p-6 lg:p-7"
+          className="absolute -top-40 left-1/2 -translate-x-1/2 rounded-full"
           style={{
-            background:
-              'linear-gradient(135deg, rgba(10,20,36,0.95), rgba(6,12,22,0.88))',
-            border: '1px solid rgba(201,168,76,0.22)',
-            boxShadow: '0 0 0 1px rgba(201,168,76,0.05), 0 24px 60px rgba(0,0,0,0.35)',
+            width: 900,
+            height: 600,
+            background: 'rgba(201,168,76,0.09)',
+            filter: 'blur(80px)',
+          }}
+        />
+        <div
+          className="absolute bottom-0 right-0 rounded-full"
+          style={{
+            width: 500,
+            height: 500,
+            background: 'rgba(20,78,46,0.34)',
+            filter: 'blur(80px)',
+          }}
+        />
+      </div>
+
+      <main className="relative z-10 mx-auto max-w-[1180px] px-4 py-5 sm:px-6 lg:px-8">
+        <div
+          className="relative mb-6 overflow-hidden rounded-[30px] p-6 lg:p-7"
+          style={{
+            background: 'linear-gradient(135deg, rgba(12,24,22,0.94), rgba(8,12,18,0.90))',
+            border: '1px solid rgba(201,168,76,0.24)',
+            boxShadow: '0 0 0 1px rgba(201,168,76,0.06), 0 28px 72px rgba(0,0,0,0.40)',
           }}
         >
           <div
@@ -705,7 +646,7 @@ export function LobbyPage() {
             style={{
               width: 240,
               height: 240,
-              background: 'rgba(201,168,76,0.1)',
+              background: 'rgba(201,168,76,0.12)',
               filter: 'blur(60px)',
             }}
           />
@@ -718,7 +659,7 @@ export function LobbyPage() {
                     fontSize: 9,
                     fontWeight: 700,
                     letterSpacing: '0.34em',
-                    color: 'rgba(255,255,255,0.38)',
+                    color: 'rgba(240,230,211,0.42)',
                     textTransform: 'uppercase',
                   }}
                 >
@@ -756,7 +697,7 @@ export function LobbyPage() {
               <p
                 style={{
                   fontSize: 13,
-                  color: 'rgba(255,255,255,0.45)',
+                  color: 'rgba(240,230,211,0.48)',
                   maxWidth: 560,
                   lineHeight: 1.5,
                 }}
@@ -781,8 +722,8 @@ export function LobbyPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_280px]">
-          <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_308px]">
+          <div className={derivedMatchId ? 'space-y-3.5' : 'space-y-5'}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -804,7 +745,7 @@ export function LobbyPage() {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {eyebrow}
+                    {derivedMatchId ? 'Sala pronta' : 'Aguardando sala'}
                   </span>
                 </div>
 
@@ -825,9 +766,9 @@ export function LobbyPage() {
                 <span
                   className="rounded-full px-3 py-1 text-xs font-bold"
                   style={{
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    color: 'rgba(255,255,255,0.45)',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(201,168,76,0.12)',
+                    color: 'rgba(240,230,211,0.48)',
                     letterSpacing: '0.1em',
                   }}
                 >
@@ -837,9 +778,7 @@ export function LobbyPage() {
                 <span
                   className="rounded-full px-3 py-1 text-xs font-bold"
                   style={{
-                    background: isOnline
-                      ? 'rgba(22,101,52,0.2)'
-                      : 'rgba(153,27,27,0.2)',
+                    background: isOnline ? 'rgba(22,101,52,0.2)' : 'rgba(153,27,27,0.2)',
                     border: isOnline
                       ? '1px solid rgba(34,197,94,0.25)'
                       : '1px solid rgba(239,68,68,0.25)',
@@ -851,16 +790,14 @@ export function LobbyPage() {
                 </span>
               </div>
             </div>
-
             <div
               className="relative overflow-hidden rounded-2xl"
               style={{
                 background:
                   'radial-gradient(ellipse at 50% 40%, #1a5c2e 0%, #0f3d1e 40%, #082010 100%)',
-                border: '2px solid rgba(201,168,76,0.2)',
-                boxShadow:
-                  '0 0 0 1px rgba(201,168,76,0.06), inset 0 0 80px rgba(0,0,0,0.45)',
-                minHeight: 290,
+                border: '1.5px solid rgba(201,168,76,0.16)',
+                boxShadow: '0 0 0 1px rgba(201,168,76,0.06), inset 0 0 80px rgba(0,0,0,0.45)',
+                minHeight: derivedMatchId ? 258 : 290,
               }}
             >
               <div
@@ -876,8 +813,8 @@ export function LobbyPage() {
                 style={{
                   inset: 18,
                   borderRadius: '50%',
-                  border: '1.5px solid rgba(201,168,76,0.25)',
-                  boxShadow: 'inset 0 0 60px rgba(0,0,0,0.4)',
+                  border: '1.5px solid rgba(201,168,76,0.30)',
+                  boxShadow: 'inset 0 0 72px rgba(0,0,0,0.42)',
                 }}
               />
 
@@ -896,7 +833,11 @@ export function LobbyPage() {
                 </div>
               ) : null}
 
-              <div className="relative z-10 flex flex-col items-center justify-center gap-6 py-8 sm:gap-8">
+              <div
+                className={`relative z-10 flex flex-col items-center justify-center ${
+                  derivedMatchId ? 'gap-5 py-6 sm:gap-6' : 'gap-6 py-8 sm:gap-8'
+                }`}
+              >
                 <div className="flex flex-col items-center gap-2">
                   <SeatAvatar
                     isBot={roomPlayers.find((player) => player.seatId === 'T2A')?.isBot ?? false}
@@ -908,7 +849,7 @@ export function LobbyPage() {
                       style={{
                         fontSize: 11,
                         fontWeight: 700,
-                        color: 'rgba(255,255,255,0.5)',
+                        color: 'rgba(240,230,211,0.56)',
                         letterSpacing: '0.08em',
                       }}
                     >
@@ -931,7 +872,7 @@ export function LobbyPage() {
                   <span
                     className="mx-3 px-3 py-1 text-[11px] font-black italic"
                     style={{
-                      color: 'rgba(255,255,255,0.2)',
+                      color: 'rgba(240,230,211,0.22)',
                       letterSpacing: '0.1em',
                     }}
                   >
@@ -978,7 +919,7 @@ export function LobbyPage() {
                   <div
                     style={{
                       fontSize: 12.5,
-                      color: 'rgba(255,255,255,0.45)',
+                      color: 'rgba(240,230,211,0.48)',
                       textAlign: 'center',
                       lineHeight: 1.55,
                     }}
@@ -998,120 +939,203 @@ export function LobbyPage() {
               ) : null}
             </div>
 
-            <div
-              className="rounded-2xl p-5"
-              style={{
-                background: CARD_BG,
-                border: CARD_BORDER,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-              }}
-            >
-              <h3
-                style={{
-                  fontFamily: 'Georgia, serif',
-                  fontSize: 17,
-                  fontWeight: 700,
-                  color: '#f0e6d3',
-                  marginBottom: 4,
-                }}
-              >
-                {heroAction.label}
-              </h3>
-
-              <p
-                style={{
-                  fontSize: 12.5,
-                  color: 'rgba(255,255,255,0.42)',
-                  marginBottom: 16,
-                  lineHeight: 1.5,
-                }}
-              >
-                {heroAction.detail}
-              </p>
-
-              <div className="flex flex-wrap gap-3">
-                <GoldButton
-                  onClick={heroAction.onClick}
-                  disabled={heroAction.disabled}
-                  size="lg"
-                  className="flex-1"
-                >
-                  {heroAction.ctaLabel}
-                </GoldButton>
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <GoldButton variant="ghost" onClick={handleGetState} disabled={!canRequestState}>
-                  Obter Estado
-                </GoldButton>
-
-                <GoldButton variant="ghost" onClick={handleDisconnect} disabled={!isSocketOnline}>
-                  Desconectar
-                </GoldButton>
-              </div>
-
+            {continuation.state === 'reconnect' ? (
               <div
-                className="mt-4 rounded-xl p-4"
+                className="rounded-2xl p-4"
                 style={{
-                  background: 'rgba(0,0,0,0.2)',
-                  border: '1px solid rgba(255,255,255,0.04)',
+                  background: CARD_BG,
+                  border: '1px solid rgba(201,168,76,0.14)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
                 }}
               >
-                <div className="mb-1 flex justify-between">
-                  <span
-                    style={{
-                      fontSize: 9,
-                      fontWeight: 700,
-                      letterSpacing: '0.15em',
-                      color: 'rgba(255,255,255,0.3)',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    Jogadores
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 900,
-                      color: '#f0e6d3',
-                    }}
-                  >
-                    {playerCount} / 2
-                  </span>
-                </div>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.2em',
+                        color: 'rgba(201,168,76,0.8)',
+                        textTransform: 'uppercase',
+                        marginBottom: 6,
+                      }}
+                    >
+                      Sessão em tempo real
+                    </h3>
 
-                <ProgressBar value={playerCount} max={2} />
+                    <p
+                      style={{
+                        fontSize: 11.5,
+                        color: 'rgba(255,255,255,0.46)',
+                        lineHeight: 1.45,
+                        maxWidth: 540,
+                      }}
+                    >
+                      A mesa continua visível, mas ranking, histórico e sala ativa só voltam a
+                      sincronizar quando o socket reconectar.
+                    </p>
+                  </div>
 
-                <div className="mt-3 flex justify-between">
-                  <span
-                    style={{
-                      fontSize: 9,
-                      fontWeight: 700,
-                      letterSpacing: '0.15em',
-                      color: 'rgba(255,255,255,0.3)',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    Prontos
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 900,
-                      color: '#4ade80',
-                    }}
-                  >
-                    {readyCount} / {playerCount}
-                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <span
+                      className="rounded-full px-3 py-1"
+                      style={{
+                        background: 'rgba(239,68,68,0.1)',
+                        border: '1px solid rgba(239,68,68,0.18)',
+                        color: '#f87171',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Socket offline
+                    </span>
+
+                    <span
+                      className="rounded-full px-3 py-1"
+                      style={{
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        color: 'rgba(240,230,211,0.48)',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.12em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Sem sala ativa
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
+
+            {derivedMatchId ? (
+              <div
+                className="rounded-2xl p-4"
+                style={{
+                  background: CARD_BG,
+                  border: '1px solid rgba(201,168,76,0.14)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                }}
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.2em',
+                      color: 'rgba(201,168,76,0.8)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Status da Sala
+                  </h3>
+
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: '0.14em',
+                      color: 'rgba(240,230,211,0.36)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {isOnline ? 'Socket ativo' : 'Socket offline'}
+                  </span>
+                </div>
+
+                <div
+                  className="grid grid-cols-2 gap-3 rounded-xl px-4 py-3"
+                  style={{
+                    background: 'rgba(0,0,0,0.18)',
+                    border: '1px solid rgba(255,255,255,0.04)',
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        letterSpacing: '0.14em',
+                        color: 'rgba(255,255,255,0.3)',
+                        textTransform: 'uppercase',
+                        marginBottom: 5,
+                      }}
+                    >
+                      Jogadores
+                    </div>
+
+                    <div className="mb-2 flex items-center justify-between">
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#f0e6d3',
+                        }}
+                      >
+                        {playerCount} / 2
+                      </span>
+                    </div>
+
+                    <ProgressBar value={playerCount} max={2} />
+                  </div>
+
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        letterSpacing: '0.14em',
+                        color: 'rgba(255,255,255,0.3)',
+                        textTransform: 'uppercase',
+                        marginBottom: 5,
+                      }}
+                    >
+                      Prontos
+                    </div>
+
+                    <div className="mb-2 flex items-center justify-between">
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: '#4ade80',
+                        }}
+                      >
+                        {readyCount} / {playerCount}
+                      </span>
+                    </div>
+
+                    <ProgressBar value={readyCount} max={Math.max(playerCount, 1)} />
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2.5">
+                  <GoldButton
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleGetState}
+                    disabled={!canRequestState}
+                  >
+                    Atualizar Estado
+                  </GoldButton>
+
+                  <GoldButton
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleDisconnect}
+                    disabled={!isSocketOnline}
+                  >
+                    Desconectar
+                  </GoldButton>
+                </div>
+              </div>
+            ) : null}
 
             {showJoinPanel ? (
-              <div
-                className="rounded-2xl p-5"
-                style={{ background: CARD_BG, border: CARD_BORDER }}
-              >
+              <div className="rounded-2xl p-5" style={{ background: CARD_BG, border: CARD_BORDER }}>
                 <h3
                   style={{
                     fontSize: 10,
@@ -1195,23 +1219,34 @@ export function LobbyPage() {
             <div
               className="rounded-2xl p-4"
               style={{
-                background:
-                  'linear-gradient(180deg, rgba(10,18,30,0.88), rgba(7,13,23,0.74))',
-                border: CARD_BORDER,
+                background: 'linear-gradient(180deg, rgba(12,22,36,0.96), rgba(7,13,23,0.82))',
+                border: '1px solid rgba(201,168,76,0.18)',
+                boxShadow: '0 0 0 1px rgba(201,168,76,0.04), 0 16px 32px rgba(0,0,0,0.26)',
               }}
             >
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.2em',
-                    color: 'rgba(201,168,76,0.8)',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  Seu Momento
-                </h3>
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div>
+                  <h3
+                    style={{
+                      fontFamily: 'Georgia, serif',
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: '#f0e6d3',
+                      marginBottom: 2,
+                    }}
+                  >
+                    Seu Momento
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: 11,
+                      color: 'rgba(255,255,255,0.44)',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {progressSnapshot.summary}
+                  </p>
+                </div>
 
                 <span
                   className="rounded-full px-2.5 py-1"
@@ -1219,108 +1254,100 @@ export function LobbyPage() {
                     background: 'rgba(255,255,255,0.04)',
                     border: '1px solid rgba(255,255,255,0.06)',
                     color: progressSnapshot.momentumTone,
-                    fontSize: 9,
+                    fontSize: 8.5,
                     fontWeight: 700,
-                    letterSpacing: '0.08em',
+                    letterSpacing: '0.1em',
+                    whiteSpace: 'nowrap',
+                    textTransform: 'uppercase',
                   }}
                 >
                   {progressSnapshot.momentumLabel}
                 </span>
               </div>
 
-              <div
-                className="rounded-xl px-3 py-3"
-                style={{
-                  background: 'rgba(0,0,0,0.22)',
-                  border: '1px solid rgba(255,255,255,0.05)',
-                }}
-              >
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Partidas</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: '#f0e6d3' }}>
-                      {progressSnapshot.matchesPlayed}
-                    </div>
+              {/* CHANGE: zero-matches variant collapses the stat grid and the
+                  Rank/Rating row. With no plays to show, four cards of "0"
+                  and a Rank/Rating summary were visually heavy and read as
+                  false scoreboard data. The collapsed variant keeps the card
+                  quiet until the first match lands. */}
+              {hasAnyMatchesPlayed ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <SidebarStat label="Partidas" value={progressSnapshot.matchesPlayed} />
+                    <SidebarStat
+                      label="Win rate"
+                      value={progressSnapshot.winRateLabel}
+                      tone="rgba(201,168,76,0.88)"
+                    />
+                    <SidebarStat label="Vitórias" value={progressSnapshot.wins} tone="#4ade80" />
+                    <SidebarStat label="Derrotas" value={progressSnapshot.losses} tone="#f87171" />
                   </div>
 
-                  <div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Win rate</div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: 'rgba(201,168,76,0.88)' }}>
-                      {progressSnapshot.winRateLabel}
+                  <div
+                    className="mt-2 rounded-xl px-3 py-2"
+                    style={{
+                      background: 'rgba(255,255,255,0.035)',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        color: 'rgba(255,255,255,0.72)',
+                        display: 'flex',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span>
+                        Rank:{' '}
+                        <span style={{ color: '#f0e6d3' }}>
+                          {progressSnapshot.rankingPosition
+                            ? `${progressSnapshot.rankingPosition}º`
+                            : 'Fora do top'}
+                        </span>
+                      </span>
+
+                      <span style={{ color: 'rgba(255,255,255,0.25)' }}>•</span>
+
+                      <span>
+                        Rating:{' '}
+                        <span style={{ color: 'rgba(201,168,76,0.88)' }}>
+                          {progressSnapshot.ratingLabel ?? '—'}
+                        </span>
+                      </span>
                     </div>
                   </div>
-
-                  <div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Vitórias</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#4ade80' }}>
-                      {progressSnapshot.wins}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>Derrotas</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#f87171' }}>
-                      {progressSnapshot.losses}
-                    </div>
-                  </div>
-                </div>
-
+                </>
+              ) : (
                 <div
-                  className="mt-3 border-t pt-3"
-                  style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+                  className="rounded-xl px-3 py-3"
+                  style={{
+                    background: 'rgba(0,0,0,0.20)',
+                    border: '1px solid rgba(201,168,76,0.10)',
+                  }}
                 >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>Ranking</span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: progressSnapshot.rankingPosition
-                          ? '#f0e6d3'
-                          : 'rgba(255,255,255,0.55)',
-                      }}
-                    >
-                      {progressSnapshot.rankingPosition
-                        ? `${progressSnapshot.rankingPosition}º`
-                        : 'Fora do top carregado'}
-                    </span>
-                  </div>
-
-                  <div className="mb-2 flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>Rating</span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: progressSnapshot.ratingLabel
-                          ? 'rgba(201,168,76,0.88)'
-                          : 'rgba(255,255,255,0.55)',
-                      }}
-                    >
-                      {progressSnapshot.ratingLabel ?? '—'}
-                    </span>
-                  </div>
-
                   <p
                     style={{
                       fontSize: 11.5,
-                      color: 'rgba(255,255,255,0.48)',
+                      color: 'rgba(240,230,211,0.56)',
                       lineHeight: 1.5,
-                      marginTop: 8,
                     }}
                   >
-                    {progressSnapshot.summary}
+                    Suas partidas ainda não começaram. Depois da primeira mesa, seu win rate, rank e
+                    rating aparecem aqui.
                   </p>
                 </div>
-              </div>
+              )}
             </div>
 
             <div
-              className="rounded-2xl p-4"
+              className="rounded-[24px] p-4"
               style={{
-                background:
-                  'linear-gradient(180deg, rgba(10,18,30,0.88), rgba(7,13,23,0.74))',
+                background: 'linear-gradient(180deg, rgba(11,20,21,0.92), rgba(7,12,18,0.82))',
                 border: CARD_BORDER,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
               }}
             >
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -1347,102 +1374,92 @@ export function LobbyPage() {
               </div>
 
               {latestHistoryItem && recentMatchViewModel ? (
-                <div className="space-y-3">
-                  <div
-                    className="rounded-xl px-3 py-3"
-                    style={{
-                      background: 'rgba(0,0,0,0.22)',
-                      border: '1px solid rgba(255,255,255,0.05)',
-                    }}
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-3">
+                <div
+                  className="rounded-xl px-3 py-3"
+                  style={{
+                    background: 'rgba(0,0,0,0.20)',
+                    border: '1px solid rgba(201,168,76,0.10)',
+                  }}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: recentMatchViewModel.resultTone,
+                      }}
+                    >
+                      {recentMatchViewModel.resultLabel}
+                    </span>
+
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: 'rgba(240,230,211,0.36)',
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      {recentMatchViewModel.finishedAtLabel}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+                        Oponente
+                      </span>
                       <span
                         style={{
                           fontSize: 12,
                           fontWeight: 700,
-                          color: recentMatchViewModel.resultTone,
+                          color: '#f0e6d3',
                         }}
                       >
-                        {recentMatchViewModel.resultLabel}
+                        {recentMatchViewModel.opponentLabel}
                       </span>
+                    </div>
 
+                    <div className="flex items-center justify-between gap-3">
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>Placar</span>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: 'rgba(201,168,76,0.85)',
+                        }}
+                      >
+                        {recentMatchViewModel.scoreLabel}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
+                        Match ID
+                      </span>
                       <span
                         style={{
                           fontSize: 10,
-                          color: 'rgba(255,255,255,0.35)',
-                          letterSpacing: '0.08em',
+                          fontFamily: 'monospace',
+                          color: 'rgba(255,255,255,0.58)',
                         }}
                       >
-                        {recentMatchViewModel.finishedAtLabel}
+                        #{latestHistoryItem.matchId.slice(-8)}
                       </span>
                     </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
-                          Oponente
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: '#f0e6d3',
-                          }}
-                        >
-                          {recentMatchViewModel.opponentLabel}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
-                          Placar
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: 'rgba(201,168,76,0.85)',
-                          }}
-                        >
-                          {recentMatchViewModel.scoreLabel}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>
-                          Match ID
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            color: 'rgba(255,255,255,0.58)',
-                          }}
-                        >
-                          #{latestHistoryItem.matchId.slice(-8)}
-                        </span>
-                      </div>
-                    </div>
                   </div>
-
-                  {!derivedMatchId ? (
-                    <GoldButton size="md" className="w-full" onClick={handleCreateMatch}>
-                      Jogar Novamente
-                    </GoldButton>
-                  ) : null}
                 </div>
               ) : (
                 <div
                   className="rounded-xl px-3 py-4"
                   style={{
-                    background: 'rgba(0,0,0,0.22)',
-                    border: '1px solid rgba(255,255,255,0.05)',
+                    background: 'rgba(0,0,0,0.20)',
+                    border: '1px solid rgba(201,168,76,0.10)',
                   }}
                 >
                   <p
                     style={{
                       fontSize: 12,
-                      color: 'rgba(255,255,255,0.52)',
+                      color: 'rgba(240,230,211,0.54)',
                       lineHeight: 1.5,
                     }}
                   >
@@ -1453,60 +1470,11 @@ export function LobbyPage() {
             </div>
 
             <div
-              className="rounded-2xl p-4"
-              style={{ background: CARD_BG, border: CARD_BORDER }}
-            >
-              <h3
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.2em',
-                  color: 'rgba(255,255,255,0.35)',
-                  textTransform: 'uppercase',
-                  marginBottom: 12,
-                }}
-              >
-                Status da Sala
-              </h3>
-
-              <div className="space-y-2.5">
-                {[
-                  { label: 'Modo', value: roomModeLabel.toUpperCase() },
-                  {
-                    label: 'Conexão',
-                    value: connectionStatus.toUpperCase(),
-                    highlight: isOnline,
-                  },
-                  {
-                    label: 'Match ID',
-                    value: derivedMatchId ? `#${derivedMatchId.slice(-8)}` : '—',
-                    mono: true,
-                  },
-                  { label: 'Pronto', value: currentReady ? 'Sim' : 'Não', highlight: currentReady },
-                ].map(({ label, value, highlight, mono }) => (
-                  <div key={label} className="flex items-center justify-between">
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{label}</span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        fontFamily: mono ? 'monospace' : undefined,
-                        color: highlight ? '#4ade80' : 'rgba(255,255,255,0.7)',
-                      }}
-                    >
-                      {value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div
-              className="rounded-2xl p-4"
+              className="rounded-[24px] p-4"
               style={{
-                background:
-                  'radial-gradient(ellipse at 50% 0%, #1a5c2e 0%, #0f3d1e 50%, #082010 100%)',
-                border: '1px solid rgba(201,168,76,0.2)',
+                background: 'linear-gradient(180deg, rgba(10,18,20,0.90), rgba(7,12,18,0.80))',
+                border: '1px solid rgba(201,168,76,0.12)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
               }}
             >
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -1527,7 +1495,7 @@ export function LobbyPage() {
                     fontSize: 9,
                     fontWeight: 700,
                     letterSpacing: '0.12em',
-                    color: 'rgba(255,255,255,0.35)',
+                    color: 'rgba(240,230,211,0.36)',
                     textTransform: 'uppercase',
                   }}
                 >
@@ -1543,14 +1511,14 @@ export function LobbyPage() {
                       className="flex items-center justify-between rounded-xl px-3 py-2"
                       style={{
                         background: entry.isCurrentUser
-                          ? 'rgba(201,168,76,0.12)'
-                          : 'rgba(0,0,0,0.22)',
+                          ? 'rgba(201,168,76,0.10)'
+                          : 'rgba(255,255,255,0.03)',
                         border: entry.isCurrentUser
-                          ? '1px solid rgba(201,168,76,0.24)'
-                          : '1px solid transparent',
+                          ? '1px solid rgba(201,168,76,0.20)'
+                          : '1px solid rgba(255,255,255,0.04)',
                       }}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <span
                           style={{
                             fontFamily: 'Georgia, serif',
@@ -1561,13 +1529,17 @@ export function LobbyPage() {
                             WebkitTextFillColor: 'transparent',
                             backgroundClip: 'text',
                             width: 16,
+                            flexShrink: 0,
                           }}
                         >
                           {entry.position}
                         </span>
 
-                        <div className="flex items-center gap-2">
-                          <span style={{ fontSize: 13, color: '#f0e6d3' }}>{entry.name}</span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate" style={{ fontSize: 13, color: '#f0e6d3' }}>
+                            {entry.name}
+                          </span>
+
                           {entry.isCurrentUser ? (
                             <span
                               className="rounded-full px-2 py-0.5 text-[9px] font-black"
@@ -1575,6 +1547,7 @@ export function LobbyPage() {
                                 background: 'rgba(201,168,76,0.16)',
                                 color: '#e8c76a',
                                 letterSpacing: '0.08em',
+                                flexShrink: 0,
                               }}
                             >
                               VOCÊ
@@ -1586,8 +1559,9 @@ export function LobbyPage() {
                       <span
                         style={{
                           fontSize: 11,
-                          color: 'rgba(201,168,76,0.85)',
+                          color: 'rgba(201,168,76,0.82)',
                           fontWeight: 700,
+                          flexShrink: 0,
                         }}
                       >
                         ⭐ {entry.ratingLabel}
@@ -1599,14 +1573,14 @@ export function LobbyPage() {
                 <div
                   className="rounded-xl px-3 py-4"
                   style={{
-                    background: 'rgba(0,0,0,0.22)',
-                    border: '1px solid rgba(255,255,255,0.05)',
+                    background: 'rgba(0,0,0,0.20)',
+                    border: '1px solid rgba(201,168,76,0.10)',
                   }}
                 >
                   <p
                     style={{
                       fontSize: 12,
-                      color: 'rgba(255,255,255,0.52)',
+                      color: 'rgba(240,230,211,0.54)',
                       lineHeight: 1.5,
                     }}
                   >
