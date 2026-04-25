@@ -10,6 +10,19 @@ import type {
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 
+
+const EMPTY_AVAILABLE_ACTIONS = {
+  canRequestTruco: false,
+  canRaiseToSix: false,
+  canRaiseToNine: false,
+  canRaiseToTwelve: false,
+  canAcceptBet: false,
+  canDeclineBet: false,
+  canAcceptMaoDeOnze: false,
+  canDeclineMaoDeOnze: false,
+  canAttemptPlayCard: false,
+} satisfies NonNullable<MatchStatePayload['currentHand']>['availableActions'];
+
 export type TableSeatView = {
   seatId: string;
   ready: boolean;
@@ -55,6 +68,20 @@ export function useMatchPageViewModel({
     const resolvedMatchId = matchId ?? 'no-match';
     const isOneVsOne = true;
 
+    const currentPublicHand = publicMatchState?.currentHand ?? null;
+    const currentPrivateHand = privateMatchState?.currentHand ?? null;
+
+    // Private hand is the viewer-authoritative source for actions. Public hand
+    // remains the source for shared table history such as rounds and score.
+    const viewerActionHand = currentPrivateHand;
+    const availableActions = viewerActionHand?.availableActions ?? EMPTY_AVAILABLE_ACTIONS;
+    const nextDecisionType =
+      viewerActionHand?.nextDecisionType ?? currentPublicHand?.nextDecisionType ?? 'idle';
+
+    const viewerCanActNow = Boolean(viewerActionHand?.viewerCanActNow);
+    const inferredCurrentTurnSeatId =
+      viewerCanActNow && mySeat !== null ? mySeat : (roomState?.currentTurnSeatId ?? null);
+
     const roomPlayers: TableSeatView[] = TABLE_SEAT_ORDER_1V1.map((seatId) => {
       const player = roomState?.players.find((entry) => entry.seatId === seatId);
 
@@ -62,7 +89,7 @@ export function useMatchPageViewModel({
         seatId,
         ready: player?.ready ?? false,
         isBot: player?.isBot ?? false,
-        isCurrentTurn: roomState?.currentTurnSeatId === seatId,
+        isCurrentTurn: inferredCurrentTurnSeatId === seatId,
         isMine: seatId === mySeat,
         botIdentity: player?.botIdentity ?? null,
       };
@@ -70,14 +97,6 @@ export function useMatchPageViewModel({
 
     const mySeatView = roomPlayers.find((player) => player.isMine) ?? null;
     const opponentSeatView = roomPlayers.find((player) => !player.isMine) ?? null;
-
-    const currentPublicHand = publicMatchState?.currentHand ?? null;
-    const currentPrivateHand = privateMatchState?.currentHand ?? null;
-
-    // NOTE: Private state is the source for the viewer hand, but start-next-hand
-    // semantics must still survive whenever either projection already carries them.
-    const effectiveHand = currentPrivateHand ?? currentPublicHand;
-    const nextDecisionType = effectiveHand?.nextDecisionType ?? 'idle';
 
     const myIsPlayerOne = mySeat === 'T1A';
     const rawViewerCards = myIsPlayerOne
@@ -115,12 +134,9 @@ export function useMatchPageViewModel({
           (publicMatchState?.state === 'waiting' && roomState?.canStart === true)),
     );
 
-    const isMyTurn = Boolean(mySeat && roomState?.currentTurnSeatId === mySeat);
-    const canPlayCard = Boolean(
-      effectiveHand?.availableActions.canAttemptPlayCard &&
-        mySeat &&
-        myCards.length > 0 &&
-        !handFinished,
+    const canPlayCard = Boolean(mySeat && availableActions.canAttemptPlayCard);
+    const isMyTurn = Boolean(
+      mySeat && (canPlayCard || viewerCanActNow || inferredCurrentTurnSeatId === mySeat),
     );
 
     const contractPresentation = buildMatchContractPresentation({
@@ -134,6 +150,9 @@ export function useMatchPageViewModel({
 
     return {
       ...contractPresentation,
+      availableActions,
+      canPlayCard,
+      currentTurnSeatId: inferredCurrentTurnSeatId,
       resolvedMatchId,
       mySeat,
       isOneVsOne,

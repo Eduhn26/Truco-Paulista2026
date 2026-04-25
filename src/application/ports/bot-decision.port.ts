@@ -47,6 +47,25 @@ export type BotBetView = {
   availableActions: BotAvailableActionsView;
 };
 
+// Match-level context for bets. Optional so legacy callers and the python adapter
+// contract keep working without modification; the heuristic adapter treats missing
+// values as "neutral" and falls back to the pre-existing thresholds.
+export type BotMatchScoreView = {
+  playerOne: number;
+  playerTwo: number;
+  pointsToWin: number;
+};
+
+// Rounds already resolved in the current hand. Derived from the view DTO in the gateway.
+// Used by the heuristic adapter to weigh truco initiative (e.g. winning R1 strongly
+// favours calling truco; losing R1 favours bluffing only when hand strength supports it).
+export type BotHandProgressView = {
+  roundsWonByMe: number;
+  roundsWonByOpponent: number;
+  roundsTied: number;
+  currentRoundIndex: number; // 0-based
+};
+
 export type BotDecisionContext = {
   matchId: string;
   profile: BotProfile;
@@ -54,6 +73,8 @@ export type BotDecisionContext = {
   currentRound: BotRoundView | null;
   player: BotPlayerView;
   bet?: BotBetView;
+  score?: BotMatchScoreView;
+  handProgress?: BotHandProgressView;
 };
 
 // Provenance of the decision from the consumer's perspective.
@@ -82,6 +103,11 @@ export type BotDecisionStrategy =
   | 'bet-decline'
   | 'bet-raise'
   | 'bet-no-response'
+  | 'bet-accept-forced-by-score'
+  | 'bet-decline-by-score'
+  | 'bet-initiative-value'
+  | 'bet-initiative-pressure'
+  | 'bet-initiative-bluff'
   | 'empty-hand'
   | 'missing-round'
   | 'unsupported-state';
@@ -111,6 +137,10 @@ export type BotDecision =
     }
   | {
       action: 'decline-bet';
+      metadata?: BotDecisionMetadata;
+    }
+  | {
+      action: 'request-truco';
       metadata?: BotDecisionMetadata;
     }
   | {

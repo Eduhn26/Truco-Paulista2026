@@ -15,19 +15,27 @@ type UpdateRatingResponseDto = {
 const RATING_DELTA = 25;
 const RATING_FLOOR = 100;
 
-function applyWin(profile: PlayerProfileSnapshot): PlayerProfileSnapshot {
+function applyWin(
+  profile: PlayerProfileSnapshot,
+  options: { adjustRating: boolean },
+): PlayerProfileSnapshot {
   return {
     ...profile,
-    rating: profile.rating + RATING_DELTA,
+    rating: options.adjustRating ? profile.rating + RATING_DELTA : profile.rating,
     wins: profile.wins + 1,
     matchesPlayed: profile.matchesPlayed + 1,
   };
 }
 
-function applyLoss(profile: PlayerProfileSnapshot): PlayerProfileSnapshot {
+function applyLoss(
+  profile: PlayerProfileSnapshot,
+  options: { adjustRating: boolean },
+): PlayerProfileSnapshot {
   return {
     ...profile,
-    rating: Math.max(RATING_FLOOR, profile.rating - RATING_DELTA),
+    rating: options.adjustRating
+      ? Math.max(RATING_FLOOR, profile.rating - RATING_DELTA)
+      : profile.rating,
     losses: profile.losses + 1,
     matchesPlayed: profile.matchesPlayed + 1,
   };
@@ -40,6 +48,10 @@ export class UpdateRatingUseCase {
     const winnerUserIds = this.normalizeUserIds(request.winnerUserIds, 'winnerUserIds');
     const loserUserIds = this.normalizeUserIds(request.loserUserIds, 'loserUserIds');
 
+    if (winnerUserIds.length === 0 && loserUserIds.length === 0) {
+      throw new Error('At least one side must contain a human userId');
+    }
+
     const winners = await Promise.all(
       winnerUserIds.map((userId) => this.repo.findByUserId(userId)),
     );
@@ -49,14 +61,15 @@ export class UpdateRatingUseCase {
       throw new Error('Player profile not found');
     }
 
+    const shouldAdjustRating = winnerUserIds.length > 0 && loserUserIds.length > 0;
     const profilesToSave: PlayerProfileSnapshot[] = [];
 
     for (const profile of winners as PlayerProfileSnapshot[]) {
-      profilesToSave.push(applyWin(profile));
+      profilesToSave.push(applyWin(profile, { adjustRating: shouldAdjustRating }));
     }
 
     for (const profile of losers as PlayerProfileSnapshot[]) {
-      profilesToSave.push(applyLoss(profile));
+      profilesToSave.push(applyLoss(profile, { adjustRating: shouldAdjustRating }));
     }
 
     await Promise.all(profilesToSave.map((profile) => this.repo.save(profile)));
@@ -65,8 +78,12 @@ export class UpdateRatingUseCase {
   }
 
   private normalizeUserIds(userIds: string[], fieldName: string): string[] {
-    if (!Array.isArray(userIds) || userIds.length === 0) {
-      throw new Error(`${fieldName} must contain at least one userId`);
+    if (!Array.isArray(userIds)) {
+      throw new Error(`${fieldName} must be an array of userIds`);
+    }
+
+    if (userIds.length === 0) {
+      return [];
     }
 
     const normalizedUserIds = userIds.map((userId) => {

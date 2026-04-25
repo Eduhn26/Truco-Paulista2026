@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
+import { TrucoDramaOverlay } from './trucoDramaOverlay';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
 import type {
   BotIdentityPayload,
@@ -93,8 +94,32 @@ const SUIT_SYMBOL_MAP: Record<string, string> = {
 // without a blocker.
 const CLIMAX_AUTO_DISMISS_MS = 2800;
 
+function debugMatchTableShell(event: string, details: Record<string, unknown> = {}): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.info('[MATCH_TABLE_SHELL]', event, details);
+}
+
 function parseSuitColor(suit: string): boolean {
   return suit === 'P' || suit === 'O';
+}
+
+function mapSeatToPlayerId(seatId: string | null | undefined): 'P1' | 'P2' | null {
+  if (!seatId) {
+    return null;
+  }
+
+  if (seatId.startsWith('T1')) {
+    return 'P1';
+  }
+
+  if (seatId.startsWith('T2')) {
+    return 'P2';
+  }
+
+  return null;
 }
 
 function getTierVisuals(tier: ValeTier) {
@@ -538,32 +563,26 @@ function LeftContextColumn({
         >
           Valor atual
         </div>
-        <div className="mt-1 flex items-baseline gap-2">
+        <div className="mt-1 flex items-center gap-2">
           <span
-            className="text-[26px] font-black leading-none"
+            className="flex h-10 min-w-10 items-center justify-center rounded-2xl px-3 text-[25px] font-black leading-none"
             style={{
-              color: valeTier === 'muted' ? '#e8d5a0' : 'transparent',
-              background: valeTier === 'muted' ? 'none' : valeVisuals.background,
-              WebkitBackgroundClip: valeTier === 'muted' ? 'border-box' : 'text',
-              backgroundClip: valeTier === 'muted' ? 'border-box' : 'text',
+              backgroundImage: valeVisuals.background,
+              border: valeVisuals.border,
+              boxShadow: valeVisuals.glow,
+              color: valeVisuals.textColor,
               fontFamily: 'Georgia, serif',
-              filter:
-                valeTier === 'red-pulse'
-                  ? 'drop-shadow(0 0 10px rgba(248,113,113,0.60))'
-                  : valeTier === 'red'
-                    ? 'drop-shadow(0 0 8px rgba(220,38,38,0.42))'
-                    : valeTier === 'orange'
-                      ? 'drop-shadow(0 0 8px rgba(245,158,11,0.40))'
-                      : valeTier === 'gold'
-                        ? 'drop-shadow(0 0 6px rgba(201,168,76,0.36))'
-                        : 'none',
+              textShadow:
+                valeTier === 'gold' || valeTier === 'orange'
+                  ? '0 1px 0 rgba(255,255,255,0.22)'
+                  : '0 2px 8px rgba(0,0,0,0.42)',
             }}
           >
             {currentValue}
           </span>
           <span
-            className="text-[10px] font-bold uppercase tracking-[0.20em]"
-            style={{ color: 'rgba(232,213,160,0.48)' }}
+            className="text-[10px] font-bold uppercase leading-tight tracking-[0.20em]"
+            style={{ color: 'rgba(232,213,160,0.58)' }}
           >
             {currentValue === 1 ? 'ponto' : 'pontos'}
           </span>
@@ -961,9 +980,11 @@ function PlayedSlot({
 function CenterActionBar({
   availableActions,
   onAction,
+  isBetDramaActive = false,
 }: {
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   onAction: (action: MatchAction) => void;
+  isBetDramaActive?: boolean;
 }) {
   const canAccept = availableActions.canAcceptBet || availableActions.canAcceptMaoDeOnze;
   const canDecline = availableActions.canDeclineBet || availableActions.canDeclineMaoDeOnze;
@@ -1001,7 +1022,15 @@ function CenterActionBar({
         : 'Aumentar';
 
   return (
-    <div className="flex items-center justify-center gap-2.5">
+    <motion.div
+      className="relative z-10 flex items-center justify-center gap-2.5"
+      animate={{
+        opacity: isBetDramaActive ? 0.84 : 1,
+        y: isBetDramaActive ? 4 : 0,
+        scale: isBetDramaActive ? 0.985 : 1,
+      }}
+      transition={{ duration: 0.22 }}
+    >
       <motion.button
         type="button"
         onClick={() => canTruco && onAction('request-truco')}
@@ -1109,7 +1138,7 @@ function CenterActionBar({
       >
         {canRaise ? raiseLabel : canDecline ? 'Correr' : 'Aumentar'}
       </motion.button>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1590,6 +1619,49 @@ export function MatchTableShell(props: MatchTableShellProps) {
     () => resolveValeTier(activeValueForTier),
     [activeValueForTier],
   );
+  const viewerPlayerId = mapSeatToPlayerId(mySeatView?.seatId);
+  const requesterIsMine = Boolean(
+    viewerPlayerId !== null && props.requestedBy === viewerPlayerId,
+  );
+  const requestedByLabel = requesterIsMine
+    ? 'Você pediu'
+    : opponentSeatView?.botIdentity?.displayName
+      ? opponentSeatView.botIdentity.displayName + ' pediu'
+      : 'Adversário pediu';
+  const pendingBetValue = pendingValue ?? currentValue;
+  const pendingBetWord = (() => {
+    switch (pendingBetValue) {
+      case 3:
+        return 'TRUCO';
+      case 6:
+        return 'SEIS';
+      case 9:
+        return 'NOVE';
+      case 12:
+        return 'DOZE';
+      default:
+        return String(pendingBetValue);
+    }
+  })();
+  const shouldShowTrucoDrama =
+    isAwaitingBet && pendingBetValue > currentValue && !isHandFinished && !isMatchFinished;
+  const trucoDramaHeadline = `${requestedByLabel} ${pendingBetWord}`;
+  const trucoDramaDetail = requesterIsMine
+    ? 'Aguardando resposta.'
+    : `A mão passa a valer ${pendingBetValue}.`;
+  const trucoDramaAuraColor = (() => {
+    switch (activeTier) {
+      case 'orange':
+        return requesterIsMine ? 'rgba(251,146,60,0.18)' : 'rgba(251,146,60,0.34)';
+      case 'red':
+      case 'red-pulse':
+        return requesterIsMine ? 'rgba(239,68,68,0.20)' : 'rgba(239,68,68,0.38)';
+      case 'gold':
+      case 'muted':
+      default:
+        return requesterIsMine ? 'rgba(255,215,128,0.16)' : 'rgba(255,215,128,0.30)';
+    }
+  })();
 
   const parseCard = (cardString: string | null) => {
     if (!cardString || cardString.length < 2) {
@@ -1636,16 +1708,16 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const opponentCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P2');
   const isTieRound = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'TIE');
 
-  const shouldBlockHandDock =
-    isAwaitingBet ||
+  const hasPendingBetDecision =
+    isAwaitingBet || availableActions.canAcceptBet || availableActions.canDeclineBet;
+  const hasPendingSpecialDecision =
     props.specialDecisionPending ||
-    availableActions.canAcceptBet ||
-    availableActions.canDeclineBet ||
-    availableActions.canRaiseToSix ||
-    availableActions.canRaiseToNine ||
-    availableActions.canRaiseToTwelve ||
     availableActions.canAcceptMaoDeOnze ||
     availableActions.canDeclineMaoDeOnze;
+
+  // Optional raise actions must not freeze the hand. In Truco, raising to 6/9/12 is
+  // an alternative action on the player's turn, not a mandatory response gate.
+  const shouldBlockHandDock = hasPendingBetDecision || hasPendingSpecialDecision;
 
   const [climaxDismissed, setClimaxDismissed] = useState(false);
   const lastClimaxPhaseRef = useRef<TablePhase | null>(null);
@@ -1677,7 +1749,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
     if (isAwaitingBet) {
       const ask = pendingValue ?? currentValue;
       if (ask > 3) {
-        return { label: `Subiu para ${ask}`, accent: 'escalate' };
+        return { label: `Pedido de ${ask}`, accent: 'escalate' };
       }
       return { label: 'Truco pedido', accent: 'pressure' };
     }
@@ -1754,6 +1826,74 @@ export function MatchTableShell(props: MatchTableShellProps) {
   })();
 
   useEffect(() => {
+    debugMatchTableShell('render-decision-snapshot', {
+      tablePhase,
+      isHandFinished,
+      isMatchFinished,
+      isResolvingRound,
+      shouldSuppressCenterTableCards: false,
+      suppressHandOutcomeModal: props.suppressHandOutcomeModal ?? false,
+      shouldShowHandClimax: Boolean(climax),
+      shouldFlyPlayer: myCardLaunching,
+      shouldFlyOpponent: false,
+      hasExplicitOpponentFlight: false,
+      hasExplicitPlayerFlight: false,
+      displayedMyPlayedCard,
+      displayedOpponentPlayedCard,
+      closingTableCards,
+      resolvedMyCardString,
+      resolvedOpponentCardString,
+      centerCards: {
+        mine: myCard ? resolvedMyCardString : null,
+        opponent: opponentCard ? resolvedOpponentCardString : null,
+      },
+      parsedCenterCards: {
+        mine: myCard,
+        opponent: opponentCard,
+      },
+      resolvedRoundFinished,
+      resolvedRoundResult,
+      isShowingResolvedRoundCards,
+      shouldFadeMyCard,
+      shouldFadeOpponentCard,
+      myCardWon,
+      opponentCardWon,
+      isTieRound,
+      canPlayCard,
+      isMyTurn,
+      myCardsCount: myCards.length,
+      launchingCardKey,
+    });
+  }, [
+    canPlayCard,
+    climax,
+    closingTableCards,
+    displayedMyPlayedCard,
+    displayedOpponentPlayedCard,
+    isHandFinished,
+    isMatchFinished,
+    isMyTurn,
+    isResolvingRound,
+    isShowingResolvedRoundCards,
+    isTieRound,
+    launchingCardKey,
+    myCard,
+    myCardLaunching,
+    myCardWon,
+    myCards.length,
+    opponentCard,
+    opponentCardWon,
+    props.suppressHandOutcomeModal,
+    resolvedMyCardString,
+    resolvedOpponentCardString,
+    resolvedRoundFinished,
+    resolvedRoundResult,
+    shouldFadeMyCard,
+    shouldFadeOpponentCard,
+    tablePhase,
+  ]);
+
+  useEffect(() => {
     if (!isShowingResolvedRoundCards) {
       return;
     }
@@ -1785,6 +1925,13 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const lastDismissedClimaxKeyRef = useRef<string | null>(null);
 
   const handleClimaxDismiss = useCallback(() => {
+    debugMatchTableShell('handClimax:dismiss-clicked', {
+      hasClimax: Boolean(climax),
+      tablePhase,
+      isHandFinished,
+      isMatchFinished,
+    });
+
     setClimaxDismissed(true);
 
     if (!climax) {
@@ -1905,6 +2052,28 @@ export function MatchTableShell(props: MatchTableShellProps) {
             filter: 'blur(24px)',
           }}
         />
+
+        <AnimatePresence>
+          {shouldShowTrucoDrama ? (
+            <motion.div
+              key={`table-pressure-aura-${pendingBetValue}-${requesterIsMine}`}
+              className="absolute inset-0 rounded-[28px]"
+              initial={{ opacity: 0 }}
+              animate={{
+                opacity: requesterIsMine ? [0.18, 0.28, 0.18] : [0.32, 0.52, 0.32],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: requesterIsMine ? 1.8 : 1.25, repeat: Infinity }}
+              style={{
+                boxShadow: `
+                  inset 0 0 34px ${trucoDramaAuraColor},
+                  inset 0 0 92px rgba(0,0,0,0.28),
+                  0 0 28px ${trucoDramaAuraColor}
+                `,
+              }}
+            />
+          ) : null}
+        </AnimatePresence>
       </div>
 
       {/* Content layer — overflow-visible so the player's hand can breathe
@@ -1947,7 +2116,11 @@ export function MatchTableShell(props: MatchTableShellProps) {
             </div>
 
             <div className="mt-0">
-              <CenterActionBar availableActions={availableActions} onAction={onAction} />
+              <CenterActionBar
+                availableActions={availableActions}
+                onAction={onAction}
+                isBetDramaActive={shouldShowTrucoDrama}
+              />
             </div>
           </div>
 
@@ -1973,6 +2146,15 @@ export function MatchTableShell(props: MatchTableShellProps) {
           />
         </div>
       </div>
+
+      <TrucoDramaOverlay
+        isOpen={shouldShowTrucoDrama}
+        pendingValue={pendingBetValue}
+        requesterIsMine={requesterIsMine}
+        tier={activeTier}
+        headline={trucoDramaHeadline}
+        detail={trucoDramaDetail}
+      />
 
       <AnimatePresence>
         {climax ? (
@@ -2021,4 +2203,5 @@ export function MatchTableShell(props: MatchTableShellProps) {
     </div>
   );
 }
+
 

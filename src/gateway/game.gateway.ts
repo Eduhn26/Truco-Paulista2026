@@ -39,6 +39,7 @@ import {
   type BotDecisionContext,
   type BotDecisionMetadata,
   type BotDecisionPort,
+  type BotHandProgressView,
   type BotProfile,
   type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
@@ -348,6 +349,26 @@ type CardPlayedActor = {
 // resolução da rodada (hold ~1600ms) antes que o bot jogue a próxima carta.
 const BOT_CHAINED_TURN_DELAY_MS = 1800;
 
+// [NEW] Pacing diferenciado para respostas de aposta — um bot "pensante" varia
+// o tempo de resposta conforme a complexidade da decisão. Mantém a partida
+// menos robótica sem mover decisão de jogo para o frontend.
+const BOT_BET_RESPONSE_DELAY_MS = {
+  accept: 1200,
+  decline: 1400,
+  raise: 2200,
+  initiative: 2600,
+} as const;
+
+type BotBetPacingKind = keyof typeof BOT_BET_RESPONSE_DELAY_MS;
+
+type BotBetAction =
+  | 'accept-bet'
+  | 'decline-bet'
+  | 'request-truco'
+  | 'raise-to-six'
+  | 'raise-to-nine'
+  | 'raise-to-twelve';
+
 @WebSocketGateway({
   cors: {
     origin: readGatewayCorsOrigin(),
@@ -653,7 +674,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return state;
   }
 
-  private async continueAutomaticGameFlow(matchId: string): Promise<ViewMatchStateResponseDto> {
+  private async continueAutomaticGameFlow(
+    matchId: string,
+    botFollowUpDelayMs?: number,
+  ): Promise<ViewMatchStateResponseDto> {
+    this.emitRoomState(matchId);
+
     const state = await this.emitSyncedMatchState(matchId);
     await this.finalizeMatchIfFinished(matchId, state);
 
@@ -661,7 +687,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return state;
     }
 
-    await this.processBotTurns(matchId);
+    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state));
+
+    if (!hasPendingBotAction) {
+      return state;
+    }
+
+    this.clearScheduledBotTurn(matchId);
+    this.scheduleDeferredBotTurn(matchId, botFollowUpDelayMs);
 
     return this.getAuthoritativeMatchState(matchId);
   }
@@ -707,10 +740,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.scheduledBotTurns.delete(matchId);
   }
 
-  private scheduleDeferredBotTurn(matchId: string): void {
+  private scheduleDeferredBotTurn(matchId: string, delayMs?: number): void {
     if (this.scheduledBotTurns.has(matchId)) {
       return;
     }
+
+    const resolvedDelay = delayMs ?? BOT_CHAINED_TURN_DELAY_MS;
 
     const timeout = setTimeout(() => {
       this.scheduledBotTurns.delete(matchId);
@@ -727,9 +762,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           errorMessage: message,
         });
       });
-    }, BOT_CHAINED_TURN_DELAY_MS);
+    }, resolvedDelay);
 
     this.scheduledBotTurns.set(matchId, timeout);
+  }
+
+  private resolveBetPacingDelay(kind: BotBetPacingKind): number {
+    return BOT_BET_RESPONSE_DELAY_MS[kind];
   }
 
   private fillBotsAndBroadcast(matchId: string): void {
@@ -1129,6 +1168,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const hand = actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand;
 
     const betView = this.buildBotBetView(currentHand);
+    const handProgress = this.buildBotHandProgressView(viewerState, actor.playerId);
+    const pointsToWin = this.resolvePointsToWin(viewerState);
 
     return {
       ...actor,
@@ -1142,7 +1183,44 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           hand,
         },
         ...(betView ? { bet: betView } : {}),
+        score: {
+          playerOne: viewerState.score.playerOne,
+          playerTwo: viewerState.score.playerTwo,
+          pointsToWin,
+        },
+        handProgress,
       },
+    };
+  }
+
+  private buildBotHandProgressView(
+    state: ViewMatchStateResponseDto,
+    playerId: 'P1' | 'P2',
+  ): BotHandProgressView {
+    const rounds = state.currentHand?.rounds ?? [];
+    let roundsWonByMe = 0;
+    let roundsWonByOpponent = 0;
+    let roundsTied = 0;
+
+    for (const round of rounds) {
+      if (!round.finished) {
+        continue;
+      }
+
+      if (round.result === 'TIE') {
+        roundsTied += 1;
+      } else if (round.result === playerId) {
+        roundsWonByMe += 1;
+      } else if (round.result !== null) {
+        roundsWonByOpponent += 1;
+      }
+    }
+
+    return {
+      roundsWonByMe,
+      roundsWonByOpponent,
+      roundsTied,
+      currentRoundIndex: Math.max(0, rounds.length - 1),
     };
   }
 
@@ -1351,7 +1429,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-
   private resolveHistoricalMode(matchId: string): HistoricalMatchMode {
     const roomState = this.roomManager.getState(matchId);
 
@@ -1385,9 +1462,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return null;
   }
 
-  private buildHistoricalParticipants(
-    matchId: string,
-  ): CreateMatchRecordInputDto['participants'] {
+  private buildHistoricalParticipants(matchId: string): CreateMatchRecordInputDto['participants'] {
     const roomState = this.roomManager.getState(matchId);
 
     return roomState.players.map((player) => ({
@@ -1507,9 +1582,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         Boolean,
       );
 
-      // NOTE: In human vs bot matches one side can legitimately have no human userIds.
-      // We skip rating updates in that case instead of breaking match finalization.
-      if (winnerUserIds.length > 0 && loserUserIds.length > 0) {
+      // NOTE: Human vs bot matches still need to update the human profile history
+      // (wins/losses/matchesPlayed), even when only one side has human userIds.
+      if (winnerUserIds.length > 0 || loserUserIds.length > 0) {
         await this.updateRatingUseCase.execute({
           winnerUserIds,
           loserUserIds,
@@ -1548,13 +1623,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
+    const nextPacing = this.inferNextBotPacing(state, botTurnContext);
     const shouldScheduleFollowUp = await this.executeBotTurn(matchId, botTurnContext);
 
     if (shouldScheduleFollowUp) {
-      this.scheduleDeferredBotTurn(matchId);
+      this.scheduleDeferredBotTurn(matchId, nextPacing);
     }
 
     return true;
+  }
+
+  private inferNextBotPacing(
+    state: ViewMatchStateResponseDto,
+    botTurnContext: BotTurnDecisionContext,
+  ): number {
+    const currentHand = state.currentHand;
+
+    if (!currentHand) {
+      return BOT_CHAINED_TURN_DELAY_MS;
+    }
+
+    const isRespondingToBet =
+      currentHand.betState === 'awaiting_response' &&
+      currentHand.requestedBy !== null &&
+      currentHand.requestedBy !== botTurnContext.playerId;
+
+    if (isRespondingToBet) {
+      const strongestRaiseAvailable =
+        currentHand.availableActions.canRaiseToSix ||
+        currentHand.availableActions.canRaiseToNine ||
+        currentHand.availableActions.canRaiseToTwelve;
+
+      return this.resolveBetPacingDelay(strongestRaiseAvailable ? 'raise' : 'accept');
+    }
+
+    const canOpenBet =
+      currentHand.betState === 'idle' &&
+      currentHand.specialState === 'normal' &&
+      !currentHand.specialDecisionPending &&
+      (currentHand.availableActions.canRequestTruco ||
+        currentHand.availableActions.canRaiseToSix ||
+        currentHand.availableActions.canRaiseToNine ||
+        currentHand.availableActions.canRaiseToTwelve);
+
+    if (canOpenBet) {
+      return this.resolveBetPacingDelay('initiative');
+    }
+
+    return BOT_CHAINED_TURN_DELAY_MS;
   }
 
   private async executeBotBetDecision(
@@ -1564,10 +1680,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ): Promise<boolean> {
     this.rememberBotDecision(matchId, botTurnContext, decision);
 
-    const action =
-      decision.action === 'pass' || decision.action === 'play-card'
-        ? 'accept-bet'
-        : decision.action;
+    const action: BotBetAction =
+      decision.action === 'accept-bet' ||
+      decision.action === 'decline-bet' ||
+      decision.action === 'request-truco' ||
+      decision.action === 'raise-to-six' ||
+      decision.action === 'raise-to-nine' ||
+      decision.action === 'raise-to-twelve'
+        ? decision.action
+        : 'accept-bet';
 
     if (action === 'accept-bet') {
       const dto: AcceptBetRequestDto = {
@@ -1583,6 +1704,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       await this.declineBetUseCase.execute(dto);
+    } else if (action === 'request-truco') {
+      const dto: RequestTrucoRequestDto = {
+        matchId,
+        playerId: botTurnContext.playerId,
+      };
+
+      await this.requestTrucoUseCase.execute(dto);
     } else if (action === 'raise-to-six') {
       const dto: RaiseToSixRequestDto = {
         matchId,
@@ -1606,12 +1734,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.raiseToTwelveUseCase.execute(dto);
     }
 
+    this.emitRoomState(matchId);
+
     const updatedState = await this.emitSyncedMatchState(matchId);
     await this.finalizeMatchIfFinished(matchId, updatedState);
 
     const eventByAction = {
       'accept-bet': 'accept_bet_succeeded',
       'decline-bet': 'decline_bet_succeeded',
+      'request-truco': 'request_truco_succeeded',
       'raise-to-six': 'raise_to_six_succeeded',
       'raise-to-nine': 'raise_to_nine_succeeded',
       'raise-to-twelve': 'raise_to_twelve_succeeded',
@@ -1682,11 +1813,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const decision = this.botDecisionPort.decide(botTurnContext.context);
     this.rememberBotDecision(matchId, botTurnContext, decision);
 
-    if (
+    const isRespondingToBet =
       currentHand.betState === 'awaiting_response' &&
       currentHand.requestedBy !== null &&
-      currentHand.requestedBy !== botTurnContext.playerId
-    ) {
+      currentHand.requestedBy !== botTurnContext.playerId;
+
+    if (isRespondingToBet) {
+      return this.executeBotBetDecision(matchId, botTurnContext, decision);
+    }
+
+    const isInitiativeBet =
+      decision.action === 'request-truco' ||
+      decision.action === 'raise-to-six' ||
+      decision.action === 'raise-to-nine' ||
+      decision.action === 'raise-to-twelve';
+
+    if (isInitiativeBet) {
       return this.executeBotBetDecision(matchId, botTurnContext, decision);
     }
 
@@ -1782,9 +1924,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    // NOTE: Every consecutive bot action is always deferred. The delay gives
-    // the frontend enough time to display the round resolution hold before the
-    // next card appears on the table.
     return true;
   }
 
@@ -2947,7 +3086,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.requestTrucoUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3019,7 +3158,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.acceptBetUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('accept'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3091,7 +3230,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.declineBetUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('decline'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3163,7 +3302,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToSixUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3235,7 +3374,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToNineUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3307,7 +3446,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToTwelveUseCase.execute(dto);
 
-      await this.continueAutomaticGameFlow(matchId);
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
       this.logGateway('log', {
         layer: 'gateway',
@@ -3547,3 +3686,4 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
+

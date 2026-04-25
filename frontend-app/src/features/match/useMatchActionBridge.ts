@@ -80,8 +80,7 @@ export function useMatchActionBridge(
           return;
         }
 
-        // NOTE: Starting a new hand is the one place where a full table reset
-        // is expected before the next authoritative frames arrive.
+        // NOTE: Starting a new hand is the one place where a full table reset is expected.
         beginHandTransition();
         emitStartHand(resolvedMatchId);
         appendLog(`Emitted start-hand (${resolvedMatchId}).`);
@@ -113,73 +112,89 @@ export function useMatchActionBridge(
               appendLog('Cannot request truco in the current state.');
               return;
             }
+
             emitRequestTruco(resolvedMatchId);
             appendLog(`Emitted request-truco (${resolvedMatchId}).`);
             return;
           }
+
           case 'accept-bet': {
             if (!availableActions.canAcceptBet) {
               appendLog('Cannot accept bet in the current state.');
               return;
             }
+
             emitAcceptBet(resolvedMatchId);
             appendLog(`Emitted accept-bet (${resolvedMatchId}).`);
             return;
           }
+
           case 'decline-bet': {
             if (!availableActions.canDeclineBet) {
               appendLog('Cannot decline bet in the current state.');
               return;
             }
+
             emitDeclineBet(resolvedMatchId);
             appendLog(`Emitted decline-bet (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-six': {
             if (!availableActions.canRaiseToSix) {
               appendLog('Cannot raise to six in the current state.');
               return;
             }
+
             emitRaiseToSix(resolvedMatchId);
             appendLog(`Emitted raise-to-six (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-nine': {
             if (!availableActions.canRaiseToNine) {
               appendLog('Cannot raise to nine in the current state.');
               return;
             }
+
             emitRaiseToNine(resolvedMatchId);
             appendLog(`Emitted raise-to-nine (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-twelve': {
             if (!availableActions.canRaiseToTwelve) {
               appendLog('Cannot raise to twelve in the current state.');
               return;
             }
+
             emitRaiseToTwelve(resolvedMatchId);
             appendLog(`Emitted raise-to-twelve (${resolvedMatchId}).`);
             return;
           }
+
           case 'accept-mao-de-onze': {
             if (!availableActions.canAcceptMaoDeOnze) {
               appendLog('Cannot accept mao de onze in the current state.');
               return;
             }
+
             emitAcceptMaoDeOnze(resolvedMatchId);
             appendLog(`Emitted accept-mao-de-onze (${resolvedMatchId}).`);
             return;
           }
+
           case 'decline-mao-de-onze': {
             if (!availableActions.canDeclineMaoDeOnze) {
               appendLog('Cannot decline mao de onze in the current state.');
               return;
             }
+
             emitDeclineMaoDeOnze(resolvedMatchId);
             appendLog(`Emitted decline-mao-de-onze (${resolvedMatchId}).`);
             return;
           }
+
           default: {
             appendLog(`Unsupported action: ${action}.`);
           }
@@ -192,7 +207,7 @@ export function useMatchActionBridge(
       canStartHand,
       canPlayCard,
       availableActions,
-        appendLog,
+      appendLog,
       emitGetState,
       emitStartHand,
       emitPlayCard,

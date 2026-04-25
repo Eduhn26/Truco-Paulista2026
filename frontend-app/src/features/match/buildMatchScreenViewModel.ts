@@ -156,9 +156,6 @@ export function buildMatchScreenViewModel({
       specialDecisionBy: viewModel.specialDecisionBy,
       winner: viewModel.winner,
       awardedPoints: viewModel.awardedPoints,
-      latestRound: viewModel.latestRound,
-      latestRoundMyPlayedCard: viewModel.myPlayedCard,
-      latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
       displayedResolvedRoundFinished: liveTableTransition.isResolvingRound,
       displayedResolvedRoundResult: liveTableTransition.isResolvingRound
         ? liveTableTransition.resolvedRoundResult
@@ -195,6 +192,9 @@ export function buildMatchScreenViewModel({
       isMyTurn: viewModel.currentTurnSeatId === viewModel.mySeat,
       isResolvingRound: liveTableTransition.isResolvingRound,
       closingTableCards: liveTableTransition.closingTableCards,
+      latestRound: viewModel.latestRound,
+      latestRoundMyPlayedCard: viewModel.myPlayedCard,
+      latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
     },
     secondaryToggleLabel: `${showSecondary ? '▲' : '▼'} Painel técnico`,
     showSecondary,

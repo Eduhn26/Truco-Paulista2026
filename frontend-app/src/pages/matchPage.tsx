@@ -24,12 +24,42 @@ import type {
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 const TABLE_SEAT_ORDER_2V2 = ['T1B', 'T2A', 'T1A', 'T2B'] as const;
 const HAND_INTRO_HOLD_MS = 720;
-const HAND_RESULT_HOLD_MS = 760;
-const NEXT_HAND_COMMIT_MS = 180;
-const BET_FEEDBACK_HOLD_MS = 1500;
+const HAND_RESULT_HOLD_MS = 1180;
+const NEXT_HAND_COMMIT_MS = 320;
+const BET_FEEDBACK_HOLD_MS = 1200;
 const BET_FEEDBACK_MIN_REQUESTED_MS = 950;
 const REALTIME_RESOLUTION_GRACE_MS = 550;
 const AUTO_NEXT_HAND_DELAY_MS = 3000;
+
+function debugMatchPage(event: string, details: Record<string, unknown> = {}): void {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  console.info('[MATCH_PAGE]', event, details);
+}
+
+function summarizeMatchStateForDebug(payload: MatchStatePayload | null): Record<string, unknown> {
+  return {
+    state: payload?.state ?? null,
+    matchId: payload?.matchId ?? null,
+    hasHand: Boolean(payload?.currentHand),
+    nextDecisionType: payload?.currentHand?.nextDecisionType ?? null,
+    handFinished: payload?.currentHand?.finished ?? null,
+    winner: payload?.currentHand?.winner ?? null,
+    awardedPoints: payload?.currentHand?.awardedPoints ?? null,
+    roundsCount: payload?.currentHand?.rounds.length ?? 0,
+  };
+}
+
+function summarizeRoomStateForDebug(payload: RoomStatePayload | null): Record<string, unknown> {
+  return {
+    matchId: payload?.matchId ?? null,
+    canStart: payload?.canStart ?? null,
+    currentTurnSeatId: payload?.currentTurnSeatId ?? null,
+    mode: payload?.mode ?? null,
+  };
+}
 
 type TableSeatView = {
   seatId: string;
@@ -200,31 +230,39 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   const toneClasses =
     feedback.tone === 'success'
       ? {
-          chip: 'rgba(134, 239, 172, 0.9)',
-          border: '1px solid rgba(74,222,128,0.20)',
-          background: 'linear-gradient(180deg, rgba(5, 40, 26, 0.97), rgba(5, 18, 14, 0.94) 100%)',
-          glow: '0 0 28px rgba(34,197,94,0.12), 0 22px 52px rgba(0,0,0,0.42)',
+          chip: '#f7d98a',
+          border: '1px solid rgba(230, 195, 100, 0.34)',
+          background:
+            'linear-gradient(180deg, rgba(38, 27, 7, 0.96), rgba(16, 12, 4, 0.94) 100%)',
+          glow: '0 0 24px rgba(201,168,76,0.12), 0 18px 40px rgba(0,0,0,0.38)',
         }
       : feedback.tone === 'warning'
         ? {
-            chip: 'rgba(253, 224, 71, 0.92)',
-            border: '1px solid rgba(245,158,11,0.24)',
+            chip: '#ffcf8b',
+            border: '1px solid rgba(251,146,60,0.28)',
             background:
-              'linear-gradient(180deg, rgba(64, 28, 6, 0.97), rgba(26, 12, 8, 0.94) 100%)',
-            glow: '0 0 28px rgba(245,158,11,0.12), 0 22px 52px rgba(0,0,0,0.42)',
+              'linear-gradient(180deg, rgba(59, 25, 8, 0.96), rgba(20, 10, 5, 0.94) 100%)',
+            glow: '0 0 24px rgba(251,146,60,0.12), 0 18px 40px rgba(0,0,0,0.38)',
           }
         : {
-            chip: 'rgba(147, 197, 253, 0.92)',
-            border: '1px solid rgba(96,165,250,0.22)',
+            chip: '#cdd8ea',
+            border: '1px solid rgba(148,163,184,0.24)',
             background:
-              'linear-gradient(180deg, rgba(6, 23, 44, 0.97), rgba(5, 12, 24, 0.94) 100%)',
-            glow: '0 0 28px rgba(59,130,246,0.10), 0 22px 52px rgba(0,0,0,0.42)',
+              'linear-gradient(180deg, rgba(16, 22, 34, 0.96), rgba(8, 11, 18, 0.94) 100%)',
+            glow: '0 0 22px rgba(148,163,184,0.08), 0 18px 40px rgba(0,0,0,0.38)',
           };
 
+  const badgeLabel =
+    feedback.kind === 'accepted'
+      ? 'Aposta aceita'
+      : feedback.kind === 'declined'
+        ? 'Mão encerrada'
+        : 'Aposta';
+
   return (
-    <div className="pointer-events-none absolute left-1/2 top-[23%] z-[70] w-full max-w-[560px] -translate-x-1/2 px-4">
+    <div className="pointer-events-none absolute left-1/2 top-[12%] z-[70] w-full max-w-[430px] -translate-x-1/2 px-4">
       <div
-        className="rounded-[26px] px-6 py-4 text-center backdrop-blur-xl"
+        className="rounded-[22px] px-5 py-3.5 text-center backdrop-blur-xl"
         style={{
           background: toneClasses.background,
           border: toneClasses.border,
@@ -232,16 +270,61 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
         }}
       >
         <div
-          className="text-[10px] font-black uppercase tracking-[0.28em]"
+          className="text-[9px] font-black uppercase tracking-[0.26em]"
           style={{ color: toneClasses.chip }}
         >
-          Truco
+          {badgeLabel}
         </div>
-        <div className="mt-2 text-[18px] font-black uppercase tracking-[0.08em] text-white">
+        <div className="mt-1.5 text-[16px] font-black uppercase tracking-[0.08em] text-[#f8efd9]">
           {feedback.title}
         </div>
-        <div className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-200">
+        <div className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#d8caa5]">
           {feedback.detail}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HandTransitionVeil({ visualBeat }: { visualBeat: VisualBeat }) {
+  const isOpeningHand = visualBeat === 'hand_intro';
+  const isHoldingResult = visualBeat === 'hand_result_hold';
+
+  if (!isOpeningHand && !isHoldingResult) {
+    return null;
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[58] overflow-hidden rounded-[32px] transition-opacity duration-300"
+      style={{
+        background: isOpeningHand
+          ? 'radial-gradient(ellipse at 50% 58%, rgba(8, 18, 14, 0.12) 0%, rgba(3, 8, 10, 0.46) 72%, rgba(2, 5, 8, 0.66) 100%)'
+          : 'radial-gradient(ellipse at 50% 48%, rgba(201, 168, 76, 0.06) 0%, rgba(3, 8, 10, 0.26) 74%, rgba(2, 5, 8, 0.48) 100%)',
+        boxShadow: isOpeningHand
+          ? 'inset 0 0 84px rgba(2, 8, 8, 0.62)'
+          : 'inset 0 0 76px rgba(201, 168, 76, 0.08)',
+      }}
+    >
+      <div
+        className="absolute inset-x-[10%] top-1/2 h-px -translate-y-1/2 opacity-70"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent, rgba(230, 195, 100, 0.42), transparent)',
+        }}
+      />
+
+      <div className="absolute left-1/2 top-[47%] -translate-x-1/2 -translate-y-1/2 text-center">
+        <div
+          className="rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.26em] backdrop-blur-md"
+          style={{
+            color: '#e9d38a',
+            background: 'rgba(7, 11, 9, 0.52)',
+            border: '1px solid rgba(230, 195, 100, 0.18)',
+            boxShadow: '0 14px 34px rgba(0,0,0,0.26)',
+          }}
+        >
+          {isOpeningHand ? 'Preparando nova mão' : 'Resultado confirmado'}
         </div>
       </div>
     </div>
@@ -329,7 +412,7 @@ export function MatchPage() {
       setBetFeedback(null);
       drainNextBetFeedback();
     }, BET_FEEDBACK_HOLD_MS);
-  }, []);
+  }, [visualBeat]);
 
   const enqueueBetFeedback = useCallback(
     (nextFeedback: Omit<BetFeedbackState, 'id'>) => {
@@ -415,6 +498,15 @@ export function MatchPage() {
 
   const handleRealtimeHandStarted = useCallback(
     (payload: { matchId?: string; viraRank?: Rank | null }) => {
+      debugMatchPage('onHandStarted', {
+        payload,
+        previousVisualBeat: visualBeat,
+        isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+        pendingAutoNextHandKey: pendingAutoNextHandKeyRef.current,
+        lastAutoNextHandKey: lastAutoNextHandKeyRef.current,
+        autoNextTimeoutPending: autoNextHandTimeoutRef.current !== null,
+      });
+
       if (payload.viraRank) {
         setViraRank(payload.viraRank);
       }
@@ -435,7 +527,7 @@ export function MatchPage() {
       bufferedCardsDuringIntroRef.current = [];
       pendingBetCycleRef.current = null;
     },
-    [],
+    [visualBeat],
   );
 
   const handleRealtimeCardPlayed = useCallback(
@@ -447,6 +539,15 @@ export function MatchPage() {
 
       const card = payload.card ?? null;
 
+      debugMatchPage('onCardPlayed', {
+        payload,
+        owner,
+        card,
+        visualBeat,
+        isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+        willBuffer: isDeferringVisualCommitRef.current || visualBeat === 'hand_intro',
+      });
+
       if (isDeferringVisualCommitRef.current || visualBeat === 'hand_intro') {
         if (owner && card) {
           bufferedCardsDuringIntroRef.current.push({ owner, card });
@@ -454,6 +555,8 @@ export function MatchPage() {
 
         return;
       }
+
+      debugMatchPage('onCardPlayed:registerIncomingPlayedCard', { owner, card });
 
       registerIncomingPlayedCardRef.current({
         owner,
@@ -464,6 +567,13 @@ export function MatchPage() {
   );
 
   const handleRealtimeRoundTransition = useCallback((payload: RoundTransitionPayload) => {
+    debugMatchPage('onRoundTransition', {
+      payload,
+      mySeat: mySeatRef.current,
+      visualPublicHandRounds: latestVisualPublicHandRef.current?.rounds.length ?? 0,
+      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+    });
+
     if (payload.phase !== 'round-resolved') {
       return;
     }
@@ -493,6 +603,13 @@ export function MatchPage() {
       const opponentCard =
         myPlayerId === 'P1' ? finishedRound.playerTwoCard : finishedRound.playerOneCard;
 
+      debugMatchPage('onRoundTransition:triggerRoundResolution', {
+        resolutionKey,
+        myCard,
+        opponentCard,
+        roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+      });
+
       triggerRoundResolutionRef.current({
         resolutionKey,
         myCard,
@@ -502,6 +619,13 @@ export function MatchPage() {
 
       return;
     }
+
+    debugMatchPage('onRoundTransition:pendingRealtimeResolution', {
+      resolutionKey,
+      finishedRoundsCount: payload.finishedRoundsCount,
+      roundWinner: payload.roundWinner ?? null,
+      graceMs: REALTIME_RESOLUTION_GRACE_MS,
+    });
 
     pendingRealtimeResolutionRef.current = {
       resolutionKey,
@@ -583,12 +707,19 @@ export function MatchPage() {
 
   const drainBufferedCards = useCallback(() => {
     const buffered = bufferedCardsDuringIntroRef.current;
+
+    debugMatchPage('drainBufferedCards', {
+      count: buffered.length,
+      buffered,
+      visualBeat,
+      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+    });
     bufferedCardsDuringIntroRef.current = [];
 
     for (const { owner, card } of buffered) {
       registerIncomingPlayedCardRef.current({ owner, card });
     }
-  }, []);
+  }, [visualBeat]);
 
   useEffect(() => {
     const displayedHandFinished = isResolvedHandFinished({
@@ -603,6 +734,18 @@ export function MatchPage() {
 
     const shouldDeferNextHandCommit = displayedHandFinished && incomingFreshPlayableHand;
 
+    debugMatchPage('visualCommit:evaluate', {
+      displayedHandFinished,
+      incomingFreshPlayableHand,
+      currentVisualBeat: visualBeat,
+      publicIncoming: summarizeMatchStateForDebug(publicMatchState ?? null),
+      privateIncoming: summarizeMatchStateForDebug(privateMatchState ?? null),
+      publicVisual: summarizeMatchStateForDebug(visualPublicMatchState),
+      privateVisual: summarizeMatchStateForDebug(visualPrivateMatchState),
+      roomIncoming: summarizeRoomStateForDebug(roomState ?? null),
+      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+    });
+
     const isFreshOpeningHand =
       !displayedHandFinished &&
       incomingFreshPlayableHand &&
@@ -611,6 +754,14 @@ export function MatchPage() {
       lastHandStartedAtRef.current !== null;
 
     if (shouldDeferNextHandCommit) {
+      debugMatchPage('visualCommit:defer-next-hand', {
+        delayMs: HAND_RESULT_HOLD_MS + NEXT_HAND_COMMIT_MS,
+        previousVisualBeat: visualBeat,
+        pendingPublic: summarizeMatchStateForDebug(publicMatchState ?? null),
+        pendingPrivate: summarizeMatchStateForDebug(privateMatchState ?? null),
+        pendingRoom: summarizeRoomStateForDebug(roomState ?? null),
+      });
+
       isDeferringVisualCommitRef.current = true;
       setVisualBeat('hand_result_hold');
 
@@ -625,6 +776,12 @@ export function MatchPage() {
       }
 
       deferredNextHandTimeoutRef.current = window.setTimeout(() => {
+        debugMatchPage('visualCommit:flush-deferred-next-hand', {
+          pendingPublic: summarizeMatchStateForDebug(pendingState.publicMatchState),
+          pendingPrivate: summarizeMatchStateForDebug(pendingState.privateMatchState),
+          pendingRoom: summarizeRoomStateForDebug(pendingState.roomState),
+        });
+
         deferredNextHandTimeoutRef.current = null;
 
         beginHandTransitionRef.current();
@@ -642,6 +799,14 @@ export function MatchPage() {
     }
 
     if (isFreshOpeningHand) {
+      debugMatchPage('visualCommit:fresh-opening-hand', {
+        delayMs: HAND_INTRO_HOLD_MS,
+        previousVisualBeat: visualBeat,
+        publicIncoming: summarizeMatchStateForDebug(publicMatchState ?? null),
+        privateIncoming: summarizeMatchStateForDebug(privateMatchState ?? null),
+        roomIncoming: summarizeRoomStateForDebug(roomState ?? null),
+      });
+
       if (handIntroTimeoutRef.current !== null) {
         return;
       }
@@ -656,6 +821,12 @@ export function MatchPage() {
       };
 
       handIntroTimeoutRef.current = window.setTimeout(() => {
+        debugMatchPage('visualCommit:flush-hand-intro', {
+          pendingPublic: summarizeMatchStateForDebug(pendingState.publicMatchState),
+          pendingPrivate: summarizeMatchStateForDebug(pendingState.privateMatchState),
+          pendingRoom: summarizeRoomStateForDebug(pendingState.roomState),
+        });
+
         handIntroTimeoutRef.current = null;
         lastHandStartedAtRef.current = null;
 
@@ -684,6 +855,13 @@ export function MatchPage() {
       lastHandStartedAtRef.current = null;
     }
 
+    debugMatchPage('visualCommit:direct-commit', {
+      nextVisualBeat: incomingFreshPlayableHand ? 'live' : 'idle',
+      publicIncoming: summarizeMatchStateForDebug(publicMatchState ?? initialSnapshot?.publicMatchState ?? null),
+      privateIncoming: summarizeMatchStateForDebug(privateMatchState ?? initialSnapshot?.privateMatchState ?? null),
+      roomIncoming: summarizeRoomStateForDebug(roomState ?? initialSnapshot?.roomState ?? null),
+    });
+
     isDeferringVisualCommitRef.current = false;
     setVisualRoomState(roomState ?? initialSnapshot?.roomState ?? null);
     setVisualPublicMatchState(publicMatchState ?? initialSnapshot?.publicMatchState ?? null);
@@ -697,6 +875,7 @@ export function MatchPage() {
     privateMatchState,
     publicMatchState,
     roomState,
+    visualBeat,
     visualPrivateMatchState,
     visualPublicMatchState,
   ]);
@@ -738,6 +917,16 @@ export function MatchPage() {
     };
   }, []);
 
+  useEffect(() => {
+    debugMatchPage('visualBeat:changed', {
+      visualBeat,
+      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+      isAutoNextHandArmed,
+      isStartHandPending,
+      startHandLocked: startHandLockRef.current,
+    });
+  }, [isAutoNextHandArmed, isStartHandPending, visualBeat]);
+
   const viewModel = useMemo<MatchViewModel>(() => {
     const resolvedMatchId =
       visualPrivateMatchState?.matchId ||
@@ -756,25 +945,6 @@ export function MatchPage() {
     const matchFinished =
       nextDecisionType === 'match-finished' || visualPublicMatchState?.state === 'finished';
 
-    const isOneVsOne = visualRoomState?.mode === '1v1';
-    const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
-    const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
-      const player = visualRoomState?.players.find((entry) => entry.seatId === seatId);
-
-      return {
-        seatId,
-        ready: player?.ready ?? false,
-        isBot: player?.isBot ?? false,
-        isCurrentTurn: visualRoomState?.currentTurnSeatId === seatId,
-        isMine: mySeat === seatId,
-        botIdentity: player?.botIdentity ?? null,
-      };
-    });
-    const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
-    const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
-    const myCards = getViewerCards(currentPrivateHand);
-    const lastBotDecision = visualRoomState?.lastBotDecision ?? null;
-
     const rawAvailableActions =
       currentPrivateHand?.availableActions ??
       currentPublicHand?.availableActions ??
@@ -788,6 +958,39 @@ export function MatchPage() {
         : currentPublicHand?.availableActions
           ? 'public'
           : 'fallback';
+
+    const myCards = getViewerCards(currentPrivateHand);
+    const lastBotDecision = visualRoomState?.lastBotDecision ?? null;
+    const rawRoomCurrentTurnSeatId = visualRoomState?.currentTurnSeatId ?? null;
+    const shouldTrustPrivatePlayableTurn = Boolean(
+      mySeat &&
+        currentPrivateHand &&
+        nextDecisionType === 'play-card' &&
+        viewerCanActNow &&
+        resolvedAvailableActions.canAttemptPlayCard &&
+        myCards.length > 0 &&
+        !pendingBotAction,
+    );
+    const inferredCurrentTurnSeatId = shouldTrustPrivatePlayableTurn
+      ? mySeat
+      : rawRoomCurrentTurnSeatId;
+
+    const isOneVsOne = visualRoomState?.mode === '1v1';
+    const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
+    const roomPlayers: TableSeatView[] = visibleSeatOrder.map((seatId) => {
+      const player = visualRoomState?.players.find((entry) => entry.seatId === seatId);
+
+      return {
+        seatId,
+        ready: player?.ready ?? false,
+        isBot: player?.isBot ?? false,
+        isCurrentTurn: inferredCurrentTurnSeatId === seatId,
+        isMine: mySeat === seatId,
+        botIdentity: player?.botIdentity ?? null,
+      };
+    });
+    const mySeatView = roomPlayers.find((seat) => seat.isMine) ?? null;
+    const opponentSeatView = roomPlayers.find((seat) => !seat.isMine) ?? null;
 
     const rounds = currentPublicHand?.rounds ?? [];
     const playedRounds = rounds.filter(
@@ -815,21 +1018,48 @@ export function MatchPage() {
     const isNextHandReady = !matchFinished && nextDecisionType === 'start-next-hand';
 
     const canStartHand = isFirstHandReady || isNextHandReady;
-    const isMyTurn = Boolean(mySeat && visualRoomState?.currentTurnSeatId === mySeat);
+    const isMyTurn = Boolean(mySeat && inferredCurrentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-      !handFinished &&
-      nextDecisionType === 'play-card' &&
-      viewerCanActNow &&
-      isMyTurn &&
-      resolvedAvailableActions.canAttemptPlayCard &&
-      myCards.length > 0 &&
-      !pendingBotAction,
+        !handFinished &&
+        nextDecisionType === 'play-card' &&
+        viewerCanActNow &&
+        isMyTurn &&
+        resolvedAvailableActions.canAttemptPlayCard &&
+        myCards.length > 0 &&
+        !pendingBotAction,
     );
+    const presentationRoomState: RoomStatePayload | null = visualRoomState
+      ? {
+          ...visualRoomState,
+          currentTurnSeatId: inferredCurrentTurnSeatId,
+        }
+      : null;
+
+    if (import.meta.env.DEV) {
+      console.info('[MATCH_CAN_PLAY]', {
+        canPlayCard,
+        nextDecisionType,
+        rawRoomCurrentTurnSeatId,
+        inferredCurrentTurnSeatId,
+        mySeat,
+        isMyTurn,
+        viewerCanActNow,
+        canAttemptPlayCard: resolvedAvailableActions.canAttemptPlayCard,
+        myCardsCount: myCards.length,
+        pendingBotAction,
+        betState: effectiveHand?.betState ?? null,
+        specialState: effectiveHand?.specialState ?? null,
+        visualBeat,
+        handFinished,
+        matchFinished,
+        shouldTrustPrivatePlayableTurn,
+      });
+    }
 
     const contractPresentation = buildMatchContractPresentation({
       publicMatchState: visualPublicMatchState,
-      roomState: visualRoomState,
+      roomState: presentationRoomState,
       canStartHand,
       canPlayCard,
       isMyTurn,
@@ -1190,7 +1420,20 @@ export function MatchPage() {
     });
 
   const handleStartHandWithGate = useCallback(() => {
+    debugMatchPage('startHandWithGate:attempt', {
+      startHandLocked: startHandLockRef.current,
+      isStartHandPending,
+      canStartHand: viewModel.canStartHand,
+      visualBeat,
+      pendingAutoNextHandKey: pendingAutoNextHandKeyRef.current,
+    });
+
     if (startHandLockRef.current || isStartHandPending || !viewModel.canStartHand) {
+      debugMatchPage('startHandWithGate:blocked', {
+        startHandLocked: startHandLockRef.current,
+        isStartHandPending,
+        canStartHand: viewModel.canStartHand,
+      });
       appendLog('Ignored start-hand because a start request is already locked.');
       return;
     }
@@ -1221,12 +1464,13 @@ export function MatchPage() {
     );
 
     handleStartHand();
-  }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand]);
+  }, [appendLog, handleStartHand, isStartHandPending, viewModel.canStartHand, visualBeat]);
 
   const tryDispatchAutomaticNextHand = useCallback(() => {
     const pendingKey = pendingAutoNextHandKeyRef.current;
 
     if (!pendingKey) {
+      debugMatchPage('autoNextHand:no-pending-key');
       return;
     }
 
@@ -1235,6 +1479,7 @@ export function MatchPage() {
 
       if (lastAutoNextHandWaitLogKeyRef.current !== waitKey) {
         lastAutoNextHandWaitLogKeyRef.current = waitKey;
+        debugMatchPage('autoNextHand:waiting-missing-match-id', { pendingKey });
         appendLog('Automatic next hand is armed, but matchId is unavailable yet.');
       }
 
@@ -1242,6 +1487,7 @@ export function MatchPage() {
     }
 
     if (latestIsStartHandPendingRef.current) {
+      debugMatchPage('autoNextHand:waiting-start-hand-pending', { pendingKey });
       return;
     }
 
@@ -1250,6 +1496,7 @@ export function MatchPage() {
 
       if (lastAutoNextHandWaitLogKeyRef.current !== waitKey) {
         lastAutoNextHandWaitLogKeyRef.current = waitKey;
+        debugMatchPage('autoNextHand:waiting-authoritative-readiness', { pendingKey });
         appendLog('Automatic next hand is armed, waiting for authoritative readiness.');
       }
 
@@ -1257,6 +1504,11 @@ export function MatchPage() {
     }
 
     lastAutoNextHandWaitLogKeyRef.current = null;
+    debugMatchPage('autoNextHand:dispatch-start-hand', {
+      pendingKey,
+      matchId: latestResolvedMatchIdRef.current,
+      canStartHand: latestCanStartHandRef.current,
+    });
     appendLog('Automatic next hand dispatching start-hand.');
     pendingAutoNextHandKeyRef.current = null;
     handleStartHandWithGate();
@@ -1300,9 +1552,14 @@ export function MatchPage() {
     lastAutoNextHandKeyRef.current = autoStartKey;
     pendingAutoNextHandKeyRef.current = null;
     lastAutoNextHandWaitLogKeyRef.current = null;
+    debugMatchPage('autoNextHand:arm-after-bet-declined', {
+      autoStartKey,
+      playedRoundsCount: viewModel.playedRoundsCount,
+      suppressHandOutcomeModal,
+      currentHandFinished: currentHand.finished,
+    });
+
     setIsAutoNextHandArmed(true);
-    setVisualBeat('hand_reset');
-    beginHandTransitionRef.current();
 
     if (autoNextHandTimeoutRef.current !== null) {
       window.clearTimeout(autoNextHandTimeoutRef.current);
@@ -1327,6 +1584,8 @@ export function MatchPage() {
     viewModel.resolvedMatchId,
     visualPublicMatchState?.score.playerOne,
     visualPublicMatchState?.score.playerTwo,
+    visualBeat,
+    isAutoNextHandArmed,
   ]);
 
   useEffect(() => {
@@ -1385,7 +1644,20 @@ export function MatchPage() {
   const handleHandClimaxDismissed = useCallback(() => {
     const currentHand = viewModel.currentPublicHand ?? viewModel.currentPrivateHand;
 
+    debugMatchPage('handClimaxDismissed:called', {
+      matchFinished: viewModel.matchFinished,
+      suppressHandOutcomeModal,
+      currentHandFinished: currentHand?.finished ?? null,
+      visualBeat,
+      isAutoNextHandArmed,
+    });
+
     if (viewModel.matchFinished || suppressHandOutcomeModal || !currentHand?.finished) {
+      debugMatchPage('handClimaxDismissed:ignored', {
+        matchFinished: viewModel.matchFinished,
+        suppressHandOutcomeModal,
+        currentHandFinished: currentHand?.finished ?? null,
+      });
       return;
     }
 
@@ -1407,9 +1679,14 @@ export function MatchPage() {
     lastAutoNextHandKeyRef.current = autoStartKey;
     pendingAutoNextHandKeyRef.current = null;
     lastAutoNextHandWaitLogKeyRef.current = null;
+    debugMatchPage('handClimaxDismissed:arm-auto-next-hand', {
+      autoStartKey,
+      playedRoundsCount: viewModel.playedRoundsCount,
+      scorePlayerOne: visualPublicMatchState?.score.playerOne ?? 0,
+      scorePlayerTwo: visualPublicMatchState?.score.playerTwo ?? 0,
+    });
+
     setIsAutoNextHandArmed(true);
-    setVisualBeat('hand_reset');
-    beginHandTransitionRef.current();
 
     if (autoNextHandTimeoutRef.current !== null) {
       window.clearTimeout(autoNextHandTimeoutRef.current);
@@ -1434,6 +1711,8 @@ export function MatchPage() {
     viewModel.resolvedMatchId,
     visualPublicMatchState?.score.playerOne,
     visualPublicMatchState?.score.playerTwo,
+    visualBeat,
+    isAutoNextHandArmed,
   ]);
 
   const playCardWithSound = useCallback(
@@ -1493,6 +1772,26 @@ export function MatchPage() {
     liveTableTransition.isResolvingRound ||
     visualBeat === 'hand_reset' ||
     visualBeat === 'hand_intro';
+
+  useEffect(() => {
+    debugMatchPage('handOutcomeSuppression:evaluate', {
+      suppressHandOutcomeModal,
+      shouldDelayHandOutcomeModal,
+      isResolvingRound: liveTableTransition.isResolvingRound,
+      visualBeat,
+      tablePhase: viewModel.tablePhase,
+      handFinished: viewModel.handFinished,
+      matchFinished: viewModel.matchFinished,
+    });
+  }, [
+    liveTableTransition.isResolvingRound,
+    shouldDelayHandOutcomeModal,
+    suppressHandOutcomeModal,
+    viewModel.handFinished,
+    viewModel.matchFinished,
+    viewModel.tablePhase,
+    visualBeat,
+  ]);
 
   const effectiveMyCards = shouldKeepCardsDuringResultBeat
     ? cachedMyCards
@@ -1650,7 +1949,9 @@ export function MatchPage() {
                   onHandClimaxDismissed={handleHandClimaxDismissed}
                 />
 
-                <BetFeedbackBanner feedback={betFeedback} />
+                <BetFeedbackBanner feedback={betFeedback?.kind === 'requested' ? null : betFeedback} />
+
+                <HandTransitionVeil visualBeat={visualBeat} />
 
                 {shouldRenderTrucoDebugBadge ? (
                   <TrucoDebugBadge
@@ -1849,4 +2150,6 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
+
+
 
