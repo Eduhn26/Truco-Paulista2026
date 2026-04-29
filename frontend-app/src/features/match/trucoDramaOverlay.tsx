@@ -130,6 +130,13 @@ export function TrucoDramaOverlay({
         <motion.div
           key={`truco-drama-${pendingValue}-${requesterIsMine}`}
           className="pointer-events-none absolute inset-0 z-[65] overflow-hidden rounded-[28px]"
+          // PATCH E — Truco / Seis / Nove / Doze are decision-critical events.
+          // Assertive aria-live ensures screen readers announce the call
+          // immediately (e.g. "Truco! Sua decisão"). atomic=true so the call
+          // word + pressure label are read as a single update, not chunked.
+          role="status"
+          aria-live="assertive"
+          aria-atomic="true"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -266,69 +273,142 @@ export function TrucoDramaOverlay({
                 </div>
               </motion.div>
             ) : (
+              // PATCH F.2 — Pressure chip v2.
+              //
+              // The legacy chip read as a status ribbon: tiny 17px word,
+              // thin separator, two single-line labels. After the big
+              // TRUCO! drama ended, the user dropped from cinematic to
+              // dashboard in a single beat.
+              //
+              // v2 contract:
+              //   - Chip moved up to top-[44px] and given a serif scaled
+              //     headline (the tier word in 28px) so it visually inherits
+              //     from the big drama instead of replacing it.
+              //   - The kicker line below is uppercase with a longer tracking,
+              //     so the "Sua decisão" / "Aguardando resposta" reads as a
+              //     command, not a label.
+              //   - When the bot is the requester (requesterIsMine === false),
+              //     the chip carries an aggressive red-pulse aura — the user
+              //     must respond. The pulse is stronger and faster.
+              //   - When the player is the requester, the aura is the gentle
+              //     "waiting" gold pulse — same room as the TRUCO! drama
+              //     they just triggered, not a downgrade.
+              //   - A subtle hairline beneath the chip echoes the
+              //     RoundClashVerdict / HandTransitionVeil family.
+              //
+              // The pulse animation is wired through Framer's `animate` prop
+              // so it can be paused by `transition` if reduced-motion is
+              // ever required (the rest of the table follows the same idiom).
               <motion.div
                 key="pressure-chip"
-                className="absolute inset-x-0 top-[58px] flex justify-center px-6"
-                initial={{ scale: 0.82, opacity: 0, y: -8 }}
+                className="absolute inset-x-0 top-[44px] flex justify-center px-6"
+                initial={{ scale: 0.86, opacity: 0, y: -10 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.92, opacity: 0, y: -6 }}
-                transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
+                exit={{ scale: 0.94, opacity: 0, y: -8 }}
+                transition={{ duration: 0.34, ease: [0.2, 0.8, 0.2, 1] }}
               >
                 <motion.div
-                  className="flex max-w-[min(720px,calc(100%-24px))] items-center gap-3 rounded-full px-4 py-2.5"
-                  animate={{ boxShadow: [`0 0 20px ${visuals.aura}`, `0 0 34px ${visuals.auraStrong}`, `0 0 20px ${visuals.aura}`] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
+                  className="flex max-w-[min(720px,calc(100%-24px))] flex-col items-center rounded-[18px] px-7 py-3.5"
+                  animate={{
+                    boxShadow: requesterIsMine
+                      ? [
+                          `0 0 22px ${visuals.aura}, inset 0 1px 0 rgba(255,235,170,0.18), inset 0 -2px 0 rgba(0,0,0,0.50), 0 16px 32px rgba(0,0,0,0.42)`,
+                          `0 0 36px ${visuals.auraStrong}, inset 0 1px 0 rgba(255,235,170,0.22), inset 0 -2px 0 rgba(0,0,0,0.50), 0 18px 34px rgba(0,0,0,0.46)`,
+                          `0 0 22px ${visuals.aura}, inset 0 1px 0 rgba(255,235,170,0.18), inset 0 -2px 0 rgba(0,0,0,0.50), 0 16px 32px rgba(0,0,0,0.42)`,
+                        ]
+                      : [
+                          `0 0 26px ${visuals.aura}, inset 0 1px 0 rgba(255,210,210,0.22), inset 0 -2px 0 rgba(0,0,0,0.55), 0 16px 32px rgba(0,0,0,0.42)`,
+                          `0 0 44px ${visuals.auraStrong}, inset 0 1px 0 rgba(255,210,210,0.30), inset 0 -2px 0 rgba(0,0,0,0.55), 0 20px 38px rgba(0,0,0,0.50)`,
+                          `0 0 26px ${visuals.aura}, inset 0 1px 0 rgba(255,210,210,0.22), inset 0 -2px 0 rgba(0,0,0,0.55), 0 16px 32px rgba(0,0,0,0.42)`,
+                        ],
+                  }}
+                  transition={{
+                    duration: requesterIsMine ? 1.9 : 1.1,
+                    repeat: Infinity,
+                    ease: [0.4, 0, 0.6, 1],
+                  }}
                   style={{
                     background: visuals.chipBg,
                     border: `1px solid ${visuals.chipBorder}`,
                     color: visuals.word,
                     fontFamily: 'Georgia, serif',
-                    textTransform: 'uppercase',
-                    backdropFilter: 'blur(12px)',
+                    backdropFilter: 'blur(14px)',
                   }}
                 >
+                  {/* Tier headline — the bet word at scaled size, gold/red
+                      depending on tier. Inherits the same serif as the big
+                      drama so the chip feels like a continuation. */}
                   <span
                     style={{
-                      fontSize: 17,
+                      fontSize: 26,
                       fontWeight: 900,
-                      letterSpacing: '0.18em',
-                      textShadow: `0 2px 0 ${visuals.stroke}`,
+                      lineHeight: 1,
+                      letterSpacing: '0.06em',
+                      textShadow: `0 2px 0 ${visuals.stroke}, 0 0 18px ${visuals.glow}`,
                       whiteSpace: 'nowrap',
                     }}
                   >
                     {word.replace('!', '')}
                   </span>
-                  <span
+
+                  {/* Kicker line — context (who called) + state (waiting /
+                      your decision). Two phrases, separated by a thin
+                      gold-tinted dot, all uppercase with strong tracking. */}
+                  <div className="mt-1.5 flex items-center gap-2.5">
+                    <span
+                      style={{
+                        color: 'rgba(255,248,222,0.74)',
+                        fontFamily: 'Inter, system-ui, sans-serif',
+                        fontSize: 10,
+                        fontWeight: 900,
+                        letterSpacing: '0.20em',
+                        textTransform: 'uppercase',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {headline ?? pressureLabel}
+                    </span>
+                    <span
+                      aria-hidden
+                      style={{
+                        height: 4,
+                        width: 4,
+                        borderRadius: 999,
+                        background: visuals.chipBorder,
+                        boxShadow: `0 0 6px ${visuals.aura}`,
+                      }}
+                    />
+                    <span
+                      style={{
+                        color: requesterIsMine
+                          ? 'rgba(255,232,170,0.86)'
+                          : 'rgba(255,226,164,0.96)',
+                        fontFamily: 'Inter, system-ui, sans-serif',
+                        fontSize: 10,
+                        fontWeight: 900,
+                        letterSpacing: '0.18em',
+                        textTransform: 'uppercase',
+                        whiteSpace: 'nowrap',
+                        textShadow: requesterIsMine
+                          ? 'none'
+                          : `0 0 10px ${visuals.aura}`,
+                      }}
+                    >
+                      {requesterIsMine ? 'Aguardando resposta' : 'Sua decisão'}
+                    </span>
+                  </div>
+
+                  {/* Subtle hairline below the chip — same family as the
+                      RoundClashVerdict and HandTransitionVeil v2. Anchors
+                      the chip to the felt. */}
+                  <div
+                    aria-hidden
+                    className="mt-2.5 h-px w-full"
                     style={{
-                      height: 20,
-                      width: 1,
-                      background: 'rgba(255,248,222,0.20)',
+                      background: `linear-gradient(90deg, transparent 0%, ${visuals.chipBorder} 50%, transparent 100%)`,
+                      opacity: 0.66,
                     }}
                   />
-                  <span
-                    style={{
-                      color: 'rgba(255,248,222,0.78)',
-                      fontFamily: 'Inter, system-ui, sans-serif',
-                      fontSize: 10,
-                      fontWeight: 900,
-                      letterSpacing: '0.16em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {headline ?? pressureLabel}
-                  </span>
-                  <span
-                    style={{
-                      color: requesterIsMine ? 'rgba(255,248,222,0.54)' : 'rgba(255,226,164,0.86)',
-                      fontFamily: 'Inter, system-ui, sans-serif',
-                      fontSize: 10,
-                      fontWeight: 900,
-                      letterSpacing: '0.14em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {requesterIsMine ? 'Aguardando' : 'Sua decisão'}
-                  </span>
                 </motion.div>
               </motion.div>
             )}

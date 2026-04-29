@@ -1,5 +1,44 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  CARD_REVEAL_DELAY_MS,
+  CARD_SETTLE_BEFORE_RESOLUTION_MS,
+  NEXT_ROUND_CLEAN_FRAME_MS,
+  PENDING_CARD_TIMEOUT_MS,
+  RESOLUTION_HOLD_MS,
+} from './timing';
+
+// NOTE: Active card flights now survive the first round-resolution frame.
+// Keep the resolved table pinned a little longer so WIN/PERDEU/EMPATE have a
+// readable window after both flight clones hand control back to the real slots.
+//
+// The hold begins at commitRoundResolution. The opponent flight (if still
+// landing) consumes ~460 ms inside this window. After the flight settles, the
+// shell's PlayedSlot can show the WIN/PERDEU/EMPATE ribbon. With a 1800 ms
+// hold, the ribbon has at least ~1340 ms of readable presence even in the
+// worst case where the round-resolved arrives concurrently with the opponent
+// card-played and the opponent flight only finishes at +880 ms.
+const FELT_RESOLUTION_HOLD_MS = Math.max(RESOLUTION_HOLD_MS, 1800);
+
+// PATCH A — Landing-window estimate.
+//
+// The hook does not own the flight components, but it must expose a reactive
+// boolean that says "a card is currently visually landing on the felt", so the
+// match page can suppress the playable UI (hand dock, action bar, "Em turno"
+// badge) for the entire duration of the flight clone — not just for the
+// authoritative round-resolution window.
+//
+// These constants intentionally MIRROR the duration constants from
+// opponentCardFlight.tsx / playerCardFlight.tsx (FLIGHT_DURATION_MS = 480 and
+// HANDOFF_REMOVE_MS = 590). If those values are tuned, update them here too,
+// or lift them into timing.ts. Kept inline for this patch to avoid touching
+// the high-risk flight files.
+const FLIGHT_LANDING_WINDOW_MS = 590;
+// Small additional tail to cover render scheduling jitter (raf batching, the
+// React 19 transition queue) before we declare the landing "fully settled".
+const FLIGHT_LANDING_TAIL_MS = 40;
+const TOTAL_LANDING_WINDOW_MS = FLIGHT_LANDING_WINDOW_MS + FLIGHT_LANDING_TAIL_MS;
+
 type PlayedCardOwner = 'mine' | 'opponent';
 
 type PendingPlayedCard = {
@@ -18,11 +57,22 @@ type PendingPromotionState = {
   opponentCard: string | null;
 };
 
+type ResolvedTableSnapshot = {
+  resolutionKey: string;
+  myCard: string | null;
+  opponentCard: string | null;
+  roundResult: string | null;
+};
+
 type RoundResolutionInput = {
   resolutionKey: string;
   myCard: string | null;
   opponentCard: string | null;
   roundResult?: string | null;
+};
+
+type GuardedRoundResolutionInput = RoundResolutionInput & {
+  tableGeneration: number;
 };
 
 type AcceptedCardStamp = {
@@ -49,11 +99,19 @@ type UseMatchTableTransitionResult = {
   roundIntroKey: number;
   roundResolvedKey: number;
   isResolvingRound: boolean;
+  hasPendingRoundResolution: boolean;
   resolvedRoundFinished: boolean;
   isLiveTableFrame: boolean;
   displayedMyPlayedCard: string | null;
   displayedOpponentPlayedCard: string | null;
   resolvedRoundResult: string | null;
+  // PATCH A — Landing-window flags exposed for the playable-UI suppression.
+  // True while the corresponding flight clone is still visually on screen.
+  // Consumers (matchPage, useMatchActionBridge) treat any of these as an
+  // additional reason to keep the hand inert and the action bar hidden.
+  isOpponentLandingInProgress: boolean;
+  isOwnLandingInProgress: boolean;
+  isAnyCardLandingInProgress: boolean;
   beginHandTransition: () => void;
   beginOwnCardLaunch: (params: { cardKey: string; serverCard: string }) => void;
   registerIncomingPlayedCard: (params: {
@@ -69,11 +127,12 @@ type UseMatchTableTransitionResult = {
   stopRoundResolution: () => void;
 };
 
-const CARD_REVEAL_DELAY_MS = 220;
-const PENDING_CARD_TIMEOUT_MS = 2000;
-const CARD_SETTLE_BEFORE_RESOLUTION_MS = 560;
-const RESOLUTION_HOLD_MS = 1300;
-const NEXT_ROUND_CLEAN_FRAME_MS = 260;
+// NOTE: The four felt-cadence constants (CARD_REVEAL_DELAY_MS,
+// CARD_SETTLE_BEFORE_RESOLUTION_MS, RESOLUTION_HOLD_MS,
+// NEXT_ROUND_CLEAN_FRAME_MS) plus PENDING_CARD_TIMEOUT_MS are imported from
+// `./timing`. Previously this file hard-coded its own copies which diverged
+// from timing.ts; that divergence was the root cause of the "embolado"
+// cadence report. Single source of truth now lives in timing.ts.
 
 function debugTableTransition(event: string, details: Record<string, unknown> = {}): void {
   if (!import.meta.env.DEV) {
@@ -112,7 +171,7 @@ export function useMatchTableTransition(
   const pendingCardIdRef = useRef<number | null>(null);
   const pendingPlayedCardRef = useRef<PendingPlayedCard | null>(null);
   const launchingCardKeyRef = useRef<string | null>(null);
-  const pendingRoundResolutionRef = useRef<RoundResolutionInput | null>(null);
+  const pendingRoundResolutionRef = useRef<GuardedRoundResolutionInput | null>(null);
   const lastAcceptedCardStampRef = useRef<AcceptedCardStamp | null>(null);
   const opponentCardAcceptedViaEventRef = useRef<string | null>(null);
   const myCardAcceptedViaEventRef = useRef<string | null>(null);
@@ -122,6 +181,26 @@ export function useMatchTableTransition(
     myCard: null,
     opponentCard: null,
   });
+  // PATCH 7.6 — Cards explicitly wiped when opening a fresh round.
+  //
+  // Slower combat pacing means the authoritative view-model can still expose
+  // the previous round's latest cards for a few frames after the transition
+  // hook has already cleared the felt for the next round. Without this guard,
+  // the prop-sync effects below can repaint the player's old card immediately
+  // after resetForFreshRoundFrame(). Store the cards that were just wiped so
+  // those stale prop echoes are ignored until a genuinely new card arrives.
+  const clearedRoundCardsRef = useRef<ClosingTableCards>({ mine: null, opponent: null });
+  const resolvedTableSnapshotRef = useRef<ResolvedTableSnapshot | null>(null);
+  const tableGenerationRef = useRef(0);
+
+  // PATCH A — Landing flag bookkeeping.
+  // We use a per-owner "active landing key" approach: a monotonically
+  // increasing number that flips back to 0 once the landing window elapses.
+  // A timeout per owner clears its key. Re-triggering during a window cancels
+  // the previous timeout and arms a new one — so consecutive plays do not
+  // produce stale "true" states.
+  const opponentLandingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ownLandingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [launchingCardKey, setLaunchingCardKey] = useState<string | null>(null);
   const [pendingPlayedCard, setPendingPlayedCard] = useState<PendingPlayedCard | null>(null);
@@ -134,10 +213,16 @@ export function useMatchTableTransition(
   const [roundIntroKey, setRoundIntroKey] = useState(0);
   const [roundResolvedKey, setRoundResolvedKey] = useState(0);
   const [isResolvingRound, setIsResolvingRound] = useState(false);
+  const [hasPendingRoundResolution, setHasPendingRoundResolution] = useState(false);
   const [closingTableCards, setClosingTableCards] = useState<ClosingTableCards>({
     mine: null,
     opponent: null,
   });
+  // PATCH A — Reactive landing flags. Read by matchPage to extend
+  // shouldSuppressPlayableUi, and ultimately by useMatchActionBridge as the
+  // last line of defense against a play-card emission during a flight.
+  const [isOpponentLandingInProgress, setIsOpponentLandingInProgress] = useState(false);
+  const [isOwnLandingInProgress, setIsOwnLandingInProgress] = useState(false);
 
   useEffect(() => {
     pendingPlayedCardRef.current = pendingPlayedCard;
@@ -163,10 +248,79 @@ export function useMatchTableTransition(
     currentTurnSeatIdRef.current = currentTurnSeatId;
   }, [currentTurnSeatId]);
 
+  // PATCH A — Landing-flag helpers.
+  const clearOpponentLandingTimeout = useCallback(() => {
+    if (opponentLandingClearTimeoutRef.current) {
+      clearTimeout(opponentLandingClearTimeoutRef.current);
+      opponentLandingClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearOwnLandingTimeout = useCallback(() => {
+    if (ownLandingClearTimeoutRef.current) {
+      clearTimeout(ownLandingClearTimeoutRef.current);
+      ownLandingClearTimeoutRef.current = null;
+    }
+  }, []);
+
+  const armOpponentLanding = useCallback(() => {
+    clearOpponentLandingTimeout();
+    setIsOpponentLandingInProgress(true);
+    opponentLandingClearTimeoutRef.current = setTimeout(() => {
+      setIsOpponentLandingInProgress(false);
+      opponentLandingClearTimeoutRef.current = null;
+    }, TOTAL_LANDING_WINDOW_MS);
+  }, [clearOpponentLandingTimeout]);
+
+  const armOwnLanding = useCallback(() => {
+    clearOwnLandingTimeout();
+    setIsOwnLandingInProgress(true);
+    ownLandingClearTimeoutRef.current = setTimeout(() => {
+      setIsOwnLandingInProgress(false);
+      ownLandingClearTimeoutRef.current = null;
+    }, TOTAL_LANDING_WINDOW_MS);
+  }, [clearOwnLandingTimeout]);
+
+  const cancelOpponentLanding = useCallback(() => {
+    clearOpponentLandingTimeout();
+    setIsOpponentLandingInProgress(false);
+  }, [clearOpponentLandingTimeout]);
+
+  const cancelOwnLanding = useCallback(() => {
+    clearOwnLandingTimeout();
+    setIsOwnLandingInProgress(false);
+  }, [clearOwnLandingTimeout]);
+
+  const advanceTableGeneration = useCallback((reason: string) => {
+    tableGenerationRef.current += 1;
+
+    debugTableTransition('tableGeneration:advanced', {
+      reason,
+      tableGeneration: tableGenerationRef.current,
+      pendingRoundResolution: pendingRoundResolutionRef.current,
+      pendingPromotion: pendingPromotionRef.current,
+    });
+  }, []);
+
   useEffect(() => {
+    // CHANGE (cards persisting across hands): the original release condition
+    //   (!latestRoundFinished || playedRoundsCount !== previousResolvedRoundCountRef.current)
+    // would fire prematurely RIGHT AFTER beginHandTransition, because that
+    // function resets previousResolvedRoundCountRef to 0 while the view-model's
+    // playedRoundsCount is still the previous hand's count (e.g. 3). The
+    // released suppression then let the fallback resolver re-paint stale
+    // cards.
+    //
+    // Stricter condition: release the suppression only when the authoritative
+    // state shows that no round is currently finished waiting to be resolved.
+    // That is true:
+    //   - on a fresh hand: playedRoundsCount drops to 0, OR
+    //   - between rounds inside a hand: latestRoundFinished flips to false
+    //     because a new (still-open) round started after a resolution.
+    // We deliberately do NOT release just because the count differs from the
+    // ref, because that ref is reset by beginHandTransition.
     const shouldReleaseReplaySuppression =
-      (!latestRoundFinished || playedRoundsCount !== previousResolvedRoundCountRef.current) &&
-      !awaitingNextRoundOpeningRef.current;
+      !latestRoundFinished && !awaitingNextRoundOpeningRef.current;
 
     if (shouldReleaseReplaySuppression) {
       suppressResolvedRoundReplayRef.current = false;
@@ -207,33 +361,52 @@ export function useMatchTableTransition(
     pendingCardIdRef.current = null;
   }, []);
 
-  const clearDisplayedTable = useCallback(() => {
-    debugTableTransition('clearDisplayedTable', {
-      previousMyPlayedCard: previousMyPlayedCardRef.current,
-      previousOpponentPlayedCard: previousOpponentPlayedCardRef.current,
-      myCardAcceptedViaEvent: myCardAcceptedViaEventRef.current,
-      opponentCardAcceptedViaEvent: opponentCardAcceptedViaEventRef.current,
-      tablePhase: tablePhaseRef.current,
-      nextDecisionType: nextDecisionTypeRef.current,
-      isResolvingRound: isResolvingRoundRef.current,
-      pendingCardId: pendingCardIdRef.current,
-      opponentRevealPending: opponentRevealTimeoutRef.current !== null,
-      closingTimeoutPending: closingTimeoutRef.current !== null,
-      roundTransitionPending: roundTransitionTimeoutRef.current !== null,
+  const clearPendingPromotion = useCallback((reason: string) => {
+    debugTableTransition('clearPendingPromotion', {
+      reason,
       pendingPromotion: pendingPromotionRef.current,
-      pendingRoundResolution: pendingRoundResolutionRef.current,
-      lastAcceptedCardStamp: lastAcceptedCardStampRef.current,
     });
 
-    setDisplayedMyPlayedCard(null);
-    setDisplayedOpponentPlayedCard(null);
-    setClosingTableCards({ mine: null, opponent: null });
-    setResolvedRoundResult(null);
-    previousMyPlayedCardRef.current = null;
-    previousOpponentPlayedCardRef.current = null;
-    opponentCardAcceptedViaEventRef.current = null;
-    myCardAcceptedViaEventRef.current = null;
+    pendingPromotionRef.current = { myCard: null, opponentCard: null };
   }, []);
+
+  const clearDisplayedTable = useCallback(
+    (options: { clearPendingPromotion?: boolean } = {}) => {
+      debugTableTransition('clearDisplayedTable', {
+        previousMyPlayedCard: previousMyPlayedCardRef.current,
+        previousOpponentPlayedCard: previousOpponentPlayedCardRef.current,
+        myCardAcceptedViaEvent: myCardAcceptedViaEventRef.current,
+        opponentCardAcceptedViaEvent: opponentCardAcceptedViaEventRef.current,
+        tablePhase: tablePhaseRef.current,
+        nextDecisionType: nextDecisionTypeRef.current,
+        isResolvingRound: isResolvingRoundRef.current,
+        pendingCardId: pendingCardIdRef.current,
+        opponentRevealPending: opponentRevealTimeoutRef.current !== null,
+        closingTimeoutPending: closingTimeoutRef.current !== null,
+        roundTransitionPending: roundTransitionTimeoutRef.current !== null,
+        pendingPromotion: pendingPromotionRef.current,
+        pendingRoundResolution: pendingRoundResolutionRef.current,
+        lastAcceptedCardStamp: lastAcceptedCardStampRef.current,
+        clearPendingPromotion: options.clearPendingPromotion ?? false,
+      });
+
+      setDisplayedMyPlayedCard(null);
+      setDisplayedOpponentPlayedCard(null);
+      setClosingTableCards({ mine: null, opponent: null });
+      setResolvedRoundResult(null);
+      resolvedTableSnapshotRef.current = null;
+      lastAcceptedCardStampRef.current = null;
+      previousMyPlayedCardRef.current = null;
+      previousOpponentPlayedCardRef.current = null;
+      opponentCardAcceptedViaEventRef.current = null;
+      myCardAcceptedViaEventRef.current = null;
+
+      if (options.clearPendingPromotion) {
+        clearPendingPromotion('clear-displayed-table');
+      }
+    },
+    [clearPendingPromotion],
+  );
 
   const resetForFreshRoundFrame = useCallback(() => {
     debugTableTransition('resetForFreshRoundFrame', {
@@ -248,6 +421,12 @@ export function useMatchTableTransition(
       suppressResolvedRoundReplay: suppressResolvedRoundReplayRef.current,
     });
 
+    clearedRoundCardsRef.current = {
+      mine: previousMyPlayedCardRef.current,
+      opponent: previousOpponentPlayedCardRef.current,
+    };
+
+    advanceTableGeneration('reset-fresh-round-frame');
     cancelOpponentReveal();
     clearRoundTransition();
 
@@ -259,20 +438,36 @@ export function useMatchTableTransition(
     clearTransientLaunchState();
     clearResolutionSettleTimeout();
     pendingRoundResolutionRef.current = null;
-    clearDisplayedTable();
+    setHasPendingRoundResolution(false);
+    clearDisplayedTable({ clearPendingPromotion: true });
     setIsResolvingRound(false);
     setRoundIntroKey((current) => current + 1);
+    // PATCH A — clear landing flags whenever we wipe the felt for a new round
+    // frame; flights that were arming during the old round must not bleed
+    // into the next one.
+    cancelOpponentLanding();
+    cancelOwnLanding();
   }, [
     cancelOpponentReveal,
+    cancelOpponentLanding,
+    cancelOwnLanding,
     clearDisplayedTable,
     clearResolutionSettleTimeout,
     clearRoundTransition,
     clearTransientLaunchState,
+    advanceTableGeneration,
   ]);
 
   const revealOpponentCard = useCallback(
     (card: string, immediate: boolean) => {
       cancelOpponentReveal();
+
+      // PATCH A — Arm the opponent landing window on every reveal kick-off,
+      // regardless of whether the slot will reveal now or after
+      // CARD_REVEAL_DELAY_MS. The flight clone is what the user sees during
+      // the window; the slot card is the destination. Both modes must keep
+      // the playable UI suppressed for the same total duration.
+      armOpponentLanding();
 
       const reveal = () => {
         setDisplayedOpponentPlayedCard(card);
@@ -287,7 +482,7 @@ export function useMatchTableTransition(
 
       opponentRevealTimeoutRef.current = setTimeout(reveal, CARD_REVEAL_DELAY_MS);
     },
-    [cancelOpponentReveal],
+    [armOpponentLanding, cancelOpponentReveal],
   );
 
   const queueNextRoundPromotion = useCallback((nextState: Partial<PendingPromotionState>) => {
@@ -326,6 +521,10 @@ export function useMatchTableTransition(
         pendingPromotionRef.current = { myCard: null, opponentCard: null };
         awaitingNextRoundOpeningRef.current = false;
         suppressResolvedRoundReplayRef.current = false;
+        setHasPendingRoundResolution(false);
+        // NOTE: Do not clear the displayed cards here. The hand-climax overlay
+        // needs the final resolved table preserved underneath until the next
+        // hand transition deliberately wipes the felt.
         setIsResolvingRound(false);
         return;
       }
@@ -347,6 +546,9 @@ export function useMatchTableTransition(
       pendingPromotionRef.current = { myCard: null, opponentCard: null };
       awaitingNextRoundOpeningRef.current = false;
       suppressResolvedRoundReplayRef.current = false;
+      setHasPendingRoundResolution(false);
+      // NOTE: Preserve final table cards for the hand result/climax. The felt is
+      // cleared by beginHandTransition when the next hand actually starts.
       setIsResolvingRound(false);
       return;
     }
@@ -355,9 +557,9 @@ export function useMatchTableTransition(
     awaitingNextRoundOpeningRef.current = false;
 
     roundTransitionTimeoutRef.current = setTimeout(() => {
-      resetForFreshRoundFrame();
-
       const promotionToApply = pendingPromotionRef.current;
+
+      resetForFreshRoundFrame();
 
       if (promotionToApply.myCard) {
         setDisplayedMyPlayedCard(promotionToApply.myCard);
@@ -366,14 +568,21 @@ export function useMatchTableTransition(
       }
 
       if (promotionToApply.opponentCard) {
-        revealOpponentCard(promotionToApply.opponentCard, false);
+        // NOTE: When the bot plays during the previous round's visual hold,
+        // the card is queued as a next-round promotion. At this point the felt
+        // was just cleared by resetForFreshRoundFrame(), so there is no stale
+        // slot to overlap. Revealing immediately is safer than waiting for
+        // CARD_REVEAL_DELAY_MS: it starts the opponent flight on the first
+        // fresh-round paint and prevents the player from seeing an empty turn
+        // where the bot's card has already been accepted by the socket layer.
+        revealOpponentCard(promotionToApply.opponentCard, true);
         opponentCardAcceptedViaEventRef.current = promotionToApply.opponentCard;
       }
 
-      pendingPromotionRef.current = { myCard: null, opponentCard: null };
+      clearPendingPromotion('promotion-applied');
       roundTransitionTimeoutRef.current = null;
     }, NEXT_ROUND_CLEAN_FRAME_MS);
-  }, [resetForFreshRoundFrame, revealOpponentCard]);
+  }, [clearPendingPromotion, resetForFreshRoundFrame, revealOpponentCard]);
 
   const markAcceptedCardForVisualSettle = useCallback((owner: PlayedCardOwner, card: string) => {
     lastAcceptedCardStampRef.current = {
@@ -391,10 +600,18 @@ export function useMatchTableTransition(
       markAcceptedCardForVisualSettle(owner, card);
 
       if (owner === 'mine') {
+        if (clearedRoundCardsRef.current.mine === card) {
+          clearedRoundCardsRef.current = { ...clearedRoundCardsRef.current, mine: null };
+        }
+
         setDisplayedMyPlayedCard(card);
         previousMyPlayedCardRef.current = card;
         myCardAcceptedViaEventRef.current = card;
         return;
+      }
+
+      if (clearedRoundCardsRef.current.opponent === card) {
+        clearedRoundCardsRef.current = { ...clearedRoundCardsRef.current, opponent: null };
       }
 
       opponentCardAcceptedViaEventRef.current = card;
@@ -417,32 +634,52 @@ export function useMatchTableTransition(
       suppressResolvedRoundReplay: suppressResolvedRoundReplayRef.current,
     });
 
+    advanceTableGeneration('begin-hand-transition');
     cancelOpponentReveal();
     clearTransientLaunchState();
     clearRoundTransition();
     clearResolutionSettleTimeout();
     pendingRoundResolutionRef.current = null;
+    resolvedTableSnapshotRef.current = null;
+    setHasPendingRoundResolution(false);
 
     if (closingTimeoutRef.current) {
       clearTimeout(closingTimeoutRef.current);
       closingTimeoutRef.current = null;
     }
 
-    clearDisplayedTable();
+    clearDisplayedTable({ clearPendingPromotion: true });
     setIsResolvingRound(false);
     setRoundIntroKey((current) => current + 1);
     previousResolvedRoundCountRef.current = 0;
     lastResolvedRoundKeyRef.current = null;
-    suppressResolvedRoundReplayRef.current = false;
+    // CHANGE (cards persisting across hands): when we transition into a new
+    // hand, the visual state has been wiped but the view-model's myPlayedCard
+    // / opponentPlayedCard / latestRoundFinished may still point at the
+    // PREVIOUS finished hand for one or two frames — until setVisualPublicMatchState
+    // commits and the new hand's empty rounds[] arrive. During that window,
+    // the fallback round-resolution effect below would re-fire and re-paint
+    // the old hand's last round onto the freshly cleared felt. Holding
+    // suppressResolvedRoundReplayRef true blocks that. The release effect at
+    // the top of this hook clears it as soon as the authoritative new-hand
+    // state arrives (latestRoundFinished flips to false).
+    suppressResolvedRoundReplayRef.current = true;
     awaitingNextRoundOpeningRef.current = false;
     pendingPromotionRef.current = { myCard: null, opponentCard: null };
+    clearedRoundCardsRef.current = { mine: null, opponent: null };
     lastAcceptedCardStampRef.current = null;
+    // PATCH A — flights from a previous hand cannot leak into a new hand.
+    cancelOpponentLanding();
+    cancelOwnLanding();
   }, [
     cancelOpponentReveal,
+    cancelOpponentLanding,
+    cancelOwnLanding,
     clearDisplayedTable,
     clearResolutionSettleTimeout,
     clearRoundTransition,
     clearTransientLaunchState,
+    advanceTableGeneration,
   ]);
 
   const beginOwnCardLaunch = useCallback(
@@ -463,6 +700,10 @@ export function useMatchTableTransition(
 
       suppressResolvedRoundReplayRef.current = false;
       awaitingNextRoundOpeningRef.current = false;
+
+      // PATCH A — Arm own landing window the moment we kick off the player's
+      // flight. Mirrors the opponent path. Auto-clears in TOTAL_LANDING_WINDOW_MS.
+      armOwnLanding();
 
       if (isResolvingRoundRef.current) {
         const shouldCompleteCurrentResolvedRound = closingTableCards.mine === null;
@@ -523,7 +764,7 @@ export function useMatchTableTransition(
         }
       }, PENDING_CARD_TIMEOUT_MS);
     },
-    [clearTransientLaunchState, closingTableCards.mine, queueNextRoundPromotion],
+    [armOwnLanding, clearTransientLaunchState, closingTableCards.mine, queueNextRoundPromotion],
   );
 
   const registerIncomingPlayedCard = useCallback(
@@ -563,6 +804,50 @@ export function useMatchTableTransition(
       }
 
       if (isResolvingRoundRef.current) {
+        const handEnded =
+          tablePhaseRef.current === 'hand_finished' ||
+          tablePhaseRef.current === 'match_finished' ||
+          nextDecisionTypeRef.current === 'start-next-hand' ||
+          nextDecisionTypeRef.current === 'match-finished';
+        const currentResolvedRoundAlreadyComplete =
+          closingTableCards.mine !== null && closingTableCards.opponent !== null;
+        const isDuplicateResolvedFrameCard =
+          (owner === 'mine' && closingTableCards.mine === card) ||
+          (owner === 'opponent' && closingTableCards.opponent === card);
+
+        // PATCH 7.5 — Do not let the slow resolution hold swallow the next
+        // round's opening card.
+        //
+        // After Patch 7.1, RESOLUTION_HOLD_MS became long enough that a bot can
+        // legitimately open the next round while the previous round is still in
+        // the visual hold. When the resolved frame already has BOTH cards,
+        // any different incoming card cannot belong to that old round. Treat it
+        // as the first card of the new round, interrupt the old hold, clear the
+        // stale felt, and render/animate the card immediately. Otherwise the
+        // card sits in pendingPromotion until a later timeout and can look like
+        // it never flew to the table.
+        if (currentResolvedRoundAlreadyComplete && !isDuplicateResolvedFrameCard && !handEnded) {
+          debugTableTransition('registerIncomingPlayedCard:interrupt-resolution-for-next-round-card', {
+            owner,
+            card,
+            closingTableCards,
+            tablePhase: tablePhaseRef.current,
+            nextDecisionType: nextDecisionTypeRef.current,
+            currentTurnSeatId: currentTurnSeatIdRef.current,
+          });
+
+          resetForFreshRoundFrame();
+          suppressResolvedRoundReplayRef.current = false;
+          awaitingNextRoundOpeningRef.current = false;
+          renderIncomingCard(owner, card, owner === 'opponent');
+
+          if (owner === 'mine') {
+            armOwnLanding();
+          }
+
+          return;
+        }
+
         const shouldCompleteCurrentResolvedRound =
           (owner === 'mine' && closingTableCards.mine === null) ||
           (owner === 'opponent' && closingTableCards.opponent === null);
@@ -577,6 +862,10 @@ export function useMatchTableTransition(
             }));
             previousMyPlayedCardRef.current = card;
             myCardAcceptedViaEventRef.current = card;
+            // PATCH A — own card arriving as a closing-frame card is also a
+            // landing event; arm the window so the UI stays inert through
+            // the visual settle.
+            armOwnLanding();
             return;
           }
 
@@ -586,7 +875,9 @@ export function useMatchTableTransition(
             ...current,
             opponent: card,
           }));
-          revealOpponentCard(card, true);
+          // CHANGE (visual sombra na land do oponente): defer reveal so the
+          // flight clone owns the entry animation.
+          revealOpponentCard(card, false);
           return;
         }
 
@@ -606,15 +897,34 @@ export function useMatchTableTransition(
         return;
       }
 
-      renderIncomingCard(owner, card, true);
+      // CHANGE (visual sombra na land do oponente): pass immediate=false
+      // for the opponent reveal here, so the slot waits CARD_REVEAL_DELAY_MS
+      // before painting the authoritative card. With CARD_REVEAL_DELAY_MS
+      // now ~420 ms (close to OpponentCardFlight's 460 ms), the flight clone
+      // is the only visible card during the travel, and the slot lands at
+      // the very end. Without this, the slot appeared at t=0 and overlapped
+      // with the entire flight, reading as a "second shadow card".
+      renderIncomingCard(owner, card, false);
+
+      // PATCH A — when the owner is "mine" and we are NOT inside a resolving
+      // round, the card was registered without a flight clone (e.g. server
+      // echo of an own play after the local launch already animated). Make
+      // sure the own-landing window is kept armed if it isn't already; if it
+      // already was, this re-arm just bumps the deadline to the freshest
+      // event, which is correct.
+      if (owner === 'mine') {
+        armOwnLanding();
+      }
     },
     [
+      armOwnLanding,
       clearTransientLaunchState,
       closingTableCards.mine,
       closingTableCards.opponent,
       markAcceptedCardForVisualSettle,
       queueNextRoundPromotion,
       renderIncomingCard,
+      resetForFreshRoundFrame,
       revealOpponentCard,
     ],
   );
@@ -625,12 +935,16 @@ export function useMatchTableTransition(
       myCard: resolvedMyCard,
       opponentCard: resolvedOpponentCard,
       roundResult,
-    }: RoundResolutionInput) => {
+      tableGeneration,
+    }: GuardedRoundResolutionInput) => {
       debugTableTransition('commitRoundResolution:start', {
         resolutionKey,
         resolvedMyCard,
         resolvedOpponentCard,
         roundResult: roundResult ?? null,
+        tableGeneration,
+        currentTableGeneration: tableGenerationRef.current,
+        suppressResolvedRoundReplay: suppressResolvedRoundReplayRef.current,
         tablePhase: tablePhaseRef.current,
         nextDecisionType: nextDecisionTypeRef.current,
         currentTurnSeatId: currentTurnSeatIdRef.current,
@@ -652,6 +966,25 @@ export function useMatchTableTransition(
         return;
       }
 
+      if (tableGeneration !== tableGenerationRef.current) {
+        debugTableTransition('commitRoundResolution:ignored-stale-generation', {
+          resolutionKey,
+          tableGeneration,
+          currentTableGeneration: tableGenerationRef.current,
+        });
+        return;
+      }
+
+      if (suppressResolvedRoundReplayRef.current) {
+        debugTableTransition('commitRoundResolution:ignored-replay-suppressed', {
+          resolutionKey,
+          tableGeneration,
+          tablePhase: tablePhaseRef.current,
+          nextDecisionType: nextDecisionTypeRef.current,
+        });
+        return;
+      }
+
       if (lastResolvedRoundKeyRef.current === resolutionKey) {
         debugTableTransition('commitRoundResolution:ignored-duplicate', {
           resolutionKey,
@@ -661,6 +994,7 @@ export function useMatchTableTransition(
       }
 
       pendingRoundResolutionRef.current = null;
+      setHasPendingRoundResolution(false);
       clearResolutionSettleTimeout();
       lastResolvedRoundKeyRef.current = resolutionKey;
       previousResolvedRoundCountRef.current = playedRoundsCount;
@@ -675,22 +1009,29 @@ export function useMatchTableTransition(
         resolvedOpponentCard = opponentCardAcceptedViaEventRef.current;
       }
 
-      if (resolvedMyCard) {
-        setDisplayedMyPlayedCard(resolvedMyCard);
-        previousMyPlayedCardRef.current = resolvedMyCard;
-        myCardAcceptedViaEventRef.current = resolvedMyCard;
-      }
+      // NOTE: Freeze both cards at the exact resolution frame. From here until
+      // the clean frame, the table must render from this symmetric snapshot,
+      // not from transient slot/flight state. This prevents one side from
+      // showing PERDEU while the winning side has already been hidden or reset.
+      const resolvedSnapshot: ResolvedTableSnapshot = {
+        resolutionKey,
+        myCard: resolvedMyCard,
+        opponentCard: resolvedOpponentCard,
+        roundResult: roundResult ?? null,
+      };
+      resolvedTableSnapshotRef.current = resolvedSnapshot;
 
-      if (resolvedOpponentCard) {
-        setDisplayedOpponentPlayedCard(resolvedOpponentCard);
-        previousOpponentPlayedCardRef.current = resolvedOpponentCard;
-        opponentCardAcceptedViaEventRef.current = resolvedOpponentCard;
-      }
+      setDisplayedMyPlayedCard(resolvedSnapshot.myCard);
+      setDisplayedOpponentPlayedCard(resolvedSnapshot.opponentCard);
+      previousMyPlayedCardRef.current = resolvedSnapshot.myCard;
+      previousOpponentPlayedCardRef.current = resolvedSnapshot.opponentCard;
+      myCardAcceptedViaEventRef.current = resolvedSnapshot.myCard;
+      opponentCardAcceptedViaEventRef.current = resolvedSnapshot.opponentCard;
 
-      setResolvedRoundResult(roundResult ?? null);
+      setResolvedRoundResult(resolvedSnapshot.roundResult);
       setClosingTableCards({
-        mine: resolvedMyCard,
-        opponent: resolvedOpponentCard,
+        mine: resolvedSnapshot.myCard,
+        opponent: resolvedSnapshot.opponentCard,
       });
       setIsResolvingRound(true);
       setRoundResolvedKey((current) => current + 1);
@@ -698,10 +1039,11 @@ export function useMatchTableTransition(
 
       debugTableTransition('commitRoundResolution:committed', {
         resolutionKey,
-        resolvedMyCard,
-        resolvedOpponentCard,
-        roundResult: roundResult ?? null,
-        closingCards: { mine: resolvedMyCard, opponent: resolvedOpponentCard },
+        resolvedMyCard: resolvedSnapshot.myCard,
+        resolvedOpponentCard: resolvedSnapshot.opponentCard,
+        roundResult: resolvedSnapshot.roundResult,
+        tableGeneration,
+        closingCards: { mine: resolvedSnapshot.myCard, opponent: resolvedSnapshot.opponentCard },
       });
 
       if (closingTimeoutRef.current) {
@@ -717,12 +1059,22 @@ export function useMatchTableTransition(
           nextDecisionType: nextDecisionTypeRef.current,
         });
 
+        if (tableGeneration !== tableGenerationRef.current) {
+          debugTableTransition('resolutionHoldTimeout:ignored-stale-generation', {
+            resolutionKey,
+            tableGeneration,
+            currentTableGeneration: tableGenerationRef.current,
+          });
+          closingTimeoutRef.current = null;
+          return;
+        }
+
         if (isResolvingRoundRef.current) {
           flushPendingPromotion();
         }
 
         closingTimeoutRef.current = null;
-      }, RESOLUTION_HOLD_MS);
+      }, FELT_RESOLUTION_HOLD_MS);
     },
     [
       cancelOpponentReveal,
@@ -778,6 +1130,8 @@ export function useMatchTableTransition(
         resolvedMyCard,
         resolvedOpponentCard,
         roundResult: roundResult ?? null,
+        currentTableGeneration: tableGenerationRef.current,
+        suppressResolvedRoundReplay: suppressResolvedRoundReplayRef.current,
         tablePhase: tablePhaseRef.current,
         nextDecisionType: nextDecisionTypeRef.current,
         currentTurnSeatId: currentTurnSeatIdRef.current,
@@ -800,6 +1154,16 @@ export function useMatchTableTransition(
         return;
       }
 
+      if (suppressResolvedRoundReplayRef.current) {
+        debugTableTransition('triggerRoundResolution:ignored-replay-suppressed', {
+          resolutionKey,
+          currentTableGeneration: tableGenerationRef.current,
+          tablePhase: tablePhaseRef.current,
+          nextDecisionType: nextDecisionTypeRef.current,
+        });
+        return;
+      }
+
       if (lastResolvedRoundKeyRef.current === resolutionKey) {
         debugTableTransition('triggerRoundResolution:ignored-duplicate', {
           resolutionKey,
@@ -816,10 +1180,15 @@ export function useMatchTableTransition(
         return;
       }
 
+      const guardedResolutionInput: GuardedRoundResolutionInput = {
+        ...resolutionInput,
+        tableGeneration: tableGenerationRef.current,
+      };
       const settleDelayMs = getRoundResolutionSettleDelayMs();
 
       if (settleDelayMs > 0) {
-        pendingRoundResolutionRef.current = resolutionInput;
+        pendingRoundResolutionRef.current = guardedResolutionInput;
+        setHasPendingRoundResolution(true);
 
         debugTableTransition('triggerRoundResolution:queued-for-card-settle', {
           resolutionKey,
@@ -839,6 +1208,29 @@ export function useMatchTableTransition(
             return;
           }
 
+          if (queuedResolution.tableGeneration !== tableGenerationRef.current) {
+            debugTableTransition('triggerRoundResolution:ignored-stale-queued-generation', {
+              resolutionKey: queuedResolution.resolutionKey,
+              tableGeneration: queuedResolution.tableGeneration,
+              currentTableGeneration: tableGenerationRef.current,
+            });
+            pendingRoundResolutionRef.current = null;
+            setHasPendingRoundResolution(false);
+            return;
+          }
+
+          if (suppressResolvedRoundReplayRef.current) {
+            debugTableTransition('triggerRoundResolution:ignored-suppressed-queued-resolution', {
+              resolutionKey: queuedResolution.resolutionKey,
+              tableGeneration: queuedResolution.tableGeneration,
+              tablePhase: tablePhaseRef.current,
+              nextDecisionType: nextDecisionTypeRef.current,
+            });
+            pendingRoundResolutionRef.current = null;
+            setHasPendingRoundResolution(false);
+            return;
+          }
+
           debugTableTransition('triggerRoundResolution:flushing-settled-card-resolution', {
             resolutionKey: queuedResolution.resolutionKey,
             tablePhase: tablePhaseRef.current,
@@ -854,7 +1246,7 @@ export function useMatchTableTransition(
         return;
       }
 
-      commitRoundResolution(resolutionInput);
+      commitRoundResolution(guardedResolutionInput);
     },
     [
       clearResolutionSettleTimeout,
@@ -875,6 +1267,7 @@ export function useMatchTableTransition(
 
     clearResolutionSettleTimeout();
     pendingRoundResolutionRef.current = null;
+    setHasPendingRoundResolution(false);
 
     if (closingTimeoutRef.current) {
       clearTimeout(closingTimeoutRef.current);
@@ -892,6 +1285,14 @@ export function useMatchTableTransition(
     }
 
     if (awaitingNextRoundOpeningRef.current) {
+      return;
+    }
+
+    // CHANGE (cards persisting across hands): if a fresh-hand transition is
+    // in flight, the view-model's latestRound is briefly stale (still points
+    // at the previous hand). Skip the fallback resolution until the
+    // authoritative new-hand state arrives and clears the suppression.
+    if (suppressResolvedRoundReplayRef.current) {
       return;
     }
 
@@ -946,7 +1347,10 @@ export function useMatchTableTransition(
       return;
     }
 
+    const isClearedRoundMyCard = clearedRoundCardsRef.current.mine === displayedMyPlayedCard;
+
     if (
+      !isClearedRoundMyCard &&
       myCardAcceptedViaEventRef.current !== null &&
       myCardAcceptedViaEventRef.current === displayedMyPlayedCard
     ) {
@@ -978,7 +1382,11 @@ export function useMatchTableTransition(
       return;
     }
 
+    const isClearedRoundOpponentCard =
+      clearedRoundCardsRef.current.opponent === displayedOpponentPlayedCard;
+
     if (
+      !isClearedRoundOpponentCard &&
       opponentCardAcceptedViaEventRef.current !== null &&
       opponentCardAcceptedViaEventRef.current === displayedOpponentPlayedCard
     ) {
@@ -1013,9 +1421,11 @@ export function useMatchTableTransition(
     }
 
     const myProtected =
+      clearedRoundCardsRef.current.mine !== displayedMyPlayedCard &&
       myCardAcceptedViaEventRef.current !== null &&
       myCardAcceptedViaEventRef.current === displayedMyPlayedCard;
     const opponentProtected =
+      clearedRoundCardsRef.current.opponent !== displayedOpponentPlayedCard &&
       opponentCardAcceptedViaEventRef.current !== null &&
       opponentCardAcceptedViaEventRef.current === displayedOpponentPlayedCard;
 
@@ -1060,6 +1470,20 @@ export function useMatchTableTransition(
       awaitingNextRoundOpeningRef.current ||
       (suppressResolvedRoundReplayRef.current && latestRoundFinished)
     ) {
+      return;
+    }
+
+    if (
+      !isResolvingRoundRef.current &&
+      tablePhaseRef.current === 'playing' &&
+      clearedRoundCardsRef.current.mine === myPlayedCard
+    ) {
+      debugTableTransition('propSync:ignored-cleared-my-card', {
+        myPlayedCard,
+        clearedRoundCards: clearedRoundCardsRef.current,
+        tablePhase: tablePhaseRef.current,
+        latestRoundFinished,
+      });
       return;
     }
 
@@ -1124,6 +1548,20 @@ export function useMatchTableTransition(
       return;
     }
 
+    if (
+      !isResolvingRoundRef.current &&
+      tablePhaseRef.current === 'playing' &&
+      clearedRoundCardsRef.current.opponent === opponentPlayedCard
+    ) {
+      debugTableTransition('propSync:ignored-cleared-opponent-card', {
+        opponentPlayedCard,
+        clearedRoundCards: clearedRoundCardsRef.current,
+        tablePhase: tablePhaseRef.current,
+        latestRoundFinished,
+      });
+      return;
+    }
+
     if (opponentCardAcceptedViaEventRef.current === opponentPlayedCard) {
       return;
     }
@@ -1143,7 +1581,9 @@ export function useMatchTableTransition(
           ...current,
           opponent: opponentPlayedCard,
         }));
-        revealOpponentCard(opponentPlayedCard, true);
+        // CHANGE (visual sombra na land do oponente): defer reveal by
+        // CARD_REVEAL_DELAY_MS so the flight clone owns the entry animation.
+        revealOpponentCard(opponentPlayedCard, false);
         return;
       }
 
@@ -1161,7 +1601,10 @@ export function useMatchTableTransition(
     }
 
     markAcceptedCardForVisualSettle('opponent', opponentPlayedCard);
-    revealOpponentCard(opponentPlayedCard, true);
+    // CHANGE (visual sombra na land do oponente): defer reveal so the flight
+    // clone owns the entry animation. The slot lands ~40 ms before the flight
+    // exits, producing a clean single-card landing.
+    revealOpponentCard(opponentPlayedCard, false);
     opponentCardAcceptedViaEventRef.current = opponentPlayedCard;
   }, [
     closingTableCards.opponent,
@@ -1221,6 +1664,10 @@ export function useMatchTableTransition(
       cancelOpponentReveal();
       clearRoundTransition();
       clearResolutionSettleTimeout();
+      // PATCH A — clean up landing timers on unmount so timers cannot fire
+      // setState after the hook is gone.
+      clearOpponentLandingTimeout();
+      clearOwnLandingTimeout();
 
       if (pendingCardTimeoutRef.current) {
         clearTimeout(pendingCardTimeoutRef.current);
@@ -1230,7 +1677,13 @@ export function useMatchTableTransition(
         clearTimeout(closingTimeoutRef.current);
       }
     };
-  }, [cancelOpponentReveal, clearResolutionSettleTimeout, clearRoundTransition]);
+  }, [
+    cancelOpponentReveal,
+    clearOpponentLandingTimeout,
+    clearOwnLandingTimeout,
+    clearResolutionSettleTimeout,
+    clearRoundTransition,
+  ]);
 
   const isLiveTableFrame = useMemo(
     () => tablePhase === 'playing' || tablePhase === 'hand_finished',
@@ -1238,8 +1691,28 @@ export function useMatchTableTransition(
   );
 
   const resolvedRoundFinished = useMemo(
-    () => Boolean(isResolvingRound || latestRoundFinished),
-    [isResolvingRound, latestRoundFinished],
+    () =>
+      Boolean(
+        isResolvingRound ||
+          hasPendingRoundResolution ||
+          closingTableCards.mine !== null ||
+          closingTableCards.opponent !== null,
+      ),
+    [
+      closingTableCards.mine,
+      closingTableCards.opponent,
+      hasPendingRoundResolution,
+      isResolvingRound,
+    ],
+  );
+
+  // PATCH A — Aggregate landing flag. Consumed by matchPage to extend the
+  // playable-UI suppression so the hand dock, "Em turno" badge, and action
+  // bar stay inert for the entire flight window — not just for the
+  // round-resolution hold.
+  const isAnyCardLandingInProgress = useMemo(
+    () => isOpponentLandingInProgress || isOwnLandingInProgress,
+    [isOpponentLandingInProgress, isOwnLandingInProgress],
   );
 
   return useMemo(
@@ -1251,11 +1724,15 @@ export function useMatchTableTransition(
       roundIntroKey,
       roundResolvedKey,
       isResolvingRound,
+      hasPendingRoundResolution,
       resolvedRoundFinished,
       isLiveTableFrame,
       displayedMyPlayedCard,
       displayedOpponentPlayedCard,
       resolvedRoundResult,
+      isOpponentLandingInProgress,
+      isOwnLandingInProgress,
+      isAnyCardLandingInProgress,
       beginHandTransition,
       beginOwnCardLaunch,
       registerIncomingPlayedCard,
@@ -1268,7 +1745,11 @@ export function useMatchTableTransition(
       closingTableCards,
       displayedMyPlayedCard,
       displayedOpponentPlayedCard,
+      hasPendingRoundResolution,
+      isAnyCardLandingInProgress,
       isLiveTableFrame,
+      isOpponentLandingInProgress,
+      isOwnLandingInProgress,
       isResolvingRound,
       launchingCardKey,
       opponentRevealKey,
@@ -1281,5 +1762,4 @@ export function useMatchTableTransition(
       stopRoundResolution,
       triggerRoundResolution,
     ],
-  );
-}
+  );}

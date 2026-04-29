@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { getSuitDisplay, isSuitRed } from '../../services/socket/socketTypes';
 import type { CardPayload, MatchStatePayload, Rank } from '../../services/socket/socketTypes';
 
@@ -14,6 +13,7 @@ type MatchPlayerHandPanelProps = {
   isMyTurn?: boolean;
   viraRank?: Rank;
   isDecisionFocus?: boolean;
+  onCardElementChange?: ((cardKey: string, element: HTMLButtonElement | null) => void) | undefined;
 };
 
 type FanMetrics = {
@@ -95,57 +95,20 @@ export function MatchPlayerHandPanel({
   tablePhase,
   launchingCardKey,
   onPlayCard,
+  isMyTurn = false,
   viraRank = '4',
   isDecisionFocus = false,
+  onCardElementChange,
 }: MatchPlayerHandPanelProps) {
   const cardCount = myCards.length;
   const bestCardIndex = getBestCardIndex(myCards, viraRank);
-  const hasPlayableHand = cardCount > 0 && canPlayCard && tablePhase === 'playing';
+  const hasPlayableHand = cardCount > 0 && canPlayCard && isMyTurn && tablePhase === 'playing';
   const hasDecisionFocusHand = cardCount > 0 && isDecisionFocus;
-  const canInspectCards = canPlayCard || isDecisionFocus;
+  const canInspectCards = isMyTurn || isDecisionFocus;
+  const hasActiveLaunch = launchingCardKey !== null;
 
-  // Patch 2 — Dealing animado.
-  //
-  // Detecta o momento em que o jogador acabou de receber uma nova mão (a
-  // contagem de cartas saltou de 0 para >0). Durante uma janela curta
-  // (~600ms) marcamos `isDealing = true`, o que faz cada carta entrar de
-  // BAIXO da tela com um stagger visível (140ms) em vez do fade-in de 25ms
-  // anterior. O resultado é a sensação de carteador distribuindo cartas, não
-  // de cartas que teleportam pra mão do jogador.
-  const previousCardCountRef = useRef<number>(cardCount);
-  const [isDealing, setIsDealing] = useState<boolean>(false);
-
-  useEffect(() => {
-    const prev = previousCardCountRef.current;
-    previousCardCountRef.current = cardCount;
-
-    // Subiu de 0 (ou menos) pra ter cartas → é uma mão nova sendo entregue.
-    if (prev === 0 && cardCount > 0) {
-      setIsDealing(true);
-      // Dura o bastante pra o último card (index 2) fazer seu spring.
-      // Stagger 140ms * 3 + spring ~320ms = ~740ms. Arredondado pra 760.
-      const timeout = window.setTimeout(() => setIsDealing(false), 760);
-      return () => window.clearTimeout(timeout);
-    }
-    return undefined;
-  }, [cardCount]);
-
-  // Cada carta recebe uma direção de origem ligeiramente diferente: a da
-  // esquerda vem de baixo-esquerda, a do meio de baixo-centro, a da direita
-  // de baixo-direita. Dá a sensação de carteador que gira o pulso.
-  const dealingOrigins = useMemo(
-    () =>
-      myCards.map((_, index) => {
-        const midpoint = (cardCount - 1) / 2;
-        const lateral = (index - midpoint) * 80;
-        return {
-          x: lateral,
-          y: 340,
-          rotate: (index - midpoint) * 14,
-        };
-      }),
-    [myCards, cardCount],
-  );
+  // Keep the hand visually stable while realtime events settle.
+  // Dealing animation should be handled in a dedicated step, not in this hot path.
 
   if (cardCount === 0 && tablePhase === 'waiting') {
     return (
@@ -228,33 +191,34 @@ export function MatchPlayerHandPanel({
           const isBestCard = index === bestCardIndex && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
           const isDecisionHeroCard = isDecisionFocus && centerDistance <= 0.5;
+          const canPlaySelectedCard = hasPlayableHand && !hasActiveLaunch;
+          const registerCardElement = (element: HTMLButtonElement | null) => {
+            onCardElementChange?.(cardKey, element);
+          };
+
+          const handleCardClick = () => {
+            if (!canPlaySelectedCard) {
+              return;
+            }
+
+            onPlayCard(card);
+          };
 
           return (
             <motion.button
+              ref={registerCardElement}
               key={cardKey}
               layoutId={cardKey}
               type="button"
-              onClick={() => onPlayCard(card)}
-              disabled={!canPlayCard || isLaunching}
-              initial={
-                isDealing
-                  ? {
-                      // Patch 2 — vem de fora da tela (baixo) com rotação
-                      // lateral, simulando carta sendo arremessada do monte.
-                      opacity: 0,
-                      y: dealingOrigins[index]?.y ?? 340,
-                      x: dealingOrigins[index]?.x ?? 0,
-                      scale: 0.68,
-                      rotate: dealingOrigins[index]?.rotate ?? 0,
-                    }
-                  : {
-                      opacity: 0,
-                      y: 22,
-                      scale: 0.95,
-                      rotate: fan.rotate,
-                      x: fan.x,
-                    }
-              }
+              onClick={handleCardClick}
+              disabled={!canPlaySelectedCard}
+              initial={{
+                opacity: 0,
+                y: 22,
+                scale: 0.95,
+                rotate: fan.rotate,
+                x: fan.x,
+              }}
               animate={{
                 opacity: isLaunching ? 0 : 1,
                 y: isLaunching ? -200 : fan.y,
@@ -268,23 +232,12 @@ export function MatchPlayerHandPanel({
                       ? 1.02
                       : 1,
               }}
-              transition={
-                isDealing
-                  ? {
-                      // Spring mais "pesado" + stagger 140ms por carta para
-                      // que cada uma seja perceptivelmente distribuída.
-                      type: 'spring',
-                      stiffness: 220,
-                      damping: 22,
-                      delay: isLaunching ? 0 : index * 0.14,
-                    }
-                  : {
-                      type: 'spring',
-                      stiffness: 300,
-                      damping: 24,
-                      delay: isLaunching ? 0 : index * 0.025,
-                    }
-              }
+              transition={{
+                type: 'spring',
+                stiffness: 300,
+                damping: 24,
+                delay: isLaunching ? 0 : index * 0.025,
+              }}
               whileHover={
                 canInspectCards && !isLaunching
                   ? {
@@ -298,13 +251,13 @@ export function MatchPlayerHandPanel({
                     }
                   : {}
               }
-              whileTap={canPlayCard && !isLaunching ? { scale: 0.985 } : {}}
+              whileTap={canPlaySelectedCard ? { scale: 0.985 } : {}}
               style={{
                 position: 'absolute',
                 bottom: 0,
                 transformOrigin: 'bottom center',
                 zIndex: isLaunching ? 220 : 30 + index,
-                cursor: canPlayCard && !isLaunching ? 'pointer' : 'default',
+                cursor: canPlaySelectedCard ? 'pointer' : 'default',
               }}
               className="relative focus:outline-none"
             >
@@ -456,3 +409,4 @@ export function MatchPlayerHandPanel({
     </div>
   );
 }
+

@@ -4,7 +4,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
+import { OpponentCardFlight } from './opponentCardFlight';
+import { PlayerCardFlight } from './playerCardFlight';
 import { TrucoDramaOverlay } from './trucoDramaOverlay';
+import { RoundClashEffects, buildKickAnimation, buildLoserKick } from './roundClashEffects';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
 import type {
   BotIdentityPayload,
@@ -17,6 +20,7 @@ import { useGameSound } from '../../hooks/useGameSound';
 
 type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 type HandStatusVariant = 'neutral' | 'success' | 'warning';
+type SlotRoundOutcome = 'win' | 'loss' | 'tie' | null;
 
 type TableSeatView = {
   seatId: string;
@@ -28,6 +32,12 @@ type TableSeatView = {
 };
 
 type RoundView = NonNullable<MatchStatePayload['currentHand']>['rounds'][number] | null;
+
+type PendingPlayedCardView = {
+  owner: 'mine' | 'opponent';
+  card: string;
+  id: number;
+};
 
 type MatchTableShellProps = {
   handStatusLabel: string;
@@ -69,6 +79,7 @@ type MatchTableShellProps = {
   myCards: CardPayload[];
   canPlayCard: boolean;
   launchingCardKey: string | null;
+  pendingPlayedCard: PendingPlayedCardView | null;
   currentPrivateHand: MatchStatePayload['currentHand'] | null;
   currentPublicHand: MatchStatePayload['currentHand'] | null;
   onPlayCard: (card: CardPayload) => void;
@@ -92,7 +103,15 @@ const SUIT_SYMBOL_MAP: Record<string, string> = {
 // may stay at 'hand_finished' (backend-authoritative) but the visual takeover
 // lifts itself so the player sees the mesa again and can click "Nova mão"
 // without a blocker.
-const CLIMAX_AUTO_DISMISS_MS = 2800;
+const CLIMAX_AUTO_DISMISS_MS = 4400;
+// NOTE: Outcome badges should read as the result of the card impact, not as
+// server-state stamped onto a card that is still settling. This longer delay
+// gives the player time to track the card landing before the result ribbon hits.
+const SETTLED_OUTCOME_BADGE_DELAY_MS = 900;
+const LOSER_DIM_DELAY_MS = 260;
+// NOTE: Patch 7 slows the combat beats without changing backend authority:
+// card settles first, then badge/clash, then hand result. This makes bot
+// speech and card outcomes readable instead of competing in the same instant.
 
 function debugMatchTableShell(event: string, details: Record<string, unknown> = {}): void {
   if (!import.meta.env.DEV) {
@@ -163,6 +182,215 @@ function getTierVisuals(tier: ValeTier) {
   }
 }
 
+
+type TableTensionVisuals = {
+  shellBorderColor: string;
+  shellBoxShadow: string;
+  feltBackground: string;
+  archTopColor: string;
+  archSideColor: string;
+  centreAmbientBackground: string;
+  pulseKey: string;
+  pulseOpacity: [number, number, number];
+  pulseScale: [number, number, number];
+  pulseDuration: number;
+  pulseBackground: string;
+};
+
+function resolveTableTensionVisuals({
+  activeValue,
+  isAwaitingBet,
+  isMaoDeOnzeTensionOpen,
+  isMaoDeOnzeDecisionPending,
+  isResolvingRound,
+  isPlayerTurn,
+}: {
+  activeValue: number;
+  isAwaitingBet: boolean;
+  isMaoDeOnzeTensionOpen: boolean;
+  isMaoDeOnzeDecisionPending: boolean;
+  isResolvingRound: boolean;
+  isPlayerTurn: boolean;
+}): TableTensionVisuals {
+  const buildShellShadow = (outerGlow: string, insetGlow: string) =>
+    `0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), ${outerGlow}, inset 0 0 220px rgba(0,0,0,0.48), ${insetGlow}, inset 0 1px 0 rgba(255,255,255,0.04)`;
+
+  const pulseTuple = (
+    first: number,
+    second: number,
+    third: number,
+  ): [number, number, number] => [first, second, third];
+
+  const baseVisuals: TableTensionVisuals = {
+    shellBorderColor: 'rgba(201,168,76,0.14)',
+    shellBoxShadow: buildShellShadow('0 0 0 rgba(201,168,76,0)', 'inset 0 0 0 rgba(201,168,76,0)'),
+    feltBackground:
+      'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(201,168,76,0.10) 0%, rgba(46,92,53,0.12) 18%, transparent 40%), radial-gradient(ellipse at 50% 55%, #10231a 0%, #0d1a16 34%, #08110f 62%, #04090a 100%)',
+    archTopColor: 'rgba(201,168,76,0.12)',
+    archSideColor: 'rgba(201,168,76,0.06)',
+    centreAmbientBackground:
+      'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 36%, transparent 68%)',
+    pulseKey: 'vale-1',
+    pulseOpacity: [0.06, 0.1, 0.06],
+    pulseScale: [0.98, 1.01, 0.98],
+    pulseDuration: 1.9,
+    pulseBackground:
+      'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 42%, transparent 70%)',
+  };
+
+  const withMomentPulse = (visuals: TableTensionVisuals): TableTensionVisuals => {
+    if (isResolvingRound) {
+      return {
+        ...visuals,
+        pulseKey: `${visuals.pulseKey}-resolving`,
+        pulseOpacity: [0.22, 0.4, 0.22],
+        pulseScale: [0.96, 1.03, 0.98],
+        pulseDuration: 1,
+        pulseBackground:
+          'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(201,168,76,0.10) 40%, transparent 72%)',
+      };
+    }
+
+    if (isAwaitingBet) {
+      return {
+        ...visuals,
+        pulseKey: `${visuals.pulseKey}-bet`,
+        pulseOpacity: activeValue >= 9 ? pulseTuple(0.22, 0.4, 0.22) : pulseTuple(0.16, 0.3, 0.16),
+        pulseScale: activeValue >= 9 ? pulseTuple(0.96, 1.055, 0.98) : pulseTuple(0.98, 1.025, 0.98),
+        pulseDuration: activeValue >= 9 ? 1.2 : 1.55,
+      };
+    }
+
+    if (isPlayerTurn) {
+      return {
+        ...visuals,
+        pulseKey: `${visuals.pulseKey}-turn`,
+        pulseOpacity: [0.1, 0.18, 0.1],
+        pulseScale: [0.98, 1.01, 0.98],
+        pulseDuration: 1.9,
+        pulseBackground:
+          'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)',
+      };
+    }
+
+    return visuals;
+  };
+
+  if (isMaoDeOnzeTensionOpen) {
+    return withMomentPulse({
+      shellBorderColor: 'rgba(255,223,128,0.24)',
+      shellBoxShadow: buildShellShadow(
+        '0 0 38px rgba(245,158,11,0.10)',
+        'inset 0 0 54px rgba(127,29,29,0.10)',
+      ),
+      feltBackground:
+        'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(245,158,11,0.18) 0%, rgba(127,29,29,0.10) 22%, transparent 44%), radial-gradient(ellipse at 50% 55%, #1d2115 0%, #101813 34%, #0a100d 62%, #040708 100%)',
+      archTopColor: 'rgba(255,223,128,0.20)',
+      archSideColor: 'rgba(245,158,11,0.08)',
+      centreAmbientBackground:
+        'radial-gradient(circle, rgba(245,158,11,0.12) 0%, rgba(127,29,29,0.06) 38%, transparent 70%)',
+      pulseKey: isMaoDeOnzeDecisionPending ? 'mao-de-onze-decision' : 'mao-de-onze-accepted',
+      pulseOpacity: isMaoDeOnzeDecisionPending
+        ? pulseTuple(0.22, 0.42, 0.22)
+        : pulseTuple(0.16, 0.28, 0.16),
+      pulseScale: [0.96, 1.06, 0.98],
+      pulseDuration: 1.35,
+      pulseBackground:
+        'radial-gradient(circle, rgba(245,158,11,0.24) 0%, rgba(127,29,29,0.10) 42%, transparent 74%)',
+    });
+  }
+
+  if (activeValue >= 12) {
+    return withMomentPulse({
+      shellBorderColor: 'rgba(254,202,202,0.25)',
+      shellBoxShadow: buildShellShadow(
+        '0 0 48px rgba(220,38,38,0.14)',
+        'inset 0 0 62px rgba(127,29,29,0.14)',
+      ),
+      feltBackground:
+        'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(248,113,113,0.18) 0%, rgba(127,29,29,0.13) 24%, transparent 46%), radial-gradient(ellipse at 50% 55%, #241615 0%, #111512 34%, #0a0f0d 62%, #040708 100%)',
+      archTopColor: 'rgba(254,202,202,0.20)',
+      archSideColor: 'rgba(248,113,113,0.08)',
+      centreAmbientBackground:
+        'radial-gradient(circle, rgba(248,113,113,0.13) 0%, rgba(127,29,29,0.07) 38%, transparent 70%)',
+      pulseKey: 'vale-12',
+      pulseOpacity: [0.14, 0.26, 0.14],
+      pulseScale: [0.96, 1.045, 0.98],
+      pulseDuration: 1.35,
+      pulseBackground:
+        'radial-gradient(circle, rgba(248,113,113,0.22) 0%, rgba(127,29,29,0.12) 42%, transparent 74%)',
+    });
+  }
+
+  if (activeValue >= 9) {
+    return withMomentPulse({
+      shellBorderColor: 'rgba(248,113,113,0.20)',
+      shellBoxShadow: buildShellShadow(
+        '0 0 40px rgba(220,38,38,0.10)',
+        'inset 0 0 54px rgba(127,29,29,0.10)',
+      ),
+      feltBackground:
+        'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(220,38,38,0.14) 0%, rgba(127,29,29,0.09) 22%, transparent 44%), radial-gradient(ellipse at 50% 55%, #1c1c14 0%, #101712 34%, #0a100d 62%, #040708 100%)',
+      archTopColor: 'rgba(248,113,113,0.16)',
+      archSideColor: 'rgba(220,38,38,0.07)',
+      centreAmbientBackground:
+        'radial-gradient(circle, rgba(220,38,38,0.10) 0%, rgba(127,29,29,0.05) 38%, transparent 70%)',
+      pulseKey: 'vale-9',
+      pulseOpacity: [0.12, 0.22, 0.12],
+      pulseScale: [0.97, 1.035, 0.98],
+      pulseDuration: 1.55,
+      pulseBackground:
+        'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.09) 42%, transparent 74%)',
+    });
+  }
+
+  if (activeValue >= 6) {
+    return withMomentPulse({
+      shellBorderColor: 'rgba(245,158,11,0.20)',
+      shellBoxShadow: buildShellShadow(
+        '0 0 34px rgba(245,158,11,0.09)',
+        'inset 0 0 48px rgba(146,64,14,0.08)',
+      ),
+      feltBackground:
+        'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(245,158,11,0.16) 0%, rgba(146,64,14,0.08) 22%, transparent 44%), radial-gradient(ellipse at 50% 55%, #182017 0%, #101913 34%, #0a110e 62%, #040708 100%)',
+      archTopColor: 'rgba(251,191,36,0.18)',
+      archSideColor: 'rgba(245,158,11,0.07)',
+      centreAmbientBackground:
+        'radial-gradient(circle, rgba(245,158,11,0.10) 0%, rgba(146,64,14,0.04) 38%, transparent 70%)',
+      pulseKey: 'vale-6',
+      pulseOpacity: [0.1, 0.18, 0.1],
+      pulseScale: [0.98, 1.025, 0.98],
+      pulseDuration: 1.8,
+      pulseBackground:
+        'radial-gradient(circle, rgba(245,158,11,0.15) 0%, rgba(146,64,14,0.06) 42%, transparent 72%)',
+    });
+  }
+
+  if (activeValue >= 3) {
+    return withMomentPulse({
+      shellBorderColor: 'rgba(255,223,128,0.18)',
+      shellBoxShadow: buildShellShadow(
+        '0 0 28px rgba(201,168,76,0.07)',
+        'inset 0 0 42px rgba(201,168,76,0.05)',
+      ),
+      feltBackground:
+        'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(201,168,76,0.14) 0%, rgba(46,92,53,0.11) 20%, transparent 42%), radial-gradient(ellipse at 50% 55%, #12251a 0%, #0d1a16 34%, #08110f 62%, #04090a 100%)',
+      archTopColor: 'rgba(255,223,128,0.15)',
+      archSideColor: 'rgba(201,168,76,0.07)',
+      centreAmbientBackground:
+        'radial-gradient(circle, rgba(201,168,76,0.08) 0%, rgba(36,78,44,0.035) 38%, transparent 70%)',
+      pulseKey: 'vale-3',
+      pulseOpacity: [0.08, 0.14, 0.08],
+      pulseScale: [0.98, 1.018, 0.98],
+      pulseDuration: 1.9,
+      pulseBackground:
+        'radial-gradient(circle, rgba(201,168,76,0.10) 0%, rgba(36,78,44,0.04) 42%, transparent 72%)',
+    });
+  }
+
+  return withMomentPulse(baseVisuals);
+}
+
 function CardShape({
   rank,
   suit,
@@ -170,6 +398,9 @@ function CardShape({
   winner = false,
   highlight = false,
   compact = false,
+  outcomeBadge = null,
+  outcomeBadgeLabel = null,
+  outcomeBadgeDelayMs = 0,
 }: {
   rank?: string;
   suit?: string;
@@ -177,9 +408,49 @@ function CardShape({
   winner?: boolean;
   highlight?: boolean;
   compact?: boolean;
+  outcomeBadge?: SlotRoundOutcome;
+  outcomeBadgeLabel?: string | null;
+  outcomeBadgeDelayMs?: number;
 }) {
   const isRed = parseSuitColor(suit ?? '');
   const symbol = suit ? SUIT_SYMBOL_MAP[suit] : '♦';
+  const resolvedOutcomeBadgeLabel =
+    outcomeBadgeLabel ??
+    // PATCH B — Default winner label localised to PT. Loser was already
+    // 'PERDEU' and tie was already 'EMPATE'; the winner fallback was the
+    // outlier in English. Any caller that wants a different word still
+    // wins via `outcomeBadgeLabel`.
+    (outcomeBadge === 'win' ? 'VENCEU' : outcomeBadge === 'loss' ? 'PERDEU' : 'EMPATE');
+  const outcomeBadgeStyles =
+    outcomeBadge === 'win'
+      ? {
+          wrapper: 'linear-gradient(135deg, #fff1b8 0%, #f2d488 38%, #c9a84c 74%, #6f4f14 100%)',
+          border: '1px solid rgba(255,241,184,0.96)',
+          shadow:
+            '0 9px 18px rgba(0,0,0,0.44), 0 0 22px rgba(242,212,136,0.68), inset 0 1px 0 rgba(255,255,255,0.52)',
+          text: '#160f03',
+          slash: 'rgba(255,255,255,0.46)',
+        }
+      : outcomeBadge === 'loss'
+        ? {
+            wrapper: 'linear-gradient(135deg, #fecaca 0%, #ef4444 38%, #991b1b 76%, #450a0a 100%)',
+            border: '1px solid rgba(254,202,202,0.80)',
+            shadow:
+              '0 8px 16px rgba(0,0,0,0.34), 0 0 16px rgba(220,38,38,0.32), inset 0 1px 0 rgba(255,255,255,0.30)',
+            text: '#fff7f7',
+            slash: 'rgba(255,255,255,0.30)',
+          }
+        : outcomeBadge === 'tie'
+          ? {
+              wrapper:
+                'linear-gradient(135deg, #f8fafc 0%, #cbd5e1 42%, #64748b 78%, #334155 100%)',
+              border: '1px solid rgba(226,232,240,0.84)',
+              shadow:
+                '0 8px 16px rgba(0,0,0,0.36), 0 0 16px rgba(148,163,184,0.36), inset 0 1px 0 rgba(255,255,255,0.52)',
+              text: '#0f172a',
+              slash: 'rgba(255,255,255,0.48)',
+            }
+          : null;
 
   if (faceDown) {
     // Face-down back with TP monogram in gold (kept from previous patch —
@@ -236,12 +507,12 @@ function CardShape({
     <motion.div
       animate={
         winner
-          ? { y: [-2, -8, -2], rotate: [0, 0.7, 0], scale: [1.02, 1.06, 1.02] }
+          ? { y: [-1, -4, -2], rotate: [0, 0.35, 0], scale: [1.01, 1.035, 1.02] }
           : highlight
             ? { y: [-1, -2, -1] }
             : {}
       }
-      transition={{ duration: 1.1, repeat: winner || highlight ? Infinity : 0 }}
+      transition={{ duration: 1.1, repeat: highlight ? Infinity : 0 }}
       className={`relative rounded-[18px] border ${
         compact ? 'h-[100px] w-[72px]' : 'h-[162px] w-[116px]'
       }`}
@@ -249,7 +520,7 @@ function CardShape({
         background: 'linear-gradient(180deg, #fefdf8 0%, #f8f5ec 50%, #f5f0e4 100%)',
         borderColor: winner ? 'rgba(255,223,128,0.92)' : 'rgba(0,0,0,0.14)',
         boxShadow: winner
-          ? '0 0 52px rgba(201,168,76,0.58), 0 0 20px rgba(255,223,128,0.44), 0 28px 44px rgba(0,0,0,0.40)'
+          ? '0 0 0 1px rgba(255,223,128,0.66), 0 0 18px rgba(201,168,76,0.26), 0 24px 38px rgba(0,0,0,0.38)'
           : highlight
             ? '0 0 16px rgba(201,168,76,0.14), 0 20px 36px rgba(0,0,0,0.32)'
             : '0 6px 14px rgba(0,0,0,0.30), 0 18px 34px rgba(0,0,0,0.36)',
@@ -257,12 +528,12 @@ function CardShape({
     >
       {winner ? (
         <motion.div
-          className="pointer-events-none absolute inset-0 rounded-[16px]"
-          animate={{ opacity: [0.22, 0.5, 0.22] }}
-          transition={{ duration: 0.95, repeat: Infinity }}
+          className="pointer-events-none absolute inset-[3px] rounded-[15px]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.2 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
           style={{
-            background:
-              'radial-gradient(circle at 50% 45%, rgba(255,223,128,0.52), transparent 72%)',
+            background: 'linear-gradient(135deg, rgba(255,223,128,0.18), rgba(201,168,76,0.04))',
           }}
         />
       ) : null}
@@ -299,6 +570,53 @@ function CardShape({
           {symbol}
         </span>
       </div>
+
+      {outcomeBadge && outcomeBadgeStyles ? (
+        <motion.div
+          aria-hidden
+          className={`pointer-events-none absolute z-30 rounded-full ${
+            compact ? '-right-2 -top-2 px-2.5 py-1' : '-right-4 -top-4 px-3.5 py-1.5'
+          }`}
+          initial={{ opacity: 0, scale: 0.74, y: 8, rotate: outcomeBadge === 'loss' ? -8 : 8 }}
+          animate={{
+            opacity: 1,
+            scale: [0.86, 1.12, 1],
+            y: 0,
+            rotate: outcomeBadge === 'loss' ? -5 : 5,
+          }}
+          transition={{
+            duration: 0.44,
+            delay: outcomeBadgeDelayMs / 1000,
+            times: [0, 0.58, 1],
+            ease: [0.2, 0.9, 0.24, 1],
+          }}
+          style={{
+            background: outcomeBadgeStyles.wrapper,
+            border: outcomeBadgeStyles.border,
+            boxShadow: outcomeBadgeStyles.shadow,
+          }}
+        >
+          <span
+            className={`relative z-10 font-black uppercase leading-none ${
+              compact ? 'text-[8px] tracking-[0.16em]' : 'text-[10px] tracking-[0.20em]'
+            }`}
+            style={{
+              color: outcomeBadgeStyles.text,
+              fontFamily: 'Georgia, serif',
+              textShadow:
+                outcomeBadge === 'loss'
+                  ? '0 1px 0 rgba(0,0,0,0.24)'
+                  : '0 1px 0 rgba(255,255,255,0.30)',
+            }}
+          >
+            {resolvedOutcomeBadgeLabel}
+          </span>
+          <span
+            className="pointer-events-none absolute left-1/2 top-0 h-full w-[1px] -rotate-[24deg]"
+            style={{ background: outcomeBadgeStyles.slash }}
+          />
+        </motion.div>
+      ) : null}
     </motion.div>
   );
 }
@@ -346,24 +664,290 @@ function resolveProfileLabel(profile: string): string {
   return BOT_PROFILE_LABELS[profile] ?? profile;
 }
 
-function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent: boolean }) {
+type BotPresenceTone = 'idle' | 'thinking' | 'pressure' | 'maoDeOnze' | 'wonRound' | 'lostRound';
+
+type BotPresenceHold = {
+  line: string;
+  quote: string | null;
+  tone: BotPresenceTone;
+  id: number;
+};
+
+const BOT_THINKING_LINES: Record<string, string> = {
+  balanced: 'Lendo a mesa',
+  aggressive: 'Preparando pressão',
+  cautious: 'Calculando a mão',
+};
+
+const BOT_PRESSURE_LINES: Record<string, string> = {
+  balanced: 'Colocou pressão',
+  aggressive: 'Veio pra cima',
+  cautious: 'Escolheu a queda',
+};
+
+const BOT_THINKING_QUOTES: Record<string, string> = {
+  balanced: 'Deixa eu ler essa mesa.',
+  aggressive: 'Vou apertar essa mão.',
+  cautious: 'Sem pressa. Vou calcular.',
+};
+
+const BOT_PRESSURE_QUOTES: Record<string, string> = {
+  balanced: 'Quero ver essa resposta.',
+  aggressive: 'Truco. Quero ver.',
+  cautious: 'Se é pra cair, cai direito.',
+};
+
+function resolveBotPresenceLine({
+  seat,
+  tone,
+  currentValue,
+}: {
+  seat: TableSeatView | null;
+  tone: BotPresenceTone;
+  currentValue: number;
+}): string | null {
+  if (!seat?.isBot) {
+    return null;
+  }
+
+  const profile = seat.botIdentity?.profile ?? 'balanced';
+
+  if (tone === 'thinking') {
+    return BOT_THINKING_LINES[profile] ?? 'Pensando a jogada';
+  }
+
+  if (tone === 'pressure') {
+    if (currentValue >= 9) {
+      return 'Quer decidir agora';
+    }
+
+    if (currentValue >= 6) {
+      return 'Mesa esquentou';
+    }
+
+    return BOT_PRESSURE_LINES[profile] ?? 'Colocou pressão';
+  }
+
+  if (tone === 'maoDeOnze') {
+    return 'Sentiu a queda';
+  }
+
+  if (tone === 'wonRound') {
+    return 'Levou a rodada';
+  }
+
+  if (tone === 'lostRound') {
+    return 'Sentiu o golpe';
+  }
+
+  if (currentValue >= 9) {
+    return 'Mesa quente';
+  }
+
+  if (currentValue >= 6) {
+    return 'Aposta alta';
+  }
+
+  return null;
+}
+
+function resolveBotPresenceQuote({
+  seat,
+  tone,
+  currentValue,
+}: {
+  seat: TableSeatView | null;
+  tone: BotPresenceTone;
+  currentValue: number;
+}): string | null {
+  if (!seat?.isBot || tone === 'idle') {
+    return null;
+  }
+
+  const profile = seat.botIdentity?.profile ?? 'balanced';
+
+  if (tone === 'thinking') {
+    return BOT_THINKING_QUOTES[profile] ?? 'Pensando a jogada.';
+  }
+
+  if (tone === 'pressure') {
+    if (currentValue >= 9) {
+      return 'Agora quero ver segurar.';
+    }
+
+    return BOT_PRESSURE_QUOTES[profile] ?? 'Coloquei pressão.';
+  }
+
+  if (tone === 'maoDeOnze') {
+    return 'Agora é queda.';
+  }
+
+  if (tone === 'wonRound') {
+    return 'Essa ficou comigo.';
+  }
+
+  if (tone === 'lostRound') {
+    return 'Boa. Ainda tem jogo.';
+  }
+
+  return null;
+}
+
+function getBotPresenceVisuals(tone: BotPresenceTone) {
+  switch (tone) {
+    case 'thinking':
+      return {
+        background: 'linear-gradient(180deg, rgba(47,35,17,0.96), rgba(15,20,16,0.90))',
+        border: '1px solid rgba(255,223,128,0.42)',
+        dot: '#f2d488',
+        dotGlow: '0 0 14px rgba(242,212,136,0.66)',
+        text: '#f6dfa0',
+        quoteBorder: 'rgba(255,223,128,0.28)',
+        quoteBackground:
+          'linear-gradient(180deg, rgba(32,25,14,0.94), rgba(10,14,12,0.90))',
+      };
+    case 'pressure':
+      return {
+        background: 'linear-gradient(180deg, rgba(69,18,18,0.94), rgba(20,13,11,0.90))',
+        border: '1px solid rgba(248,113,113,0.38)',
+        dot: '#f59e0b',
+        dotGlow: '0 0 16px rgba(245,158,11,0.68)',
+        text: '#fed7aa',
+        quoteBorder: 'rgba(248,113,113,0.32)',
+        quoteBackground:
+          'linear-gradient(180deg, rgba(73,22,18,0.94), rgba(14,10,9,0.92))',
+      };
+    case 'maoDeOnze':
+      return {
+        background: 'linear-gradient(180deg, rgba(73,43,12,0.94), rgba(18,14,9,0.90))',
+        border: '1px solid rgba(255,223,128,0.36)',
+        dot: '#e8c76a',
+        dotGlow: '0 0 14px rgba(232,199,106,0.58)',
+        text: '#f2d488',
+        quoteBorder: 'rgba(255,223,128,0.28)',
+        quoteBackground:
+          'linear-gradient(180deg, rgba(68,43,14,0.94), rgba(14,11,8,0.92))',
+      };
+    case 'wonRound':
+      return {
+        background: 'linear-gradient(180deg, rgba(75,46,15,0.96), rgba(18,16,10,0.90))',
+        border: '1px solid rgba(255,223,128,0.42)',
+        dot: '#f2d488',
+        dotGlow: '0 0 16px rgba(242,212,136,0.64)',
+        text: '#fff1b8',
+        quoteBorder: 'rgba(255,223,128,0.30)',
+        quoteBackground:
+          'linear-gradient(180deg, rgba(52,37,14,0.94), rgba(10,12,10,0.92))',
+      };
+    case 'lostRound':
+      return {
+        background: 'linear-gradient(180deg, rgba(33,43,38,0.94), rgba(10,16,15,0.90))',
+        border: '1px solid rgba(148,163,184,0.26)',
+        dot: '#94a3b8',
+        dotGlow: '0 0 12px rgba(148,163,184,0.34)',
+        text: '#cbd5e1',
+        quoteBorder: 'rgba(148,163,184,0.22)',
+        quoteBackground:
+          'linear-gradient(180deg, rgba(23,31,31,0.94), rgba(8,12,12,0.92))',
+      };
+    case 'idle':
+    default:
+      return {
+        background: 'linear-gradient(180deg, rgba(22,30,24,0.92), rgba(10,18,14,0.86))',
+        border: '1px solid rgba(255,255,255,0.10)',
+        dot: 'rgba(148,163,184,0.55)',
+        dotGlow: 'none',
+        text: 'rgba(232,213,160,0.58)',
+        quoteBorder: 'rgba(255,255,255,0.10)',
+        quoteBackground: 'linear-gradient(180deg, rgba(11,16,14,0.88), rgba(5,8,8,0.86))',
+      };
+  }
+}
+
+// PATCH G — Dynamic OpponentCluster with lift-off exit.
+//
+// Before: the cluster always rendered three face-down TP cards regardless
+// of how many the bot actually had left. The bot played a card → the
+// OpponentCardFlight clone flew from the cluster's geometric center to the
+// played slot, but the cluster itself never reacted. Visually it looked
+// like the card was being conjured from thin air.
+//
+// After: the cluster renders exactly `cardsRemaining` cards. When the bot
+// plays a card, the count drops by 1, AnimatePresence runs an "exit"
+// animation on the rightmost card (lift-off + fade + slight rotate), and
+// the OpponentCardFlight clone simultaneously flies from the cached source
+// rect to the played slot. Two animations on the same frame, one source
+// of truth: the cluster acts like a real hand, the table catches the card.
+//
+// Important about timing: OpponentCardFlight captures the source ref's
+// getBoundingClientRect() inside a useLayoutEffect when activeFlight kicks
+// off. That happens on the SAME render tick as the count drop. The flight
+// reads the rect of the still-3-wide cluster — so the clone always emerges
+// from the position where the card LEFT, not from the new shrunken
+// geometry. This is intentional: it preserves the physical illusion.
+//
+// The rounds[] array on currentPublicHand carries playerOneCard /
+// playerTwoCard per round (null if not yet played). Counting how many of
+// those are non-null on the OPPONENT side gives an exact "cards played"
+// count, which we subtract from the starting hand size of 3.
+function OpponentCluster({
+  seat,
+  cardsRemaining,
+  isOpponent,
+  presenceLine = null,
+  presenceQuote = null,
+  presenceTone = 'idle',
+  suppressNeutralProfile = false,
+}: {
+  seat: TableSeatView;
+  cardsRemaining: number;
+  isOpponent: boolean;
+  presenceLine?: string | null;
+  presenceQuote?: string | null;
+  presenceTone?: BotPresenceTone;
+  suppressNeutralProfile?: boolean;
+}) {
+  // Defensive clamp — never render negative, never render more than the
+  // starting hand size. The "playing" indicator should always be 0–3.
+  const safeCount = Math.max(0, Math.min(3, cardsRemaining));
+  const cardIndices = Array.from({ length: safeCount }, (_, index) => index);
+
   const isCurrentTurn = seat.isCurrentTurn;
   const displayName = seat.isMine ? 'Você' : (seat.botIdentity?.displayName ?? seat.seatId);
   const avatar = resolveSeatAvatar(seat, displayName);
   const profileLabel =
     seat.isBot && seat.botIdentity ? resolveProfileLabel(seat.botIdentity.profile) : null;
+  const presenceVisuals = getBotPresenceVisuals(presenceTone);
+  const shouldShowPresenceLine = presenceLine !== null;
+  const shouldShowPresenceQuote = presenceQuote !== null;
+  const shouldPulsePresence = presenceTone !== 'idle';
+  // NOTE: Dynamic speech should read like the bot's current state, not like
+  // a second identity label. Keep the profile label only in neutral moments;
+  // when the bot speaks, the avatar pill already owns the character name.
+  const statusLabel = shouldShowPresenceLine
+    ? presenceLine
+    : suppressNeutralProfile
+      ? null
+      : profileLabel;
 
   return (
     <div className="flex flex-col items-center gap-1.5">
       <motion.div
-        animate={isCurrentTurn ? { scale: [1, 1.015, 1] } : {}}
-        transition={{ duration: 2.2, repeat: isCurrentTurn ? Infinity : 0 }}
+        animate={
+          shouldPulsePresence
+            ? { scale: [1, 1.018, 1], y: [0, -1, 0] }
+            : isCurrentTurn
+              ? { scale: [1, 1.015, 1] }
+              : {}
+        }
+        transition={{
+          duration: shouldPulsePresence ? 1.35 : 2.2,
+          repeat: shouldPulsePresence || isCurrentTurn ? Infinity : 0,
+        }}
         className="relative flex items-center gap-2.5 rounded-full px-3.5 py-1.5 backdrop-blur-xl"
         style={{
-          background: 'linear-gradient(180deg, rgba(22,30,24,0.92), rgba(10,18,14,0.86))',
-          border: isCurrentTurn
-            ? '1px solid rgba(230,195,100,0.52)'
-            : '1px solid rgba(255,255,255,0.10)',
+          background: presenceVisuals.background,
+          border: isCurrentTurn ? presenceVisuals.border : '1px solid rgba(255,255,255,0.10)',
           boxShadow: isCurrentTurn
             ? '0 0 24px rgba(230,195,100,0.22), 0 14px 30px rgba(0,0,0,0.48)'
             : '0 14px 30px rgba(0,0,0,0.44)',
@@ -395,42 +979,108 @@ function OpponentCluster({ seat, isOpponent }: { seat: TableSeatView; isOpponent
           {displayName}
         </span>
 
-        <span
+        <motion.span
           className="relative z-10 h-2.5 w-2.5 rounded-full"
+          animate={shouldPulsePresence ? { opacity: [0.62, 1, 0.62], scale: [1, 1.22, 1] } : {}}
+          transition={{ duration: 1.1, repeat: shouldPulsePresence ? Infinity : 0 }}
           style={{
             background: seat.isBot
-              ? 'rgba(148,163,184,0.55)'
+              ? presenceVisuals.dot
               : isCurrentTurn
                 ? '#22c55e'
                 : 'rgba(148,163,184,0.42)',
-            boxShadow: isCurrentTurn ? '0 0 10px rgba(34,197,94,0.64)' : 'none',
+            boxShadow: seat.isBot
+              ? presenceVisuals.dotGlow
+              : isCurrentTurn
+                ? '0 0 10px rgba(34,197,94,0.64)'
+                : 'none',
           }}
         />
       </motion.div>
 
-      {profileLabel ? (
-        <span
-          className="text-[9px] font-bold uppercase leading-none tracking-[0.22em]"
-          style={{
-            color: 'rgba(232,213,160,0.52)',
-            fontFamily: 'Georgia, serif',
-          }}
-        >
-          {profileLabel}
-        </span>
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        {[0, 1, 2].map((index) => (
+      <AnimatePresence mode="popLayout">
+        {statusLabel || shouldShowPresenceQuote ? (
           <motion.div
-            key={index}
-            initial={{ opacity: 0, y: -8, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
-            animate={{ opacity: 1, y: 0, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
-            transition={{ delay: index * 0.06 }}
+            key={String(presenceTone) + '-' + String(statusLabel ?? 'profile') + '-' + String(presenceQuote ?? 'no-quote')}
+            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.96 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className={`pointer-events-none max-w-[270px] rounded-[16px] border text-center ${
+              shouldShowPresenceQuote ? 'px-3.5 py-2' : 'px-3 py-1.5'
+            }`}
+            style={{
+              background: shouldShowPresenceQuote
+                ? presenceVisuals.quoteBackground
+                : shouldShowPresenceLine
+                  ? presenceVisuals.quoteBackground
+                  : 'rgba(0,0,0,0.16)',
+              borderColor: shouldShowPresenceQuote
+                ? presenceVisuals.quoteBorder
+                : shouldShowPresenceLine
+                  ? presenceVisuals.quoteBorder
+                  : 'rgba(255,223,128,0.12)',
+              boxShadow: shouldPulsePresence
+                ? '0 16px 28px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.06)'
+                : '0 10px 20px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
+              backdropFilter: 'blur(12px)',
+            }}
           >
-            <CardShape faceDown compact />
+            {statusLabel ? (
+              <div
+                className="text-[9px] font-black uppercase leading-none tracking-[0.20em]"
+                style={{
+                  color: shouldShowPresenceLine ? presenceVisuals.text : 'rgba(232,213,160,0.52)',
+                  fontFamily: 'Georgia, serif',
+                }}
+              >
+                {statusLabel}
+              </div>
+            ) : null}
+
+            {shouldShowPresenceQuote ? (
+              <div
+                className={`${statusLabel ? 'mt-1.5' : ''} text-[10px] font-black uppercase leading-tight tracking-[0.14em]`}
+                style={{ color: presenceVisuals.text, fontFamily: 'Georgia, serif' }}
+              >
+                “{presenceQuote}”
+              </div>
+            ) : null}
           </motion.div>
-        ))}
+        ) : null}
+      </AnimatePresence>
+      {/* Cards row.
+          - layout="position" so the remaining cards smoothly close the
+            gap left by the played one (Framer's automatic FLIP).
+          - AnimatePresence with custom exit so the rightmost card lifts
+            off (y: -22, scale: 1.06, slight rotate) and fades, mirroring
+            a real-world "throw to the table" flick.
+          - The flight clone in OpponentCardFlight starts simultaneously
+            and overshoots toward the played slot — the two animations
+            read as one continuous gesture.
+          - min-h preserved so the cluster row doesn't collapse to 0
+            while exit-animating. */}
+      <div className="flex min-h-[64px] items-center gap-2">
+        <AnimatePresence initial={false}>
+          {cardIndices.map((index) => (
+            <motion.div
+              key={`opponent-card-${index}`}
+              layout="position"
+              initial={{ opacity: 0, y: -8, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
+              animate={{ opacity: 1, y: 0, rotate: index === 0 ? -5 : index === 2 ? 5 : 0 }}
+              exit={{
+                opacity: 0,
+                y: -22,
+                scale: 1.06,
+                rotate: index === 0 ? -10 : index === 2 ? 10 : -2,
+                transition: { duration: 0.28, ease: [0.4, 0, 0.6, 1] },
+              }}
+              transition={{ delay: index * 0.06 }}
+            >
+              <CardShape faceDown compact />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
       <div
@@ -781,9 +1431,13 @@ type PlayedSlotProps = {
   isFading: boolean;
   rotation: number;
   isLaunching?: boolean;
+  isCoveredByFlight?: boolean;
   hideEmpty?: boolean;
   winnerBadgeLabel?: string | null;
+  loserBadgeLabel?: string | null;
   isTieHighlight?: boolean;
+  isLoser?: boolean;
+  showOutcomeBadge?: boolean;
 };
 
 // CHANGE (issues C & D):
@@ -797,6 +1451,196 @@ type PlayedSlotProps = {
 //      "EMPATE" badge in silver/slate tones, same mechanical placement as
 //      WIN but on BOTH played cards simultaneously so the player sees that
 //      neither card won.
+function resolveSlotRoundOutcome(params: {
+  roundResult: string | null;
+  playerId: 'P1' | 'P2' | null;
+  canShow: boolean;
+}): SlotRoundOutcome {
+  const { roundResult, playerId, canShow } = params;
+
+  if (!canShow || !roundResult || !playerId) {
+    return null;
+  }
+
+  if (roundResult === 'TIE') {
+    return 'tie';
+  }
+
+  if (roundResult === playerId) {
+    return 'win';
+  }
+
+  if (roundResult === 'P1' || roundResult === 'P2') {
+    return 'loss';
+  }
+
+  return null;
+}
+
+function formatRoundVerdictCard(card: { rank: string; suit: string } | null): string {
+  if (!card) {
+    return '—';
+  }
+
+  return `${card.rank}${SUIT_SYMBOL_MAP[card.suit] ?? ''}`;
+}
+
+function RoundClashVerdict({
+  outcome,
+  myCard,
+  opponentCard,
+}: {
+  outcome: SlotRoundOutcome;
+  myCard: { rank: string; suit: string } | null;
+  opponentCard: { rank: string; suit: string } | null;
+}) {
+  if (!outcome || !myCard || !opponentCard) {
+    return null;
+  }
+
+  const myCardLabel = formatRoundVerdictCard(myCard);
+  const opponentCardLabel = formatRoundVerdictCard(opponentCard);
+  const isViewerWin = outcome === 'win';
+  const isViewerLoss = outcome === 'loss';
+  const isTie = outcome === 'tie';
+  const leftAccent = isViewerLoss
+    ? 'rgba(255,223,128,0.86)'
+    : isTie
+      ? 'rgba(203,213,225,0.66)'
+      : 'rgba(248,113,113,0.62)';
+  const rightAccent = isViewerWin
+    ? 'rgba(255,223,128,0.86)'
+    : isTie
+      ? 'rgba(203,213,225,0.66)'
+      : 'rgba(248,113,113,0.62)';
+  const verdictTitle = isViewerWin ? 'Rodada sua' : isViewerLoss ? 'Rodada deles' : 'Empate';
+  const verdictDetail = isViewerWin
+    ? `${myCardLabel} venceu ${opponentCardLabel}`
+    : isViewerLoss
+      ? `${opponentCardLabel} venceu ${myCardLabel}`
+      : `${myCardLabel} e ${opponentCardLabel} se equivaleram`;
+  const titleColor = isViewerWin ? '#f8e7b4' : isViewerLoss ? '#ffd6cf' : '#e2e8f0';
+  const crownColor = isTie ? '#cbd5e1' : '#f2d488';
+
+  return (
+    <motion.div
+      // PATCH E — surface the round verdict to assistive tech. The textual
+      // content (verdictTitle + verdictDetail) is meaningful — it tells the
+      // user who won the round and with which cards. Polite, not assertive,
+      // so it doesn't interrupt the truco drama announcement if both happen
+      // in quick succession.
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.48, ease: [0.2, 0.9, 0.24, 1] }}
+      className="pointer-events-none absolute left-1/2 top-1/2 z-[18] h-[226px] w-[392px] -translate-x-1/2 -translate-y-1/2"
+    >
+      <motion.div
+        className="absolute left-1/2 top-[38%] h-[190px] w-[390px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        initial={{ opacity: 0, scale: 0.78 }}
+        animate={{ opacity: [0.22, 0.58, 0.34], scale: [0.86, 1.12, 0.98] }}
+        transition={{ duration: 1.35, ease: [0.2, 0.9, 0.24, 1] }}
+        style={{
+          background: isTie
+            ? 'radial-gradient(circle, rgba(203,213,225,0.18) 0%, rgba(71,85,105,0.10) 38%, transparent 72%)'
+            : 'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(127,29,29,0.16) 36%, transparent 74%)',
+          filter: 'blur(22px)',
+        }}
+      />
+
+      <motion.div
+        className="absolute left-1/2 top-[37%] h-[3px] w-[390px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        initial={{ opacity: 0, scaleX: 0.12 }}
+        animate={{ opacity: [0.18, 1, 0.62], scaleX: [0.22, 1.12, 1] }}
+        transition={{ duration: 0.98, ease: [0.2, 0.9, 0.24, 1] }}
+        style={{
+          background: `linear-gradient(90deg, transparent 0%, ${leftAccent} 19%, rgba(255,244,214,0.96) 50%, ${rightAccent} 81%, transparent 100%)`,
+          boxShadow: '0 0 22px rgba(255,223,128,0.38), 0 0 30px rgba(248,113,113,0.20)',
+        }}
+      />
+
+      <motion.div
+        className="absolute left-1/2 top-[37%] flex h-[60px] w-[60px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
+        initial={{ opacity: 0, scale: 0.68, rotate: -18 }}
+        animate={{ opacity: 1, scale: [0.78, 1.18, 1], rotate: 0 }}
+        transition={{ duration: 0.9, ease: [0.2, 0.9, 0.24, 1] }}
+        style={{
+          background:
+            'radial-gradient(circle at 35% 25%, rgba(255,244,214,0.34) 0%, rgba(18,16,11,0.96) 42%, rgba(7,9,8,0.98) 100%)',
+          border: '1px solid rgba(255,223,128,0.66)',
+          boxShadow:
+            '0 0 28px rgba(255,223,128,0.30), 0 16px 34px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.22)',
+        }}
+      >
+        <span
+          className="text-[16px] font-black uppercase tracking-[0.08em]"
+          style={{
+            color: '#f8e7b4',
+            fontFamily: 'Georgia, serif',
+            textShadow: '0 2px 8px rgba(0,0,0,0.44)',
+          }}
+        >
+          VS
+        </span>
+      </motion.div>
+
+      <motion.div
+        className="absolute left-1/2 top-[72%] -translate-x-1/2 -translate-y-1/2 text-center"
+        initial={{ opacity: 0, y: 14, scale: 0.94 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.66, delay: 0.24, ease: [0.2, 0.9, 0.24, 1] }}
+      >
+        <div className="relative px-5 py-3">
+          <div
+            className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent, rgba(255,223,128,0.42), transparent)',
+            }}
+          />
+
+          <div
+            className="relative rounded-full px-6 py-2.5"
+            style={{
+              background: 'linear-gradient(180deg, rgba(9,13,12,0.88) 0%, rgba(3,6,7,0.76) 100%)',
+              border: '1px solid rgba(255,223,128,0.26)',
+              boxShadow: '0 16px 34px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.07)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <div
+              className="absolute left-1/2 top-[-14px] -translate-x-1/2 text-[18px] leading-none"
+              style={{ color: crownColor, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.48))' }}
+            >
+              {isTie ? '◆' : '♛'}
+            </div>
+
+            <p
+              className="text-[16px] font-black uppercase tracking-[0.22em]"
+              style={{
+                color: titleColor,
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 2px 10px rgba(0,0,0,0.34)',
+              }}
+            >
+              {verdictTitle}
+            </p>
+            <p
+              className="mt-1 text-[12px] font-bold tracking-[0.08em]"
+              style={{ color: 'rgba(240,230,211,0.80)' }}
+            >
+              {verdictDetail}
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function PlayedSlot({
   label = '',
   card,
@@ -805,61 +1649,198 @@ function PlayedSlot({
   isFading,
   rotation,
   isLaunching = false,
+  isCoveredByFlight = false,
   hideEmpty = false,
   winnerBadgeLabel = null,
+  loserBadgeLabel = null,
   isTieHighlight = false,
+  isLoser = false,
+  showOutcomeBadge = true,
 }: PlayedSlotProps) {
   const shouldRenderCard = Boolean(card) || !hideEmpty;
-  const showWinnerBadge = Boolean(card && isWinner && winnerBadgeLabel);
-  const showTieBadge = Boolean(card && isTieHighlight && !isWinner);
+  const renderedCard = card;
+  const shouldRenderVisibleCard = renderedCard !== null;
+  const shouldShowSettledCard = !isCoveredByFlight;
+  const showWinnerEffects = shouldShowSettledCard && Boolean(renderedCard && isWinner);
+  const showTieEffects =
+    shouldShowSettledCard && Boolean(renderedCard && isTieHighlight && !isWinner);
+  const showLoserEffects =
+    shouldShowSettledCard && Boolean(renderedCard && isLoser && !isWinner && !isTieHighlight);
+  const nativeOutcomeBadge: SlotRoundOutcome = showOutcomeBadge
+    ? showWinnerEffects
+      ? 'win'
+      : showTieEffects
+        ? 'tie'
+        : showLoserEffects
+          ? 'loss'
+          : null
+    : null;
+  const nativeOutcomeBadgeLabel =
+    nativeOutcomeBadge === 'win'
+      ? winnerBadgeLabel
+      : nativeOutcomeBadge === 'loss'
+        ? loserBadgeLabel
+        : nativeOutcomeBadge === 'tie'
+          ? 'EMPATE'
+          : null;
+  const cardIdentity = `${renderedCard?.rank ?? 'empty'}${renderedCard?.suit ?? ''}`;
+  const slotRevealAnimationKey = `${cardIdentity}-${revealKey}`;
+  const wasCoveredByFlightRef = useRef(false);
+  const [flightReleaseSettleKey, setFlightReleaseSettleKey] = useState(0);
+
+  useEffect(() => {
+    if (wasCoveredByFlightRef.current && !isCoveredByFlight && shouldRenderVisibleCard) {
+      setFlightReleaseSettleKey((current) => current + 1);
+    }
+
+    wasCoveredByFlightRef.current = isCoveredByFlight;
+  }, [cardIdentity, isCoveredByFlight, shouldRenderVisibleCard]);
+
+  const hasJustReleasedFromFlight = flightReleaseSettleKey > 0 && shouldShowSettledCard;
+  const shouldPlayFlightReleaseSettle = hasJustReleasedFromFlight && !showWinnerEffects;
+  const slotMotionKey = `${slotRevealAnimationKey}-${flightReleaseSettleKey}`;
+
   void label;
+  void isLaunching;
 
   return (
     <div className="relative flex min-w-[188px] flex-col items-center">
       <div className="relative flex h-[190px] w-[164px] items-center justify-center">
-        {isTieHighlight && !isWinner ? (
+        {showTieEffects ? (
           <div
-            className="pointer-events-none absolute inset-x-2 top-5 z-10 h-16 rounded-full"
+            className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-20 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full"
             style={{
               background:
-                'radial-gradient(circle at 50% 50%, rgba(203,213,225,0.22) 0%, transparent 72%)',
-              filter: 'blur(10px)',
+                'radial-gradient(circle at 50% 50%, rgba(203,213,225,0.18) 0%, transparent 72%)',
+              filter: 'blur(14px)',
+            }}
+          />
+        ) : null}
+
+        {showWinnerEffects ? (
+          <motion.div
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-24 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full"
+            initial={false}
+            animate={{ opacity: [0.2, 0.52, 0.3], scale: [0.82, 1.24, 1.08] }}
+            transition={{ duration: 0.82, ease: [0.2, 0.9, 0.24, 1] }}
+            style={{
+              background:
+                'radial-gradient(circle at 50% 50%, rgba(255,230,150,0.38) 0%, rgba(201,168,76,0.18) 44%, transparent 78%)',
+              filter: 'blur(22px)',
             }}
           />
         ) : null}
 
         {shouldRenderCard ? (
           <motion.div
-            key={`${card?.rank ?? 'empty'}${card?.suit ?? ''}-${revealKey}`}
-            initial={{ opacity: 0, y: isLaunching ? 34 : 12, scale: 0.92, rotate: rotation }}
-            animate={{
-              opacity: isFading ? 0.72 : 1,
-              y: isWinner ? -8 : 0,
-              scale: isWinner ? 1.08 : 1.04,
-              rotate: rotation,
-            }}
-            transition={{
-              duration: isWinner ? 0.28 : 0.22,
-              ease: 'easeOut',
-            }}
-            className="relative"
+            key={slotMotionKey}
+            initial={
+              isCoveredByFlight
+                ? false
+                : hasJustReleasedFromFlight
+                  ? {
+                      opacity: 1,
+                      y: showWinnerEffects ? -8 : showLoserEffects ? 12 : 0,
+                      scale: showWinnerEffects ? 1.08 : showLoserEffects ? 0.88 : 1.02,
+                      rotate: rotation,
+                      rotateY: 0,
+                    }
+                  : {
+                      opacity: 0,
+                      y: 10,
+                      scale: 0.96,
+                      rotate: rotation,
+                      rotateY: 22,
+                    }
+            }
+            animate={
+              showWinnerEffects
+                ? {
+                    opacity: 1,
+                    y: [-4, -16, -10],
+                    scale: [1.04, 1.18, 1.12],
+                    rotate: [rotation, rotation + 0.9, rotation + 0.24],
+                    rotateY: 0,
+                  }
+                : {
+                    opacity: shouldShowSettledCard ? (isFading || isLoser ? 0.42 : 1) : 0,
+                    y: shouldPlayFlightReleaseSettle
+                      ? [8, -5, 0]
+                      : isLoser && shouldShowSettledCard
+                        ? 13
+                        : 0,
+                    scale: shouldPlayFlightReleaseSettle
+                      ? [0.96, 1.055, 1.02]
+                      : isFading || isLoser
+                        ? 0.87
+                        : 1.02,
+                    rotate: shouldPlayFlightReleaseSettle
+                      ? [rotation - 3, rotation + 1.2, rotation]
+                      : rotation,
+                    rotateY: shouldPlayFlightReleaseSettle ? [18, 0, 0] : 0,
+                  }
+            }
+            transition={
+              showWinnerEffects
+                ? {
+                    duration: 1.16,
+                    times: [0, 0.44, 1],
+                    ease: [0.2, 0.9, 0.24, 1],
+                  }
+                : {
+                    duration: isCoveredByFlight
+                      ? 0.04
+                      : shouldPlayFlightReleaseSettle
+                        ? 0.42
+                        : showLoserEffects
+                          ? 0.48
+                          : 0.28,
+                    delay: showLoserEffects ? LOSER_DIM_DELAY_MS / 1000 : 0,
+                    ease: [0.2, 0.9, 0.24, 1],
+                  }
+            }
+            className="relative z-10"
             style={{
-              filter: isWinner
-                ? 'drop-shadow(0 0 32px rgba(201,168,76,0.52))'
-                : isTieHighlight
-                  ? 'drop-shadow(0 0 14px rgba(148,163,184,0.24))'
-                  : 'drop-shadow(0 14px 22px rgba(0,0,0,0.26))',
+              pointerEvents: isCoveredByFlight ? 'none' : 'auto',
+              filter: showWinnerEffects
+                ? 'drop-shadow(0 0 34px rgba(255,230,150,0.74)) drop-shadow(0 24px 34px rgba(0,0,0,0.42))'
+                : showTieEffects
+                  ? 'drop-shadow(0 0 14px rgba(148,163,184,0.28))'
+                  : isFading || showLoserEffects
+                    ? 'grayscale(0.72) saturate(0.46) brightness(0.58) drop-shadow(0 3px 6px rgba(0,0,0,0.20))'
+                    : 'drop-shadow(0 12px 18px rgba(0,0,0,0.22))',
+              transition: showLoserEffects
+                ? `filter 520ms cubic-bezier(0.2, 0.9, 0.24, 1) ${LOSER_DIM_DELAY_MS}ms`
+                : undefined,
             }}
           >
-            {card ? (
+            {shouldRenderVisibleCard ? (
               <>
-                {isWinner ? (
-                  <div
-                    className="pointer-events-none absolute -inset-3 rounded-[24px]"
+                {showWinnerEffects ? (
+                  <motion.div
+                    className="pointer-events-none absolute left-1/2 top-1/2 h-[148px] w-[104px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                    initial={false}
+                    animate={{ opacity: [0.2, 0.52, 0.28] }}
+                    transition={{ duration: 1.06, ease: 'easeOut' }}
                     style={{
                       background:
-                        'radial-gradient(circle at 50% 42%, rgba(242,212,136,0.34) 0%, rgba(201,168,76,0.16) 42%, transparent 78%)',
-                      filter: 'blur(12px)',
+                        'radial-gradient(circle at 50% 45%, rgba(255,230,150,0.38) 0%, rgba(201,168,76,0.16) 48%, transparent 78%)',
+                      filter: 'blur(18px)',
+                    }}
+                  />
+                ) : null}
+
+                {showLoserEffects ? (
+                  <motion.div
+                    className="pointer-events-none absolute -inset-2 rounded-[22px]"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.46, delay: LOSER_DIM_DELAY_MS / 1000 }}
+                    style={{
+                      background:
+                        'radial-gradient(circle at 50% 48%, rgba(127,29,29,0.28) 0%, rgba(69,10,10,0.12) 45%, transparent 76%)',
+                      filter: 'blur(10px)',
                     }}
                   />
                 ) : null}
@@ -867,96 +1848,24 @@ function PlayedSlot({
                 <div
                   className="relative rounded-[18px]"
                   style={{
-                    boxShadow: isWinner
-                      ? '0 0 0 1px rgba(255,223,128,0.64), 0 0 28px rgba(201,168,76,0.28)'
-                      : isTieHighlight
-                        ? '0 0 0 1px rgba(203,213,225,0.30)'
-                        : 'none',
+                    boxShadow: showWinnerEffects
+                      ? '0 0 0 2px rgba(255,230,150,0.78), 0 0 28px rgba(201,168,76,0.34), 0 20px 34px rgba(0,0,0,0.28)'
+                      : showTieEffects
+                        ? '0 0 0 1px rgba(203,213,225,0.24)'
+                        : showLoserEffects
+                          ? '0 0 0 1px rgba(185,28,28,0.14)'
+                          : 'none',
                   }}
                 >
                   <CardShape
-                    rank={card.rank}
-                    suit={card.suit}
-                    winner={isWinner}
-                    highlight={isTieHighlight}
+                    rank={renderedCard.rank}
+                    suit={renderedCard.suit}
+                    winner={showWinnerEffects}
+                    highlight={showTieEffects}
+                    outcomeBadge={nativeOutcomeBadge}
+                    outcomeBadgeLabel={nativeOutcomeBadgeLabel}
+                    outcomeBadgeDelayMs={nativeOutcomeBadge ? SETTLED_OUTCOME_BADGE_DELAY_MS : 0}
                   />
-
-                  {/* CHANGE (issue C): WIN badge anchored to the card's
-                      top-right corner, with a small negative offset so it
-                      sits as a ribbon on the card itself (not floating in
-                      wrapper padding). Uses absolute positioning relative to
-                      the card's own relative parent, so it travels with the
-                      card through its rotation/scale animation. */}
-                  {showWinnerBadge ? (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.7, y: -4 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      transition={{
-                        duration: 0.24,
-                        delay: 0.08,
-                        type: 'spring',
-                        stiffness: 420,
-                        damping: 22,
-                      }}
-                      className="pointer-events-none absolute -right-3 -top-3 z-30 rounded-full"
-                      style={{
-                        padding: '4px 11px',
-                        background:
-                          'linear-gradient(135deg, #f2d488 0%, #c9a84c 58%, #7b5a1d 100%)',
-                        border: '1px solid rgba(255,223,128,0.92)',
-                        boxShadow:
-                          '0 4px 10px rgba(0,0,0,0.44), 0 0 16px rgba(201,168,76,0.44), inset 0 1px 0 rgba(255,255,255,0.46)',
-                      }}
-                    >
-                      <span
-                        className="text-[10px] font-black uppercase leading-none tracking-[0.22em]"
-                        style={{
-                          color: '#1a1204',
-                          fontFamily: 'Georgia, serif',
-                          textShadow: '0 1px 0 rgba(255,255,255,0.28)',
-                        }}
-                      >
-                        {winnerBadgeLabel}
-                      </span>
-                    </motion.div>
-                  ) : null}
-
-                  {/* CHANGE (issue D): symmetric TIE badge — same mechanics
-                      as WIN but silver/slate palette, so the player gets
-                      equivalent feedback. Appears on both tied cards. */}
-                  {showTieBadge ? (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.7, y: -4 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      transition={{
-                        duration: 0.24,
-                        delay: 0.08,
-                        type: 'spring',
-                        stiffness: 420,
-                        damping: 22,
-                      }}
-                      className="pointer-events-none absolute -right-3 -top-3 z-30 rounded-full"
-                      style={{
-                        padding: '4px 10px',
-                        background:
-                          'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 58%, #475569 100%)',
-                        border: '1px solid rgba(226,232,240,0.82)',
-                        boxShadow:
-                          '0 4px 10px rgba(0,0,0,0.44), 0 0 14px rgba(148,163,184,0.38), inset 0 1px 0 rgba(255,255,255,0.56)',
-                      }}
-                    >
-                      <span
-                        className="text-[10px] font-black uppercase leading-none tracking-[0.22em]"
-                        style={{
-                          color: '#0f172a',
-                          fontFamily: 'Georgia, serif',
-                          textShadow: '0 1px 0 rgba(255,255,255,0.36)',
-                        }}
-                      >
-                        Empate
-                      </span>
-                    </motion.div>
-                  ) : null}
                 </div>
               </>
             ) : (
@@ -976,7 +1885,33 @@ function PlayedSlot({
     </div>
   );
 }
-
+// PATCH F.1 — CenterActionBar v2.
+//
+// Brief: the original CenterActionBar used four loosely-related pills:
+//   - TRUCO! in cherry-red gradient (#ef4444 → #7f1d1d), pure CTA red
+//     that clashed with the felt's wine palette and the overall gold rim.
+//   - ACEITAR / CORRER as low-contrast translucent chips that read as
+//     skeletons rather than premium decisions.
+//   - AUMENTAR in flat orange gradient.
+//   - All sharing border-radius:999 (full-pill), giving them a "social
+//     media" look instead of a "vintage poker chip" look.
+//
+// v2 contract — every action button speaks the same "metal chip" language:
+//   - Same compound boxShadow recipe: an inset highlight rim + outer drop +
+//     a tone-aware aura when active.
+//   - Two-stop gradient with a depth fold at 55% so the chip reads as
+//     stamped, not flat.
+//   - Border-radius 14, not 999. Slightly oblong feels more like a token.
+//   - Georgia serif at 12px with 0.18em tracking, mirrors the TrucoDrama
+//     headline word.
+//   - Inactive state is a deep felt-on-felt chip (no white-grey),
+//     preserving the table's color identity.
+//   - TRUCO! is wine-vinho (#9a1f1f → #4a0c0c), not cherry red, anchored
+//     to the same red the table uses for tier:'red' (#7f1d1d).
+//   - ACEITAR is gold-bordered dark with a soft gold inset glow.
+//   - AUMENTAR is orange-on-amber, escalating intent.
+//   - CORRER is silver-edged dark, the only "neutral" option, distinct
+//     from ACEITAR by hue not by opacity.
 function CenterActionBar({
   availableActions,
   onAction,
@@ -1021,6 +1956,30 @@ function CenterActionBar({
         ? 'Aumentar 12'
         : 'Aumentar';
 
+  // Shared chip skeleton — every action button carries this; tone overrides
+  // background/border/color/shadow on top.
+  const chipBase = {
+    borderRadius: 14,
+    minHeight: 38,
+    minWidth: 102,
+    padding: '8px 16px',
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase' as const,
+    fontFamily: 'Georgia, serif',
+  };
+
+  // Felt-tone neutral chip used when an action is unavailable.
+  // Stays inside the table's palette instead of sliding into a white-grey.
+  const neutralStyle = {
+    background: 'linear-gradient(180deg, rgba(18,26,22,0.78) 0%, rgba(8,14,12,0.80) 100%)',
+    border: '1px solid rgba(255,255,255,0.05)',
+    color: 'rgba(232,213,160,0.22)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+    cursor: 'not-allowed' as const,
+  };
+
   return (
     <motion.div
       className="relative z-10 flex items-center justify-center gap-2.5"
@@ -1031,74 +1990,78 @@ function CenterActionBar({
       }}
       transition={{ duration: 0.22 }}
     >
+      {/* TRUCO! — the user-initiated bet call. Wine-vinho gradient anchored
+          to #7f1d1d, double inset highlight + outer aura. Subtle pulse on
+          active so the chip reads as "available pressure". */}
       <motion.button
         type="button"
         onClick={() => canTruco && onAction('request-truco')}
         disabled={!canTruco || hasDecision}
-        whileHover={canTruco && !hasDecision ? { y: -1, scale: 1.02 } : {}}
+        whileHover={canTruco && !hasDecision ? { y: -2, scale: 1.03 } : {}}
         whileTap={canTruco && !hasDecision ? { scale: 0.97 } : {}}
+        animate={
+          canTruco && !hasDecision
+            ? {
+                boxShadow: [
+                  '0 0 18px rgba(220,38,38,0.28), inset 0 1px 0 rgba(255,210,210,0.22), inset 0 -2px 0 rgba(0,0,0,0.45), 0 12px 22px rgba(0,0,0,0.40)',
+                  '0 0 28px rgba(220,38,38,0.42), inset 0 1px 0 rgba(255,210,210,0.26), inset 0 -2px 0 rgba(0,0,0,0.48), 0 14px 26px rgba(0,0,0,0.44)',
+                  '0 0 18px rgba(220,38,38,0.28), inset 0 1px 0 rgba(255,210,210,0.22), inset 0 -2px 0 rgba(0,0,0,0.45), 0 12px 22px rgba(0,0,0,0.40)',
+                ],
+              }
+            : {}
+        }
+        transition={
+          canTruco && !hasDecision
+            ? { duration: 1.8, repeat: Infinity, ease: [0.4, 0, 0.6, 1] }
+            : { duration: 0.22 }
+        }
         className="relative overflow-hidden"
         style={{
-          borderRadius: 999,
-          minHeight: 36,
-          minWidth: 96,
-          padding: '7px 15px',
-          fontSize: 11,
-          fontWeight: 900,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          fontFamily: 'Georgia, serif',
-          background:
-            canTruco && !hasDecision
-              ? 'linear-gradient(180deg, #ef4444 0%, #c81d0d 55%, #7f1d1d 100%)'
-              : 'rgba(255,255,255,0.03)',
-          border:
-            canTruco && !hasDecision
-              ? '1px solid rgba(252,165,165,0.46)'
-              : '1px solid rgba(255,255,255,0.05)',
-          color: canTruco && !hasDecision ? '#fff' : 'rgba(255,255,255,0.18)',
-          boxShadow:
-            canTruco && !hasDecision
-              ? '0 0 22px rgba(220,38,38,0.32), 0 10px 22px rgba(0,0,0,0.32)'
-              : 'none',
-          cursor: canTruco && !hasDecision ? 'pointer' : 'not-allowed',
+          ...chipBase,
+          ...(canTruco && !hasDecision
+            ? {
+                background: 'linear-gradient(180deg, #9a1f1f 0%, #6b1414 55%, #3a0808 100%)',
+                border: '1px solid rgba(248,113,113,0.55)',
+                color: '#ffe8e0',
+                textShadow: '0 1px 0 rgba(0,0,0,0.55), 0 0 14px rgba(248,113,113,0.34)',
+                cursor: 'pointer',
+              }
+            : neutralStyle),
         }}
       >
         Truco!
       </motion.button>
 
+      {/* ACEITAR — gold-bordered dark chip. Felt below, gold rim on top.
+          Reads as "this is the safe accept", confident without being loud. */}
       <motion.button
         type="button"
         onClick={() => acceptAction && onAction(acceptAction)}
         disabled={!canAccept}
-        whileHover={canAccept ? { y: -1, scale: 1.02 } : {}}
+        whileHover={canAccept ? { y: -2, scale: 1.03 } : {}}
         whileTap={canAccept ? { scale: 0.97 } : {}}
         style={{
-          borderRadius: 999,
-          minHeight: 36,
-          minWidth: 96,
-          padding: '7px 15px',
-          fontSize: 11,
-          fontWeight: 900,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          fontFamily: 'Georgia, serif',
-          background: canAccept
-            ? 'linear-gradient(180deg, rgba(40,44,34,0.98), rgba(20,24,18,0.98))'
-            : 'rgba(255,255,255,0.03)',
-          border: canAccept
-            ? '1px solid rgba(230,195,100,0.34)'
-            : '1px solid rgba(255,255,255,0.05)',
-          color: canAccept ? '#e8d5a0' : 'rgba(255,255,255,0.18)',
-          boxShadow: canAccept
-            ? '0 10px 22px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.06)'
-            : 'none',
-          cursor: canAccept ? 'pointer' : 'not-allowed',
+          ...chipBase,
+          ...(canAccept
+            ? {
+                background: 'linear-gradient(180deg, #1f2a1d 0%, #0f1810 55%, #060c08 100%)',
+                border: '1px solid rgba(230,195,100,0.52)',
+                color: '#f0d896',
+                textShadow: '0 1px 0 rgba(0,0,0,0.55)',
+                boxShadow:
+                  '0 0 16px rgba(230,195,100,0.20), inset 0 1px 0 rgba(255,235,170,0.18), inset 0 -2px 0 rgba(0,0,0,0.50), 0 12px 22px rgba(0,0,0,0.40)',
+                cursor: 'pointer',
+              }
+            : neutralStyle),
         }}
       >
         Aceitar
       </motion.button>
 
+      {/* AUMENTAR / CORRER — escalation slot. When raise is available, the
+          chip is amber (orange/copper, the table's tier:'orange' family).
+          When only decline is available, the chip becomes silver-edged
+          dark — the runaway move, neutral hue distinct from gold. */}
       <motion.button
         type="button"
         onClick={() => {
@@ -1109,31 +2072,31 @@ function CenterActionBar({
           }
         }}
         disabled={!canRaise && !canDecline}
-        whileHover={canRaise || canDecline ? { y: -1, scale: 1.02 } : {}}
+        whileHover={canRaise || canDecline ? { y: -2, scale: 1.03 } : {}}
         whileTap={canRaise || canDecline ? { scale: 0.97 } : {}}
         style={{
-          borderRadius: 999,
-          minHeight: 36,
-          minWidth: 96,
-          padding: '7px 15px',
-          fontSize: 11,
-          fontWeight: 900,
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          fontFamily: 'Georgia, serif',
-          background: canRaise
-            ? 'linear-gradient(180deg, #d97706 0%, #92400e 100%)'
+          ...chipBase,
+          ...(canRaise
+            ? {
+                background: 'linear-gradient(180deg, #c97919 0%, #8a4f0e 55%, #4a2a06 100%)',
+                border: '1px solid rgba(251,191,36,0.62)',
+                color: '#fff0d0',
+                textShadow: '0 1px 0 rgba(0,0,0,0.55), 0 0 12px rgba(251,191,36,0.30)',
+                boxShadow:
+                  '0 0 18px rgba(245,158,11,0.30), inset 0 1px 0 rgba(255,224,170,0.24), inset 0 -2px 0 rgba(0,0,0,0.46), 0 12px 22px rgba(0,0,0,0.40)',
+                cursor: 'pointer',
+              }
             : canDecline
-              ? 'linear-gradient(180deg, rgba(40,44,34,0.98), rgba(20,24,18,0.98))'
-              : 'rgba(255,255,255,0.03)',
-          border: canRaise
-            ? '1px solid rgba(251,191,36,0.44)'
-            : canDecline
-              ? '1px solid rgba(148,163,184,0.30)'
-              : '1px solid rgba(255,255,255,0.05)',
-          color: canRaise ? '#fef3c7' : canDecline ? '#cbd5e1' : 'rgba(255,255,255,0.18)',
-          boxShadow: canRaise || canDecline ? '0 10px 22px rgba(0,0,0,0.30)' : 'none',
-          cursor: canRaise || canDecline ? 'pointer' : 'not-allowed',
+              ? {
+                  background: 'linear-gradient(180deg, #1a2028 0%, #0d1318 55%, #060a0d 100%)',
+                  border: '1px solid rgba(148,163,184,0.42)',
+                  color: '#cbd5e1',
+                  textShadow: '0 1px 0 rgba(0,0,0,0.55)',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.46), 0 12px 22px rgba(0,0,0,0.36)',
+                  cursor: 'pointer',
+                }
+              : neutralStyle),
         }}
       >
         {canRaise ? raiseLabel : canDecline ? 'Correr' : 'Aumentar'}
@@ -1167,30 +2130,57 @@ function HandClimaxStage({
   const heroTier: ValeTier = isMyHand ? valueTier : 'red';
   const visuals = getTierVisuals(heroTier);
 
+  const eyebrow = isMatchFinished ? 'Fim da partida' : 'Resultado da mão';
+  const outcomeLabel = isMatchFinished
+    ? isMyHand
+      ? 'Vitória final'
+      : 'Derrota final'
+    : isMyHand
+      ? 'Mão vencida'
+      : 'Mão perdida';
   const heading = isMatchFinished
     ? isMyHand
-      ? 'Partida sua'
+      ? 'Partida nossa'
       : 'Partida deles'
     : isMyHand
-      ? 'Mão sua'
+      ? 'Mão nossa'
       : 'Mão deles';
-
   const subheading = isMatchFinished
     ? isMyHand
-      ? 'Você fechou a partida'
-      : 'O oponente fechou a partida'
+      ? 'Você fechou a mesa.'
+      : 'Eles fecharam a mesa.'
     : isMyHand
-      ? 'Você marcou'
-      : 'Eles marcaram';
+      ? 'Você puxou a queda e marcou no placar.'
+      : 'Eles levaram a queda e marcaram no placar.';
+
+  const titleColor = isMyHand ? '#fff1b8' : '#fee2e2';
+  const accentBackground = isMyHand
+    ? 'linear-gradient(135deg, #fff1b8 0%, #f2d488 38%, #c9a84c 72%, #6f4f14 100%)'
+    : 'linear-gradient(135deg, #fecaca 0%, #b45309 34%, #7f1d1d 68%, #260707 100%)';
+  const accentColor = isMyHand ? '#160f03' : '#fff7ed';
+  const borderColor = isMyHand ? 'rgba(255,223,128,0.46)' : 'rgba(248,113,113,0.38)';
+  const ambientGlow = isMyHand ? 'rgba(242,212,136,0.24)' : 'rgba(185,28,28,0.24)';
+  const pointsBorderColor = isMyHand ? 'rgba(255,223,128,0.30)' : 'rgba(254,202,202,0.22)';
+  const pointsBackground = isMyHand
+    ? 'linear-gradient(180deg, rgba(255,241,184,0.10), rgba(201,168,76,0.045))'
+    : 'linear-gradient(180deg, rgba(254,202,202,0.085), rgba(127,29,29,0.065))';
+
+  const handleKeyDown = (event: { key: string; preventDefault: () => void }) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onDismiss();
+    }
+  };
 
   return (
     <motion.div
-      className="pointer-events-auto fixed inset-0 z-[60]"
+      className="pointer-events-auto fixed inset-0 z-[60] flex items-center justify-center px-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.24 }}
       onClick={onDismiss}
+      onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
       aria-label="Fechar resultado da mão"
@@ -1198,100 +2188,272 @@ function HandClimaxStage({
       <div
         className="absolute inset-0"
         style={{
-          background: 'rgba(2,6,12,0.68)',
-          backdropFilter: 'blur(6px)',
+          background:
+            'radial-gradient(circle at 50% 38%, rgba(242,212,136,0.10) 0%, transparent 36%), rgba(2,6,12,0.72)',
+          backdropFilter: 'blur(8px)',
         }}
       />
 
       <motion.div
-        className="absolute inset-0"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 0.42, 0] }}
-        transition={{ duration: 0.22, times: [0, 0.3, 1] }}
+        aria-hidden
+        className="pointer-events-none absolute h-[360px] w-[360px] rounded-full"
+        initial={{ opacity: 0, scale: 0.82 }}
+        animate={{ opacity: [0.18, 0.44, 0.28], scale: [0.9, 1.08, 1] }}
+        exit={{ opacity: 0, scale: 0.92 }}
+        transition={{ duration: 0.72, ease: [0.2, 0.9, 0.24, 1] }}
         style={{
-          background: isMyHand
-            ? 'radial-gradient(circle at 50% 50%, rgba(255,223,128,0.38), transparent 62%)'
-            : 'radial-gradient(circle at 50% 50%, rgba(220,38,38,0.36), transparent 62%)',
-          pointerEvents: 'none',
+          background: `radial-gradient(circle, ${ambientGlow} 0%, transparent 68%)`,
+          filter: 'blur(10px)',
         }}
       />
 
       <motion.div
-        className="absolute left-1/2 top-1/2"
-        initial={{ x: '-50%', y: '-50%', scale: 0.4, opacity: 0 }}
-        animate={{ x: '-50%', y: '-50%', scale: 1, opacity: 1 }}
-        exit={{ x: '-50%', y: '-50%', scale: 0.94, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+        className="relative w-full max-w-[520px] overflow-hidden rounded-[32px] border px-6 py-6 text-left sm:px-7 sm:py-7"
+        initial={{ y: 26, scale: 0.92, opacity: 0 }}
+        animate={{ y: 0, scale: 1, opacity: 1 }}
+        exit={{ y: 18, scale: 0.98, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(22,24,20,0.98) 0%, rgba(11,12,10,0.98) 54%, rgba(5,6,6,0.98) 100%)',
+          borderColor,
+          boxShadow: `0 36px 80px rgba(0,0,0,0.58), 0 0 54px ${ambientGlow}, inset 0 1px 0 rgba(255,255,255,0.07)`,
+        }}
       >
         <div
-          className="relative overflow-hidden rounded-[26px] px-10 py-7 text-center"
+          aria-hidden
+          className="pointer-events-none absolute inset-x-8 top-0 h-px"
           style={{
-            background: visuals.background,
-            border: `2px solid ${visuals.border.replace('1px solid ', '')}`,
-            color: visuals.textColor,
-            boxShadow: `${visuals.glow}, 0 40px 90px rgba(0,0,0,0.55)`,
-            minWidth: 360,
+            background:
+              'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.72) 50%, transparent 100%)',
           }}
-        >
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.22), transparent 62%)',
-            }}
-          />
+        />
 
-          <div className="relative z-10">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full"
+          style={{
+            background: `radial-gradient(circle, ${ambientGlow} 0%, transparent 68%)`,
+            filter: 'blur(8px)',
+          }}
+        />
+
+        <div className="relative z-10" role="status" aria-live="assertive" aria-atomic="true">
+          <div className="flex flex-wrap items-center gap-3">
             <div
-              className="text-[11px] font-black uppercase tracking-[0.26em]"
-              style={{ opacity: 0.72 }}
-            >
-              {isMatchFinished ? 'Fim da partida' : 'Resultado da mão'}
-            </div>
-
-            <div
-              className="mt-1 text-[36px] font-black uppercase leading-none tracking-[0.08em]"
-              style={{ fontFamily: 'Georgia, serif' }}
-            >
-              {heading}
-            </div>
-
-            <div
-              className="mt-3 text-[11px] font-bold uppercase tracking-[0.18em]"
-              style={{ opacity: 0.8 }}
-            >
-              {subheading}
-            </div>
-
-            <motion.div
-              initial={{ y: 24, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.18, duration: 0.36 }}
-              className="mt-2 text-[62px] font-black leading-none"
+              className="inline-flex rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.28em]"
               style={{
-                fontFamily: 'Georgia, serif',
-                textShadow: '0 6px 18px rgba(0,0,0,0.32)',
+                background: accentBackground,
+                color: accentColor,
+                boxShadow:
+                  '0 12px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.30)',
               }}
             >
-              +{awardedPoints}
-            </motion.div>
-
-            <div
-              className="text-[10px] font-black uppercase tracking-[0.22em]"
-              style={{ opacity: 0.68 }}
-            >
-              ponto{awardedPoints === 1 ? '' : 's'}
+              {eyebrow}
             </div>
 
             <div
-              className="mt-4 text-[9px] font-bold uppercase tracking-[0.22em]"
-              style={{ opacity: 0.54 }}
+              className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{
+                background: 'rgba(255,255,255,0.035)',
+                borderColor: 'rgba(255,255,255,0.10)',
+                color: 'rgba(232,213,160,0.72)',
+              }}
             >
-              Toque para continuar
+              {outcomeLabel}
             </div>
+          </div>
+
+          <h2
+            className="mt-5 text-[36px] font-black leading-[0.95] sm:text-[44px]"
+            style={{
+              color: titleColor,
+              fontFamily: 'Georgia, serif',
+              textShadow: isMyHand
+                ? '0 0 26px rgba(242,212,136,0.22), 0 3px 14px rgba(0,0,0,0.44)'
+                : '0 0 24px rgba(248,113,113,0.20), 0 3px 14px rgba(0,0,0,0.46)',
+            }}
+          >
+            {heading}
+          </h2>
+
+          <p
+            className="mt-3 max-w-[440px] text-[14px] leading-relaxed"
+            style={{ color: 'rgba(255,255,255,0.76)' }}
+          >
+            {subheading}
+          </p>
+
+          <div
+            className="mt-6 overflow-hidden rounded-[26px] border"
+            style={{
+              background: pointsBackground,
+              borderColor: pointsBorderColor,
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.28)',
+            }}
+          >
+            <div className="flex items-center justify-between gap-5 px-5 py-5">
+              <div>
+                <div
+                  className="text-[10px] font-black uppercase tracking-[0.26em]"
+                  style={{ color: 'rgba(232,213,160,0.58)' }}
+                >
+                  Pontos marcados
+                </div>
+
+                <div
+                  className="mt-1 text-[54px] font-black leading-none"
+                  style={{
+                    color: isMyHand ? '#f3e7bf' : '#fecaca',
+                    fontFamily: 'Georgia, serif',
+                    textShadow: '0 4px 16px rgba(0,0,0,0.38)',
+                  }}
+                >
+                  +{awardedPoints}
+                </div>
+              </div>
+
+              <div
+                className="rounded-[18px] border px-4 py-3 text-right"
+                style={{
+                  background: 'rgba(0,0,0,0.20)',
+                  borderColor: 'rgba(255,255,255,0.08)',
+                }}
+              >
+                <div
+                  className="text-[9px] font-black uppercase tracking-[0.24em]"
+                  style={{ color: 'rgba(232,213,160,0.48)' }}
+                >
+                  Queda
+                </div>
+                <div
+                  className="mt-1 text-[17px] font-black"
+                  style={{ color: visuals.textColor, fontFamily: 'Georgia, serif' }}
+                >
+                  {isMyHand ? 'Nossa' : 'Deles'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            className="mt-5 text-center text-[9px] font-black uppercase tracking-[0.22em]"
+            style={{ color: 'rgba(255,255,255,0.42)' }}
+          >
+            Toque para continuar
           </div>
         </div>
       </motion.div>
+    </motion.div>
+  );
+}
+
+function MaoDeOnzeTableTension({
+  isOpen,
+  isDecisionPending,
+}: {
+  isOpen: boolean;
+  isDecisionPending: boolean;
+}) {
+  if (!isOpen) {
+    return null;
+  }
+
+
+  return (
+    <motion.div
+      aria-hidden
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="pointer-events-none absolute inset-0 z-[1] overflow-hidden rounded-[28px]"
+    >
+      <motion.div
+        className="absolute inset-x-[4%] top-[5%] h-[90%] rounded-[38px] border"
+        animate={{
+          opacity: isDecisionPending ? [0.42, 0.72, 0.42] : [0.24, 0.42, 0.24],
+          boxShadow: isDecisionPending
+            ? [
+                'inset 0 0 34px rgba(251,191,36,0.12), 0 0 24px rgba(180,83,9,0.10)',
+                'inset 0 0 56px rgba(251,191,36,0.24), 0 0 42px rgba(180,83,9,0.18)',
+                'inset 0 0 34px rgba(251,191,36,0.12), 0 0 24px rgba(180,83,9,0.10)',
+              ]
+            : [
+                'inset 0 0 26px rgba(242,212,136,0.10), 0 0 18px rgba(201,168,76,0.08)',
+                'inset 0 0 38px rgba(242,212,136,0.16), 0 0 28px rgba(201,168,76,0.12)',
+                'inset 0 0 26px rgba(242,212,136,0.10), 0 0 18px rgba(201,168,76,0.08)',
+              ],
+        }}
+        transition={{ duration: isDecisionPending ? 1.25 : 1.9, repeat: Infinity }}
+        style={{
+          borderColor: isDecisionPending ? 'rgba(255,223,128,0.24)' : 'rgba(255,223,128,0.16)',
+        }}
+      />
+
+      <motion.div
+        className="absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2 select-none"
+        initial={{ opacity: 0, scale: 0.82 }}
+        animate={{
+          opacity: isDecisionPending ? [0.08, 0.15, 0.08] : [0.045, 0.085, 0.045],
+          scale: isDecisionPending ? [0.98, 1.06, 0.98] : [0.98, 1.03, 0.98],
+        }}
+        transition={{ duration: isDecisionPending ? 1.4 : 2.2, repeat: Infinity }}
+        style={{
+          color: '#f2d488',
+          fontFamily: 'Georgia, serif',
+          fontSize: '190px',
+          fontWeight: 900,
+          letterSpacing: '-0.08em',
+          lineHeight: 0.8,
+          textShadow: '0 0 42px rgba(242,212,136,0.34)',
+        }}
+      >
+        11
+      </motion.div>
+
+      {isDecisionPending ? (
+        <motion.div
+          className="absolute left-1/2 top-[15%] -translate-x-1/2 rounded-full border px-5 py-2"
+          initial={{ y: -8, opacity: 0, scale: 0.96 }}
+          animate={{ y: 0, opacity: 1, scale: 1 }}
+          exit={{ y: -6, opacity: 0, scale: 0.96 }}
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(25,20,12,0.72) 0%, rgba(71,36,10,0.42) 52%, rgba(18,12,8,0.74) 100%)',
+            borderColor: 'rgba(255,223,128,0.24)',
+            boxShadow:
+              '0 18px 34px rgba(0,0,0,0.28), 0 0 24px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.08)',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{
+                background: '#f59e0b',
+                boxShadow: '0 0 14px rgba(245,158,11,0.62)',
+              }}
+            />
+            <span
+              className="text-[10px] font-black uppercase tracking-[0.28em]"
+              style={{
+                color: '#f6dfa0',
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 2px 8px rgba(0,0,0,0.34)',
+              }}
+            >
+              Mão de 11
+            </span>
+            <span
+              className="hidden text-[9px] font-black uppercase tracking-[0.22em] sm:inline"
+              style={{ color: 'rgba(255,248,225,0.54)' }}
+            >
+              Decisão de queda
+            </span>
+          </div>
+        </motion.div>
+      ) : null}
     </motion.div>
   );
 }
@@ -1311,58 +2473,90 @@ function MaoDeOnzeDecisionStage({
 
   return (
     <motion.div
-      initial={{ y: 28, opacity: 0, scale: 0.96 }}
+      initial={{ y: 30, opacity: 0, scale: 0.96 }}
       animate={{ y: 0, opacity: 1, scale: 1 }}
-      exit={{ y: 20, opacity: 0, scale: 0.96 }}
+      exit={{ y: 22, opacity: 0, scale: 0.96 }}
       transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-      className="pointer-events-auto fixed inset-x-4 bottom-[308px] z-[110] mx-auto w-full max-w-lg md:bottom-[324px] md:max-w-xl"
+      className="pointer-events-auto fixed inset-x-4 bottom-[292px] z-[110] mx-auto w-full max-w-xl md:bottom-[314px]"
     >
       <div
-        className="overflow-hidden rounded-[26px] border px-4 py-3.5 md:px-5 md:py-4 backdrop-blur-xl"
+        className="relative overflow-hidden rounded-[28px] border px-4 py-4 backdrop-blur-xl md:px-5"
         style={{
-          background: 'linear-gradient(180deg, rgba(18,22,30,0.94) 0%, rgba(10,12,18,0.90) 100%)',
-          borderColor: 'rgba(255,223,128,0.34)',
+          background:
+            'linear-gradient(180deg, rgba(31,22,12,0.96) 0%, rgba(13,14,14,0.94) 58%, rgba(8,9,10,0.96) 100%)',
+          borderColor: 'rgba(255,223,128,0.42)',
           boxShadow:
-            '0 28px 54px rgba(0,0,0,0.42), 0 0 36px rgba(201,168,76,0.16), inset 0 1px 0 rgba(255,255,255,0.06)',
+            '0 30px 62px rgba(0,0,0,0.46), 0 0 42px rgba(201,168,76,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
         }}
       >
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-6 top-0 h-px"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.76) 50%, transparent 100%)',
+          }}
+        />
+
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full"
+          style={{
+            background: 'radial-gradient(circle, rgba(245,158,11,0.22) 0%, transparent 68%)',
+            filter: 'blur(8px)',
+          }}
+        />
+
+        <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <div
-              className="text-[11px] font-black uppercase tracking-[0.28em]"
-              style={{ color: '#f6dfa0' }}
+              className="inline-flex rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[0.26em]"
+              style={{
+                background: 'rgba(245,158,11,0.10)',
+                borderColor: 'rgba(255,223,128,0.28)',
+                color: '#f6dfa0',
+              }}
             >
-              Mão de 11
+              Queda de 11
             </div>
+
             <h3
-              className="mt-1 text-[24px] font-black leading-none"
-              style={{ color: '#fff8e1', fontFamily: 'Georgia, serif' }}
+              className="mt-2 text-[25px] font-black leading-none md:text-[28px]"
+              style={{
+                color: '#fff8e1',
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 0 24px rgba(242,212,136,0.16), 0 3px 12px rgba(0,0,0,0.42)',
+              }}
             >
-              Analise sua mão antes de decidir
+              Aceita jogar a mão?
             </h3>
+
             <p
-              className="mt-2 text-[13px] leading-relaxed"
+              className="mt-2 max-w-[360px] text-[13px] leading-relaxed"
               style={{ color: 'rgba(255,248,225,0.72)' }}
             >
-              Você ainda não pode jogar carta. Primeiro escolha se vai seguir na mão ou correr.
+              Você ainda não pode jogar carta. Primeiro escolha se entra na queda ou se corre
+              agora.
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:flex-col">
             <motion.button
               type="button"
               onClick={onPlay}
               whileHover={{ y: -1, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+              className="whitespace-nowrap rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.16em]"
               style={{
-                background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 60%, #8a6a28 100%)',
+                background:
+                  'linear-gradient(135deg, #fff1b8 0%, #e8c76a 42%, #c9a84c 72%, #7a5418 100%)',
                 color: '#1a1104',
-                border: '1px solid rgba(255,223,128,0.72)',
-                boxShadow: '0 14px 28px rgba(0,0,0,0.28), 0 0 16px rgba(201,168,76,0.18)',
+                border: '1px solid rgba(255,241,184,0.78)',
+                boxShadow:
+                  '0 16px 30px rgba(0,0,0,0.30), 0 0 20px rgba(201,168,76,0.22), inset 0 1px 0 rgba(255,255,255,0.34)',
               }}
             >
-              Jogar
+              Aceitar mão
             </motion.button>
 
             <motion.button
@@ -1370,12 +2564,13 @@ function MaoDeOnzeDecisionStage({
               onClick={onRun}
               whileHover={{ y: -1, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+              className="whitespace-nowrap rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.16em]"
               style={{
-                background: 'linear-gradient(180deg, rgba(44,58,80,0.98), rgba(20,30,48,0.98))',
+                background:
+                  'linear-gradient(180deg, rgba(34,42,58,0.98), rgba(12,18,28,0.98))',
                 color: '#d6dde8',
-                border: '1px solid rgba(148,163,184,0.26)',
-                boxShadow: '0 14px 28px rgba(0,0,0,0.24)',
+                border: '1px solid rgba(148,163,184,0.28)',
+                boxShadow: '0 14px 28px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.06)',
               }}
             >
               Correr
@@ -1394,39 +2589,147 @@ function MaoDeOnzeAcceptedBadge() {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -6, scale: 0.96 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
-      className="pointer-events-none fixed right-6 top-[88px] z-[95] md:right-8 md:top-[92px]"
+      className="pointer-events-none absolute right-5 top-[118px] z-[30] md:right-7 md:top-[124px]"
     >
       <div
-        className="rounded-full px-4 py-2"
+        className="overflow-hidden rounded-full border px-4 py-2"
         style={{
           background:
-            'linear-gradient(135deg, rgba(242,212,136,0.18) 0%, rgba(201,168,76,0.14) 55%, rgba(123,90,29,0.12) 100%)',
-          border: '1px solid rgba(255,223,128,0.34)',
+            'linear-gradient(135deg, rgba(242,212,136,0.22) 0%, rgba(127,63,18,0.18) 54%, rgba(20,14,8,0.72) 100%)',
+          borderColor: 'rgba(255,223,128,0.38)',
           boxShadow:
-            '0 10px 24px rgba(0,0,0,0.26), 0 0 18px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.10)',
-          backdropFilter: 'blur(10px)',
+            '0 14px 30px rgba(0,0,0,0.30), 0 0 24px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.12)',
+          backdropFilter: 'blur(12px)',
         }}
       >
-        <div className="flex items-center gap-2">
-          <span
+        <div className="flex items-center gap-2.5">
+          <motion.span
             className="h-2.5 w-2.5 rounded-full"
+            animate={{ opacity: [0.72, 1, 0.72], scale: [1, 1.18, 1] }}
+            transition={{ duration: 1.3, repeat: Infinity }}
             style={{
               background: '#e8c76a',
-              boxShadow: '0 0 10px rgba(201,168,76,0.42)',
+              boxShadow: '0 0 12px rgba(201,168,76,0.52)',
             }}
           />
+
+          <span className="flex flex-col leading-none">
+            <span
+              className="text-[9px] font-black uppercase tracking-[0.24em]"
+              style={{ color: 'rgba(255,248,225,0.54)' }}
+            >
+              Queda ativa
+            </span>
+            <span
+              className="mt-1 text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{
+                color: '#f2d488',
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 2px 6px rgba(0,0,0,0.28)',
+              }}
+            >
+              Mão de 11 aceita
+            </span>
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+
+
+function PlayerHandTurnCue({ isOpen, isMaoDeOnze }: { isOpen: boolean; isMaoDeOnze: boolean }) {
+  if (!isOpen) {
+    return null;
+  }
+
+  const title = isMaoDeOnze ? 'Queda ativa' : 'Sua vez';
+  const subtitle = 'Jogue uma carta';
+
+  return (
+    <motion.div
+      aria-hidden
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 8, scale: 0.98 }}
+      transition={{ duration: 0.22, ease: 'easeOut' }}
+      className="pointer-events-none absolute -inset-x-4 -top-14 bottom-1 z-20 rounded-[34px]"
+    >
+      <motion.div
+        className="absolute inset-x-[14%] bottom-1 h-[102px] rounded-[999px]"
+        animate={{ opacity: [0.12, 0.24, 0.14], scale: [0.98, 1.012, 0.99] }}
+        transition={{ duration: 1.45, repeat: Infinity, ease: 'easeInOut' }}
+        style={{
+          background: isMaoDeOnze
+            ? 'radial-gradient(ellipse at 50% 62%, rgba(245,158,11,0.22) 0%, rgba(127,29,29,0.08) 45%, transparent 76%)'
+            : 'radial-gradient(ellipse at 50% 62%, rgba(255,223,128,0.18) 0%, rgba(201,168,76,0.08) 45%, transparent 76%)',
+          filter: 'blur(16px)',
+        }}
+      />
+
+      <motion.div
+        className="absolute inset-x-[8%] bottom-0 h-[118px] rounded-[36px] border"
+        animate={{
+          opacity: [0.11, 0.22, 0.13],
+          boxShadow: [
+            'inset 0 0 12px rgba(255,223,128,0.045), 0 0 12px rgba(201,168,76,0.045)',
+            'inset 0 0 20px rgba(255,223,128,0.09), 0 0 18px rgba(201,168,76,0.075)',
+            'inset 0 0 12px rgba(255,223,128,0.045), 0 0 12px rgba(201,168,76,0.045)',
+          ],
+        }}
+        transition={{ duration: 1.45, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ borderColor: 'rgba(255,223,128,0.10)' }}
+      />
+
+      <motion.div
+        className="absolute left-1/2 top-0 z-30 flex -translate-x-1/2 items-center gap-2.5 rounded-full border px-4 py-2"
+        animate={{
+          boxShadow: [
+            '0 12px 24px rgba(0,0,0,0.28), 0 0 12px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.08)',
+            '0 14px 28px rgba(0,0,0,0.32), 0 0 18px rgba(201,168,76,0.16), inset 0 1px 0 rgba(255,255,255,0.10)',
+            '0 12px 24px rgba(0,0,0,0.28), 0 0 12px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.08)',
+          ],
+        }}
+        transition={{ duration: 1.55, repeat: Infinity, ease: 'easeInOut' }}
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(22,18,10,0.94) 0%, rgba(58,42,16,0.82) 54%, rgba(8,10,10,0.96) 100%)',
+          borderColor: 'rgba(255,223,128,0.34)',
+          backdropFilter: 'blur(12px)',
+        }}
+      >
+        <motion.span
+          className="h-2.5 w-2.5 rounded-full"
+          animate={{ opacity: [0.72, 1, 0.72], scale: [1, 1.16, 1] }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+          style={{
+            background: isMaoDeOnze ? '#f59e0b' : '#e8c76a',
+            boxShadow: isMaoDeOnze
+              ? '0 0 12px rgba(245,158,11,0.56)'
+              : '0 0 12px rgba(232,199,106,0.46)',
+          }}
+        />
+
+        <span className="flex flex-col leading-none">
           <span
-            className="text-[10px] font-black uppercase tracking-[0.22em]"
+            className="text-[9px] font-black uppercase tracking-[0.24em]"
+            style={{ color: 'rgba(255,248,225,0.58)', fontFamily: 'Georgia, serif' }}
+          >
+            {title}
+          </span>
+          <span
+            className="mt-1 text-[10px] font-black uppercase tracking-[0.22em]"
             style={{
               color: '#f2d488',
               fontFamily: 'Georgia, serif',
               textShadow: '0 2px 6px rgba(0,0,0,0.28)',
             }}
           >
-            Mão de 11 aceita
+            {subtitle}
           </span>
-        </div>
-      </div>
+        </span>
+      </motion.div>
     </motion.div>
   );
 }
@@ -1444,14 +2747,32 @@ function MatchResultModal({
     return null;
   }
 
-  const title = isVictory ? 'Vitória' : 'Derrota';
+  const displayScoreLabel = scoreLabel.replace(/\bT1\b/g, 'Nós').replace(/\bT2\b/g, 'Eles');
+
+  const eyebrow = isVictory ? 'Partida nossa' : 'Mesa fechada por eles';
+  const title = isVictory ? 'Você fechou a mesa' : 'Eles fecharam a mesa';
   const subtitle = isVictory
-    ? 'Você fechou a partida. Belo fechamento de mesa.'
-    : 'A partida terminou. Vale revisar o placar e voltar preparado para a próxima.';
+    ? 'Mesa dominada. O placar confirmou a queda e a partida ficou do nosso lado.'
+    : 'A queda foi deles desta vez. Respira, lê o jogo e volta para buscar a próxima mesa.';
+  const outcomeLabel = isVictory ? 'Vitória confirmada' : 'Derrota confirmada';
+
   const accentBackground = isVictory
-    ? 'linear-gradient(135deg, #f2d488 0%, #c9a84c 55%, #7b5a1d 100%)'
-    : 'linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%)';
-  const accentColor = isVictory ? '#1a1204' : '#fff5f5';
+    ? 'linear-gradient(135deg, #fff1b8 0%, #f2d488 38%, #c9a84c 72%, #6f4f14 100%)'
+    : 'linear-gradient(135deg, #fecaca 0%, #b45309 34%, #7f1d1d 68%, #260707 100%)';
+  const accentColor = isVictory ? '#160f03' : '#fff7ed';
+  const titleColor = isVictory ? '#fff1b8' : '#fee2e2';
+  const borderColor = isVictory ? 'rgba(255,223,128,0.48)' : 'rgba(248,113,113,0.38)';
+  const ambientGlow = isVictory ? 'rgba(242,212,136,0.24)' : 'rgba(185,28,28,0.24)';
+  const innerGlow = isVictory ? 'rgba(201,168,76,0.16)' : 'rgba(127,29,29,0.22)';
+  const scoreBorderColor = isVictory ? 'rgba(255,223,128,0.26)' : 'rgba(254,202,202,0.18)';
+  const scoreBackground = isVictory
+    ? 'linear-gradient(180deg, rgba(255,241,184,0.08), rgba(201,168,76,0.035))'
+    : 'linear-gradient(180deg, rgba(254,202,202,0.075), rgba(127,29,29,0.06))';
+  const buttonBackground = isVictory
+    ? accentBackground
+    : 'linear-gradient(135deg, rgba(127,29,29,0.96) 0%, rgba(124,45,18,0.94) 48%, rgba(41,12,12,0.98) 100%)';
+  const buttonBorderColor = isVictory ? 'rgba(255,223,128,0.52)' : 'rgba(248,113,113,0.42)';
+  const buttonColor = isVictory ? accentColor : '#fff7ed';
 
   const handleBackToLobby = () => {
     window.location.assign('/lobby');
@@ -1467,98 +2788,196 @@ function MatchResultModal({
       <div
         className="absolute inset-0"
         style={{
-          background: 'rgba(4,6,10,0.68)',
-          backdropFilter: 'blur(10px)',
+          background:
+            'radial-gradient(circle at 50% 30%, rgba(242,212,136,0.10) 0%, transparent 34%), rgba(4,6,10,0.78)',
+          backdropFilter: 'blur(12px)',
         }}
       />
 
       <motion.div
-        initial={{ y: 24, scale: 0.96, opacity: 0 }}
+        aria-hidden
+        initial={{ opacity: 0, scale: 0.82 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        transition={{ duration: 0.42, ease: 'easeOut' }}
+        className="pointer-events-none absolute h-[360px] w-[360px] rounded-full"
+        style={{
+          background: `radial-gradient(circle, ${ambientGlow} 0%, transparent 68%)`,
+          filter: 'blur(10px)',
+        }}
+      />
+
+      <motion.div
+        initial={{ y: 28, scale: 0.94, opacity: 0 }}
         animate={{ y: 0, scale: 1, opacity: 1 }}
         exit={{ y: 18, scale: 0.98, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 230, damping: 24 }}
-        className="relative w-full max-w-xl overflow-hidden rounded-[30px] border px-6 py-6"
+        transition={{ type: 'spring', stiffness: 220, damping: 24 }}
+        className="relative w-full max-w-[590px] overflow-hidden rounded-[34px] border px-6 py-6 sm:px-7 sm:py-7"
         style={{
-          background: 'linear-gradient(180deg, rgba(18,22,18,0.96) 0%, rgba(10,12,10,0.96) 100%)',
-          borderColor: isVictory ? 'rgba(255,223,128,0.36)' : 'rgba(252,165,165,0.28)',
-          boxShadow:
-            '0 34px 64px rgba(0,0,0,0.48), 0 0 42px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.05)',
+          background:
+            'linear-gradient(180deg, rgba(22,24,20,0.98) 0%, rgba(11,12,10,0.98) 54%, rgba(5,6,6,0.98) 100%)',
+          borderColor,
+          boxShadow: `0 36px 80px rgba(0,0,0,0.58), 0 0 54px ${innerGlow}, inset 0 1px 0 rgba(255,255,255,0.07)`,
         }}
       >
         <div
-          className="inline-flex rounded-full px-4 py-1 text-[11px] font-black uppercase tracking-[0.24em]"
+          aria-hidden
+          className="pointer-events-none absolute inset-x-8 top-0 h-px"
           style={{
-            background: accentBackground,
-            color: accentColor,
-            boxShadow: '0 10px 22px rgba(0,0,0,0.24)',
+            background:
+              'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.74) 50%, transparent 100%)',
           }}
-        >
-          Partida encerrada
-        </div>
-
-        <h2
-          className="mt-4 text-[40px] font-black leading-none"
-          style={{ color: isVictory ? '#fff0bf' : '#ffe4e6', fontFamily: 'Georgia, serif' }}
-        >
-          {title}
-        </h2>
-
-        <p className="mt-3 text-[15px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.78)' }}>
-          {subtitle}
-        </p>
+        />
 
         <div
-          className="mt-5 rounded-[22px] border px-5 py-4"
+          aria-hidden
+          className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full"
           style={{
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02))',
-            borderColor: 'rgba(255,255,255,0.08)',
+            background: `radial-gradient(circle, ${ambientGlow} 0%, transparent 68%)`,
+            filter: 'blur(8px)',
           }}
-        >
-          <div
-            className="text-[10px] font-black uppercase tracking-[0.24em]"
-            style={{ color: 'rgba(232,213,160,0.58)' }}
-          >
-            Placar final
-          </div>
-          <div
-            className="mt-2 text-[24px] font-black"
-            style={{ color: '#f3e7bf', fontFamily: 'Georgia, serif' }}
-          >
-            {scoreLabel}
-          </div>
-        </div>
+        />
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <motion.button
-            type="button"
-            onClick={handleBackToLobby}
-            whileHover={{ y: -1, scale: 1.01 }}
-            whileTap={{ scale: 0.98 }}
-            className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-28 -left-24 h-72 w-72 rounded-full"
+          style={{
+            background:
+              'radial-gradient(circle, rgba(255,255,255,0.055) 0%, transparent 64%)',
+            filter: 'blur(10px)',
+          }}
+        />
+
+        <div className="relative">
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className="inline-flex rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-[0.28em]"
+              style={{
+                background: accentBackground,
+                color: accentColor,
+                boxShadow:
+                  '0 12px 24px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.30)',
+              }}
+            >
+              Partida encerrada
+            </div>
+
+            <div
+              className="rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em]"
+              style={{
+                background: 'rgba(255,255,255,0.035)',
+                borderColor: 'rgba(255,255,255,0.10)',
+                color: 'rgba(232,213,160,0.72)',
+              }}
+            >
+              {outcomeLabel}
+            </div>
+          </div>
+
+          <p
+            className="mt-5 text-[11px] font-black uppercase tracking-[0.30em]"
+            style={{ color: isVictory ? 'rgba(255,241,184,0.72)' : 'rgba(254,202,202,0.72)' }}
+          >
+            {eyebrow}
+          </p>
+
+          <h2
+            className="mt-2 text-[36px] font-black leading-[0.95] sm:text-[46px]"
             style={{
-              background: accentBackground,
-              color: accentColor,
-              border: '1px solid rgba(255,223,128,0.48)',
-              boxShadow: '0 16px 28px rgba(0,0,0,0.24)',
+              color: titleColor,
+              fontFamily: 'Georgia, serif',
+              textShadow: isVictory
+                ? '0 0 26px rgba(242,212,136,0.22), 0 3px 14px rgba(0,0,0,0.44)'
+                : '0 0 24px rgba(248,113,113,0.20), 0 3px 14px rgba(0,0,0,0.46)',
             }}
           >
-            Voltar ao lobby
-          </motion.button>
+            {title}
+          </h2>
 
-          <button
-            type="button"
-            disabled
-            className="rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.18em]"
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              color: 'rgba(255,255,255,0.42)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              cursor: 'not-allowed',
-            }}
-            title="Backend rematch flow is not wired yet."
+          <p
+            className="mt-4 max-w-[520px] text-[15px] leading-relaxed"
+            style={{ color: 'rgba(255,255,255,0.78)' }}
           >
-            Revanche em breve
-          </button>
+            {subtitle}
+          </p>
+
+          <div
+            className="mt-6 overflow-hidden rounded-[26px] border"
+            style={{
+              background: scoreBackground,
+              borderColor: scoreBorderColor,
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.28)',
+            }}
+          >
+            <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div
+                  className="text-[10px] font-black uppercase tracking-[0.26em]"
+                  style={{ color: 'rgba(232,213,160,0.58)' }}
+                >
+                  Placar final
+                </div>
+
+                <div
+                  className="mt-2 text-[29px] font-black leading-none sm:text-[33px]"
+                  style={{
+                    color: '#f3e7bf',
+                    fontFamily: 'Georgia, serif',
+                    textShadow: '0 2px 10px rgba(0,0,0,0.36)',
+                  }}
+                >
+                  {displayScoreLabel}
+                </div>
+              </div>
+
+              <div
+                className="rounded-[18px] border px-4 py-3 text-left sm:text-right"
+                style={{
+                  background: 'rgba(0,0,0,0.20)',
+                  borderColor: 'rgba(255,255,255,0.08)',
+                }}
+              >
+                <div
+                  className="text-[9px] font-black uppercase tracking-[0.24em]"
+                  style={{ color: 'rgba(232,213,160,0.48)' }}
+                >
+                  Queda
+                </div>
+                <div
+                  className="mt-1 text-[15px] font-black"
+                  style={{ color: isVictory ? '#f2d488' : '#fecaca', fontFamily: 'Georgia, serif' }}
+                >
+                  {isVictory ? 'Nossa mesa' : 'Mesa deles'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <motion.button
+              type="button"
+              onClick={handleBackToLobby}
+              whileHover={{ y: -1, scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
+              className="min-w-[190px] whitespace-nowrap rounded-full px-6 py-3 text-[12px] font-black uppercase tracking-[0.16em]"
+              style={{
+                background: buttonBackground,
+                color: buttonColor,
+                border: `1px solid ${buttonBorderColor}`,
+                boxShadow:
+                  '0 18px 32px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.18)',
+              }}
+            >
+              Voltar ao lobby
+            </motion.button>
+
+            <span
+              className="text-[11px] leading-relaxed sm:text-right"
+              style={{ color: 'rgba(255,255,255,0.48)' }}
+            >
+              Volte ao lobby, respire e escolha a próxima mesa.
+            </span>
+          </div>
         </div>
       </motion.div>
     </motion.div>
@@ -1574,6 +2993,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     awardedPoints,
     displayedResolvedRoundFinished,
     displayedResolvedRoundResult,
+    latestRoundMyPlayedCard,
+    latestRoundOpponentPlayedCard,
     tablePhase,
     opponentSeatView,
     mySeatView,
@@ -1582,6 +3003,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
     opponentRevealKey,
     myRevealKey,
     myCardLaunching,
+    roundIntroKey,
     currentPrivateViraRank,
     currentPublicViraRank,
     viraRank,
@@ -1590,6 +3012,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
     myCards,
     canPlayCard,
     launchingCardKey,
+    pendingPlayedCard,
     currentPrivateHand,
     currentPublicHand,
     onPlayCard,
@@ -1602,6 +3025,88 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
   const { play } = useGameSound();
   const { fire } = useConfetti();
+  const opponentFlightSourceRef = useRef<HTMLDivElement | null>(null);
+  const playerFlightSourceRef = useRef<HTMLDivElement | null>(null);
+  const playerCardElementRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const opponentPlayedSlotRef = useRef<HTMLDivElement | null>(null);
+  const playerPlayedSlotRef = useRef<HTMLDivElement | null>(null);
+  const [settledOwnFlightKey, setSettledOwnFlightKey] = useState(0);
+  const [settledOpponentFlightKey, setSettledOpponentFlightKey] = useState(0);
+  const [activeOwnFlightKey, setActiveOwnFlightKey] = useState(0);
+  const ownFlightSequenceRef = useRef(0);
+  const lastLocalFlightCardKeyRef = useRef<string | null>(null);
+  const lastSettledOpponentRef = useRef(settledOpponentFlightKey);
+  const lastSettledOwnRef = useRef(settledOwnFlightKey);
+
+  useEffect(() => {
+    if (settledOpponentFlightKey === lastSettledOpponentRef.current) {
+      return;
+    }
+
+    lastSettledOpponentRef.current = settledOpponentFlightKey;
+
+    if (settledOpponentFlightKey > 0) {
+      play('card-impact', 0.42);
+    }
+  }, [play, settledOpponentFlightKey]);
+
+  useEffect(() => {
+    if (settledOwnFlightKey === lastSettledOwnRef.current) {
+      return;
+    }
+
+    lastSettledOwnRef.current = settledOwnFlightKey;
+
+    if (settledOwnFlightKey > 0) {
+      play('card-impact', 0.32);
+    }
+  }, [play, settledOwnFlightKey]);
+
+  const handlePlayerCardElementChange = useCallback(
+    (cardKey: string, element: HTMLButtonElement | null) => {
+      if (element) {
+        playerCardElementRefs.current[cardKey] = element;
+        return;
+      }
+
+      delete playerCardElementRefs.current[cardKey];
+    },
+    [],
+  );
+
+  const playerCardFlightSourceElement = launchingCardKey
+    ? (playerCardElementRefs.current[launchingCardKey] ?? playerFlightSourceRef.current)
+    : playerFlightSourceRef.current;
+
+  useEffect(() => {
+    if (!launchingCardKey) {
+      return;
+    }
+
+    if (lastLocalFlightCardKeyRef.current === launchingCardKey) {
+      return;
+    }
+
+    ownFlightSequenceRef.current += 1;
+    lastLocalFlightCardKeyRef.current = launchingCardKey;
+    setActiveOwnFlightKey(ownFlightSequenceRef.current);
+  }, [launchingCardKey]);
+
+  const handleOwnFlightDone = useCallback((flightKey: number) => {
+    setSettledOwnFlightKey((current) => Math.max(current, flightKey));
+    setActiveOwnFlightKey((current) => (current === flightKey ? 0 : current));
+  }, []);
+
+  const handleOpponentFlightDone = useCallback((flightKey: number) => {
+    setSettledOpponentFlightKey((current) => Math.max(current, flightKey));
+  }, []);
+
+  useEffect(() => {
+    setActiveOwnFlightKey(0);
+    setSettledOwnFlightKey(0);
+    setSettledOpponentFlightKey(0);
+    lastLocalFlightCardKeyRef.current = null;
+  }, [roundIntroKey]);
 
   const effectiveViraRank = currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
   const isAwaitingBet = betState === 'awaiting_response';
@@ -1613,16 +3118,35 @@ export function MatchTableShell(props: MatchTableShellProps) {
     isMaoDeOnze && !props.specialDecisionPending && tablePhase === 'playing';
   const isMatchFinished = tablePhase === 'match_finished';
   const isHandFinished = tablePhase === 'hand_finished';
+  const isMaoDeOnzeTensionOpen = isMaoDeOnze && !isHandFinished && !isMatchFinished;
 
   const activeValueForTier = isAwaitingBet && pendingValue !== null ? pendingValue : currentValue;
   const activeTier = useMemo<ValeTier>(
     () => resolveValeTier(activeValueForTier),
     [activeValueForTier],
   );
-  const viewerPlayerId = mapSeatToPlayerId(mySeatView?.seatId);
-  const requesterIsMine = Boolean(
-    viewerPlayerId !== null && props.requestedBy === viewerPlayerId,
+  const tableTensionVisuals = useMemo(
+    () =>
+      resolveTableTensionVisuals({
+        activeValue: activeValueForTier,
+        isAwaitingBet,
+        isMaoDeOnzeTensionOpen,
+        isMaoDeOnzeDecisionPending: props.specialDecisionPending,
+        isResolvingRound,
+        isPlayerTurn: isMyTurn && canPlayCard,
+      }),
+    [
+      activeValueForTier,
+      canPlayCard,
+      isAwaitingBet,
+      isMaoDeOnzeTensionOpen,
+      isMyTurn,
+      isResolvingRound,
+      props.specialDecisionPending,
+    ],
   );
+  const viewerPlayerId = mapSeatToPlayerId(mySeatView?.seatId);
+  const requesterIsMine = Boolean(viewerPlayerId !== null && props.requestedBy === viewerPlayerId);
   const requestedByLabel = requesterIsMine
     ? 'Você pediu'
     : opponentSeatView?.botIdentity?.displayName
@@ -1674,39 +3198,327 @@ export function MatchTableShell(props: MatchTableShellProps) {
     };
   };
 
-  const resolvedMyCardString = isResolvingRound ? closingTableCards.mine : displayedMyPlayedCard;
-  const resolvedOpponentCardString = isResolvingRound
-    ? closingTableCards.opponent
-    : displayedOpponentPlayedCard;
+  const parseCardKey = (cardKey: string | null) => {
+    if (!cardKey) {
+      return null;
+    }
+
+    const [rank, suit] = cardKey.split('|');
+
+    if (!rank || !suit) {
+      return null;
+    }
+
+    return { rank, suit };
+  };
+
+  // PATCH 7.4 — Authoritative-or-event-driven felt guard.
+  //
+  // The previous render guard only trusted `currentPublicHand.rounds`. That
+  // protected against stale cards after a hand transition, but it also created
+  // a regression with slower pacing: `card-played` can be accepted by
+  // useMatchTableTransition before the visual public hand has committed the
+  // same card into rounds[]. During that gap, displayedOpponentPlayedCard was
+  // valid, but this guard forced the felt to render as empty, killing the bot
+  // flight/slot for one frame or more.
+  //
+  // Keep the stale-hand protection, but allow cards that came from the event
+  // transition layer while the table is actively playing. beginHandTransition
+  // clears these hook-owned visual cards, so they cannot leak into a new hand.
+  const currentHandHasAnyAuthoritativePlayedCard = (currentPublicHand?.rounds ?? []).some(
+    (round) => round.playerOneCard !== null || round.playerTwoCard !== null,
+  );
+  const hasEventDrivenVisualCard = Boolean(
+    tablePhase === 'playing' &&
+      (displayedMyPlayedCard !== null ||
+        displayedOpponentPlayedCard !== null ||
+        closingTableCards.mine !== null ||
+        closingTableCards.opponent !== null ||
+        pendingPlayedCard !== null),
+  );
+  const currentHandHasAnyPlayedCard =
+    currentHandHasAnyAuthoritativePlayedCard || hasEventDrivenVisualCard;
+
+  // PATCH G — Opponent's remaining cards.
+  //
+  // Each played round records `playerOneCard` and `playerTwoCard`. Whichever
+  // belongs to the opponent (based on viewerPlayerId) increments the
+  // opponent's "played" count. Starting hand size is 3, so the visible TP
+  // cards in OpponentCluster equal `3 - playedCount`. This is the live,
+  // round-accurate count: when card-played arrives for the bot, rounds[]
+  // updates with the bot's card non-null, the count drops, and the cluster
+  // re-renders one card fewer (with AnimatePresence exit).
+  const opponentCardsRemaining = useMemo(() => {
+    const rounds = currentPublicHand?.rounds ?? [];
+    if (viewerPlayerId === null) {
+      // Viewer not yet identified — fall back to "full hand minus finished
+      // rounds" using the finished flag so we don't render stale 3 cards
+      // on first paint of an in-progress hand.
+      const finishedCount = rounds.filter((round) => round.finished).length;
+      return Math.max(0, 3 - finishedCount);
+    }
+
+    const opponentField: 'playerOneCard' | 'playerTwoCard' =
+      viewerPlayerId === 'P1' ? 'playerTwoCard' : 'playerOneCard';
+    const opponentPlayedCount = rounds.reduce(
+      (acc, round) => (round[opponentField] !== null ? acc + 1 : acc),
+      0,
+    );
+    return Math.max(0, 3 - opponentPlayedCount);
+  }, [currentPublicHand, viewerPlayerId]);
+
+  const isRoundResolutionFrame = Boolean(
+    currentHandHasAnyPlayedCard &&
+    (isResolvingRound ||
+      displayedResolvedRoundFinished ||
+      closingTableCards.mine !== null ||
+      closingTableCards.opponent !== null),
+  );
+
+  // NOTE: During a resolved-round frame, both played slots must be rendered
+  // from one frozen snapshot. Otherwise one side can be cleared/covered by a
+  // flight while the other still has a card, producing the broken visual where
+  // only PERDEU appears without the matching WIN.
+  // NOTE: The latest-round fallback is only allowed while the hook is actively
+  // resolving the current round. After clearDisplayedTable runs, authoritative
+  // latestRound data can still describe the previous completed round for a few
+  // render frames; using it there repaints stale cards and makes the felt look
+  // dirty until the next play.
+  const canUseLatestRoundFallback = isResolvingRound;
+
+  const resolvedMyCardString = !currentHandHasAnyPlayedCard
+    ? null
+    : isRoundResolutionFrame
+      ? (closingTableCards.mine ??
+        displayedMyPlayedCard ??
+        (canUseLatestRoundFallback ? latestRoundMyPlayedCard : null))
+      : displayedMyPlayedCard;
+  const resolvedOpponentCardString = !currentHandHasAnyPlayedCard
+    ? null
+    : isRoundResolutionFrame
+      ? (closingTableCards.opponent ??
+        displayedOpponentPlayedCard ??
+        (canUseLatestRoundFallback ? latestRoundOpponentPlayedCard : null))
+      : displayedOpponentPlayedCard;
 
   const myCard = parseCard(resolvedMyCardString);
   const opponentCard = parseCard(resolvedOpponentCardString);
+  const activeOwnFlightCardKey = activeOwnFlightKey > 0 ? lastLocalFlightCardKeyRef.current : null;
+  const pendingOwnFlightCard =
+    activeOwnFlightCardKey !== null
+      ? parseCardKey(activeOwnFlightCardKey)
+      : pendingPlayedCard?.owner === 'mine'
+        ? parseCard(pendingPlayedCard.card)
+        : null;
+  const pendingOwnFlightRevealKey =
+    activeOwnFlightKey > 0
+      ? activeOwnFlightKey
+      : pendingPlayedCard?.owner === 'mine'
+        ? pendingPlayedCard.id
+        : 0;
+  const ownFlightCardString =
+    activeOwnFlightCardKey !== null
+      ? activeOwnFlightCardKey.replace('|', '')
+      : pendingPlayedCard?.owner === 'mine'
+        ? pendingPlayedCard.card
+        : null;
+  const opponentFlightCardString = opponentCard ? `${opponentCard.rank}${opponentCard.suit}` : null;
+  const isOwnFlightStillLanding = Boolean(
+    activeOwnFlightKey > 0 &&
+    settledOwnFlightKey !== activeOwnFlightKey &&
+    ownFlightCardString !== null,
+  );
+  const isStalePendingOwnFlightAfterSettle = Boolean(
+    pendingPlayedCard?.owner === 'mine' &&
+    activeOwnFlightKey === 0 &&
+    settledOwnFlightKey === ownFlightSequenceRef.current &&
+    lastLocalFlightCardKeyRef.current?.replace('|', '') === pendingPlayedCard.card,
+  );
+  const isPendingOwnFlightStillLanding = Boolean(
+    pendingPlayedCard?.owner === 'mine' &&
+    ownFlightCardString !== null &&
+    !isStalePendingOwnFlightAfterSettle,
+  );
+  const isOpponentFlightStillLanding = Boolean(
+    opponentRevealKey > 0 &&
+    settledOpponentFlightKey !== opponentRevealKey &&
+    opponentFlightCardString !== null,
+  );
+  const shouldAllowResolvingOwnFlight = Boolean(
+    isRoundResolutionFrame &&
+    pendingOwnFlightCard &&
+    (isOwnFlightStillLanding || isPendingOwnFlightStillLanding),
+  );
+  const shouldAllowResolvingOpponentFlight = Boolean(
+    isRoundResolutionFrame && opponentCard && isOpponentFlightStillLanding,
+  );
+  // NOTE: A resolver can arrive in the same socket burst as the final
+  // `card-played`. When that final card belongs to the viewer, tablePhase can
+  // advance before the local flight has finished. Do not suppress an already
+  // admitted resolving flight just because the authoritative phase moved on;
+  // otherwise the responder card loses its flight and/or its outcome badge.
+  const shouldSuppressOwnFlight = Boolean(
+    (tablePhase !== 'playing' || isRoundResolutionFrame) && !shouldAllowResolvingOwnFlight,
+  );
+  const shouldSuppressOpponentFlight = Boolean(
+    (tablePhase !== 'playing' || isRoundResolutionFrame) && !shouldAllowResolvingOpponentFlight,
+  );
+  const shouldRenderOwnFlight = Boolean(
+    !shouldSuppressOwnFlight &&
+    pendingOwnFlightCard &&
+    (isOwnFlightStillLanding || isPendingOwnFlightStillLanding),
+  );
+  const shouldRenderOpponentFlight = Boolean(
+    !shouldSuppressOpponentFlight && opponentCard && isOpponentFlightStillLanding,
+  );
+
+  // NOTE: A card may exist in two visual systems for a few frames: the
+  // authoritative table slot and the Framer Motion flight clone. The slot stays
+  // mounted for layout/ref stability, but its card content is hidden only while
+  // the matching flight is actually landing. When a round resolves while a
+  // flight is already active, the clone is allowed to finish its landing before
+  // the real slot becomes visible with WIN/PERDEU/EMPATE. This keeps the
+  // responder card from being killed by the resolution frame without creating
+  // a brand-new flight during resolution.
+  const shouldHideMySlotForFlight = Boolean(
+    shouldRenderOwnFlight &&
+    myCard &&
+    ownFlightCardString !== null &&
+    ownFlightCardString === resolvedMyCardString,
+  );
+  const shouldHideOpponentSlotForFlight = Boolean(
+    shouldRenderOpponentFlight &&
+    opponentCard &&
+    opponentFlightCardString !== null &&
+    opponentFlightCardString === resolvedOpponentCardString,
+  );
 
   const resolvedRoundFinished = displayedResolvedRoundFinished;
-  const resolvedRoundResult = displayedResolvedRoundResult;
+  useEffect(() => {
+    // NOTE: Do not clear `activeOwnFlightKey` from a derived render flag. The
+    // viewer-as-responder path is especially sensitive because `card-played`
+    // and `round-resolved` often arrive back-to-back. The flight owns its own
+    // lifecycle through `handleOwnFlightDone`; if it is deliberately suppressed,
+    // we only mark it as settled so the real slot can safely reveal the badge.
+    if (shouldSuppressOwnFlight && activeOwnFlightKey > 0) {
+      setSettledOwnFlightKey((current) => Math.max(current, activeOwnFlightKey));
+    }
 
-  const hasAnyClosingCard = closingTableCards.mine !== null || closingTableCards.opponent !== null;
+    if (shouldSuppressOpponentFlight) {
+      setSettledOpponentFlightKey((current) => Math.max(current, opponentRevealKey));
+    }
+  }, [
+    activeOwnFlightKey,
+    opponentRevealKey,
+    shouldSuppressOpponentFlight,
+    shouldSuppressOwnFlight,
+  ]);
+
+  const resolvedRoundResult = isRoundResolutionFrame ? displayedResolvedRoundResult : null;
+  const effectiveNextDecisionType =
+    currentPrivateHand?.nextDecisionType ?? currentPublicHand?.nextDecisionType ?? null;
+  const isBetResponseDecision = effectiveNextDecisionType === 'respond-bet';
+  const isRoundResolutionVisualHoldActive = isRoundResolutionFrame || resolvedRoundFinished;
+
+  // PATCH A — Aggregate "any flight clone still on screen" for defense-in-depth
+  // gating of the dock and center action bar inside the shell. Even if the
+  // matchPage layer correctly suppresses safeCanPlayCard via
+  // isAnyCardLandingInProgress, the shell defends itself in case a future
+  // consumer wires the shell directly without the suppression layer.
+  const isAnyShellFlightStillLanding =
+    isOpponentFlightStillLanding || isOwnFlightStillLanding || isPendingOwnFlightStillLanding;
+
+  const shouldHideActionSurfaceForRoundHold =
+    (isRoundResolutionVisualHoldActive || isAnyShellFlightStillLanding) && !isBetResponseDecision;
+
+  // CHANGE (cards persisting across hands — apply hand guard to derived
+  // booleans too): when currentHandHasAnyPlayedCard is false, all the
+  // hook-state-derived booleans below must read as false. Otherwise stale
+  // closingTableCards / displayedMyPlayedCard from a previous hand would
+  // incorrectly drive shouldBlockHandDock, isShowingResolvedRoundCards,
+  // shouldFade*, and the WIN/TIE badges into a new hand.
+  const hasAnyClosingCard =
+    currentHandHasAnyPlayedCard &&
+    (closingTableCards.mine !== null || closingTableCards.opponent !== null);
   const hasAnyDisplayedCard =
-    displayedMyPlayedCard !== null || displayedOpponentPlayedCard !== null;
+    currentHandHasAnyPlayedCard &&
+    (displayedMyPlayedCard !== null || displayedOpponentPlayedCard !== null);
 
   const isShowingResolvedRoundCards = Boolean(
-    resolvedRoundFinished && isResolvingRound && (hasAnyClosingCard || hasAnyDisplayedCard),
+    isRoundResolutionFrame &&
+    resolvedRoundResult !== null &&
+    (hasAnyClosingCard || hasAnyDisplayedCard || myCard !== null || opponentCard !== null),
   );
+  // Kept for legacy debug snapshots / parity. Not used by per-slot badge gating.
+  const isResolutionFlightLanding = Boolean(
+    isShowingResolvedRoundCards && (shouldHideMySlotForFlight || shouldHideOpponentSlotForFlight),
+  );
+  // CHANGE (rodada intermediária — badges WIN/PERDEU/EMPATE não apareciam):
+  // Previously canShowResolutionBadges was a single global flag gated by
+  // `!isResolutionFlightLanding`. That meant: while ANY flight (own or
+  // opponent) was still landing, NEITHER slot could show its badge. In the
+  // common bot-closes-the-round case, the opponent flight starts at
+  // CARD_REVEAL_DELAY_MS (~420 ms) after card-played and lasts
+  // FLIGHT_DURATION_MS (~460 ms). During that ~460 ms window the player's
+  // own slot — which is already settled and not covered by any flight —
+  // had its WIN ribbon suppressed by the opponent's flight, even though
+  // each PlayedSlot already independently suppresses its own badge while
+  // its own slot is covered (see PlayedSlot.shouldShowSettledCard).
+  //
+  // Fix: derive an *eligibility* flag (resolvedRoundIsScored) that is
+  // independent of either flight, then derive PER-SLOT outcome flags that
+  // each only consider their own flight. The actual badge render gate
+  // inside PlayedSlot (shouldShowSettledCard = !isCoveredByFlight) still
+  // hides each slot's badge during its own flight cover, so we keep the
+  // "no badge on a flying clone" invariant without globally muting both
+  // sides while either side is still in motion.
+  //
+  // canShowResolutionBadges is preserved as a coarse "is the resolution
+  // scene active" predicate for the surrounding UI (state label, sound
+  // gating, etc.) — it now matches resolvedRoundIsScored to keep semantics
+  // simple.
+  const resolvedRoundIsScored = Boolean(
+    isShowingResolvedRoundCards && myCard !== null && opponentCard !== null,
+  );
+  const canShowResolutionBadges = resolvedRoundIsScored;
+  const canShowMyResolutionBadge = Boolean(resolvedRoundIsScored && !shouldHideMySlotForFlight);
+  const canShowOpponentResolutionBadge = Boolean(
+    resolvedRoundIsScored && !shouldHideOpponentSlotForFlight,
+  );
+
+  const myDomainPlayerId = mapSeatToPlayerId(mySeatView?.seatId);
+  const opponentDomainPlayerId = mapSeatToPlayerId(opponentSeatView?.seatId);
+  const myResolvedOutcome = resolveSlotRoundOutcome({
+    roundResult: resolvedRoundResult,
+    playerId: myDomainPlayerId,
+    canShow: canShowResolutionBadges,
+  });
+  const opponentResolvedOutcome = resolveSlotRoundOutcome({
+    roundResult: resolvedRoundResult,
+    playerId: opponentDomainPlayerId,
+    canShow: canShowResolutionBadges,
+  });
 
   const shouldFadeMyCard = Boolean(
+    currentHandHasAnyPlayedCard &&
     closingTableCards.mine !== null &&
     resolvedMyCardString === closingTableCards.mine &&
-    isResolvingRound,
+    isResolvingRound &&
+    myResolvedOutcome !== 'win',
   );
   const shouldFadeOpponentCard = Boolean(
+    currentHandHasAnyPlayedCard &&
     closingTableCards.opponent !== null &&
     resolvedOpponentCardString === closingTableCards.opponent &&
-    isResolvingRound,
+    isResolvingRound &&
+    opponentResolvedOutcome !== 'win',
   );
 
-  const myCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P1');
-  const opponentCardWon = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'P2');
-  const isTieRound = Boolean(isShowingResolvedRoundCards && resolvedRoundResult === 'TIE');
+  const myCardWon = myResolvedOutcome === 'win';
+  const opponentCardWon = opponentResolvedOutcome === 'win';
+  const isTieRound = Boolean(canShowResolutionBadges && resolvedRoundResult === 'TIE');
+  const myCardLost = myResolvedOutcome === 'loss';
+  const opponentCardLost = opponentResolvedOutcome === 'loss';
 
   const hasPendingBetDecision =
     isAwaitingBet || availableActions.canAcceptBet || availableActions.canDeclineBet;
@@ -1717,8 +3529,166 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
   // Optional raise actions must not freeze the hand. In Truco, raising to 6/9/12 is
   // an alternative action on the player's turn, not a mandatory response gate.
-  const shouldBlockHandDock = hasPendingBetDecision || hasPendingSpecialDecision;
+  //
+  // CHANGE (P0 — interactivity during resolve): the hand dock must also be
+  // non-clickable while a round is resolving on the felt. Otherwise a click
+  // can land in the resolution-hold window and either cause a server "not
+  // your turn" error or visually overlay the next card on top of the
+  // resolving scene.
+  //
+  // We block while:
+  //   - a bet/special decision is pending (existing behavior); OR
+  //   - a round is currently resolving (the closing scene is on the felt); OR
+  //   - the closing-scene cards are still pinned (defensive: covers the brief
+  //     clean-frame window between RESOLUTION_HOLD and the next round); OR
+  //   - PATCH A: a flight clone (own or opponent) is still on screen. The
+  //     hand must not be clickable while a card is visually landing on the
+  //     felt, even if the authoritative server state already declared the
+  //     player's turn. This is defense-in-depth alongside matchPage's
+  //     shouldSuppressPlayableUi.
+  const shouldBlockHandDock =
+    hasPendingBetDecision ||
+    hasPendingSpecialDecision ||
+    isResolvingRound ||
+    hasAnyClosingCard ||
+    isAnyShellFlightStillLanding;
 
+
+  // NOTE: This is intentionally stricter than canPlayCard. The server may
+  // already be ready for the next player while the table is still landing a
+  // flight or holding the resolution frame. The turn cue must only appear
+  // when the hand is actually clickable and visually safe.
+  const isHandDockBlockedForTurnCue = shouldBlockHandDock || isRoundResolutionVisualHoldActive;
+  const canShowPlayerTurnCue = Boolean(
+    tablePhase === 'playing' &&
+      isMyTurn &&
+      canPlayCard &&
+      myCards.length > 0 &&
+      !isHandDockBlockedForTurnCue &&
+      !isViewerMaoDeOnzeDecision &&
+      !isAwaitingBet &&
+      !shouldShowTrucoDrama,
+  );
+  const shouldMuteBotPresenceForDrama = shouldShowTrucoDrama;
+  const isOpponentBotPressureSource = Boolean(
+    opponentSeatView?.isBot && !shouldMuteBotPresenceForDrama && isAwaitingBet && !requesterIsMine,
+  );
+  const isOpponentBotThinking = Boolean(
+    tablePhase === 'playing' &&
+      opponentSeatView?.isBot &&
+      opponentSeatView.isCurrentTurn &&
+      !isHandFinished &&
+      !isMatchFinished &&
+      !isAwaitingBet &&
+      !shouldShowTrucoDrama &&
+      !isViewerMaoDeOnzeDecision &&
+      !isResolvingRound &&
+      !isRoundResolutionVisualHoldActive &&
+      !isAnyShellFlightStillLanding,
+  );
+  const isOpponentBotWinningRound = Boolean(
+    opponentSeatView?.isBot && canShowResolutionBadges && opponentResolvedOutcome === 'win',
+  );
+  const isOpponentBotLosingRound = Boolean(
+    opponentSeatView?.isBot && canShowResolutionBadges && opponentResolvedOutcome === 'loss',
+  );
+  const isOpponentBotHighValuePressure = Boolean(
+    opponentSeatView?.isBot && activeValueForTier >= 6 && tablePhase === 'playing',
+  );
+  const botPresenceTone: BotPresenceTone = isOpponentBotPressureSource
+    ? 'pressure'
+    : isMaoDeOnzeTensionOpen
+      ? 'maoDeOnze'
+      : isOpponentBotWinningRound
+        ? 'wonRound'
+        : isOpponentBotLosingRound
+          ? 'lostRound'
+          : isOpponentBotThinking
+            ? 'thinking'
+            : isOpponentBotHighValuePressure
+              ? 'pressure'
+              : 'idle';
+  const botPresenceLine = resolveBotPresenceLine({
+    seat: opponentSeatView,
+    tone: botPresenceTone,
+    currentValue: activeValueForTier,
+  });
+  const shouldShowBotPresenceQuote =
+    isOpponentBotPressureSource ||
+    isMaoDeOnzeTensionOpen ||
+    isOpponentBotWinningRound ||
+    isOpponentBotLosingRound ||
+    isOpponentBotThinking;
+  const botPresenceQuote = shouldShowBotPresenceQuote
+    ? resolveBotPresenceQuote({
+        seat: opponentSeatView,
+        tone: botPresenceTone,
+        currentValue: activeValueForTier,
+      })
+    : null;
+  const [heldBotPresence, setHeldBotPresence] = useState<BotPresenceHold | null>(null);
+  const botPresenceHoldTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (shouldMuteBotPresenceForDrama || !botPresenceLine || botPresenceTone === 'idle') {
+      return;
+    }
+
+    const id = Date.now();
+    const duration =
+      botPresenceTone === 'wonRound' || botPresenceTone === 'lostRound'
+        ? 2300
+        : botPresenceTone === 'thinking'
+          ? 3200
+          : botPresenceTone === 'pressure'
+            ? 3000
+            : 2800;
+
+    if (botPresenceHoldTimeoutRef.current !== null) {
+      window.clearTimeout(botPresenceHoldTimeoutRef.current);
+    }
+
+    setHeldBotPresence({
+      id,
+      line: botPresenceLine,
+      quote: botPresenceQuote,
+      tone: botPresenceTone,
+    });
+
+    botPresenceHoldTimeoutRef.current = window.setTimeout(() => {
+      setHeldBotPresence((current) => (current?.id === id ? null : current));
+      botPresenceHoldTimeoutRef.current = null;
+    }, duration);
+  }, [botPresenceLine, botPresenceQuote, botPresenceTone, shouldMuteBotPresenceForDrama]);
+
+  useEffect(() => {
+    return () => {
+      if (botPresenceHoldTimeoutRef.current !== null) {
+        window.clearTimeout(botPresenceHoldTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const visibleBotPresenceTone = shouldMuteBotPresenceForDrama
+    ? 'idle'
+    : botPresenceLine
+      ? botPresenceTone
+      : (heldBotPresence?.tone ?? 'idle');
+  const visibleBotPresenceLine = shouldMuteBotPresenceForDrama
+    ? null
+    : (botPresenceLine ?? heldBotPresence?.line ?? null);
+  const visibleBotPresenceQuote = shouldMuteBotPresenceForDrama
+    ? null
+    : (botPresenceQuote ?? heldBotPresence?.quote ?? null);
+  const hasOptionalBetAction =
+    availableActions.canRequestTruco ||
+    availableActions.canRaiseToSix ||
+    availableActions.canRaiseToNine ||
+    availableActions.canRaiseToTwelve;
+  const shouldHideCenterActionBar =
+    shouldHideActionSurfaceForRoundHold ||
+    isMaoDeOnzeAcceptedState ||
+    (canShowPlayerTurnCue && !hasOptionalBetAction);
   const [climaxDismissed, setClimaxDismissed] = useState(false);
   const lastClimaxPhaseRef = useRef<TablePhase | null>(null);
 
@@ -1764,7 +3734,11 @@ export function MatchTableShell(props: MatchTableShellProps) {
       return { label: 'Mão de 11 aceita', accent: 'win' };
     }
 
-    if (isShowingResolvedRoundCards && resolvedRoundResult) {
+    if (isAnyShellFlightStillLanding) {
+      return { label: 'Aguardando', accent: 'neutral' };
+    }
+
+    if (canShowResolutionBadges && resolvedRoundResult) {
       if (resolvedRoundResult === 'P1') {
         return { label: 'Rodada sua', accent: 'win' };
       }
@@ -1775,17 +3749,19 @@ export function MatchTableShell(props: MatchTableShellProps) {
     }
 
     if (isMyTurn && canPlayCard) {
-      return { label: 'Sua jogada', accent: 'neutral' };
+      return { label: 'Em turno', accent: 'neutral' };
     }
 
     return { label: 'Aguardando', accent: 'neutral' };
   }, [
     canPlayCard,
+    canShowResolutionBadges,
     currentValue,
     isAwaitingBet,
     isHandFinished,
     isMatchFinished,
     isMyTurn,
+    isAnyShellFlightStillLanding,
     isShowingResolvedRoundCards,
     pendingValue,
     isMaoDeOnzeAcceptedState,
@@ -1835,9 +3811,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
       suppressHandOutcomeModal: props.suppressHandOutcomeModal ?? false,
       shouldShowHandClimax: Boolean(climax),
       shouldFlyPlayer: myCardLaunching,
-      shouldFlyOpponent: false,
-      hasExplicitOpponentFlight: false,
-      hasExplicitPlayerFlight: false,
+      shouldFlyOpponent: shouldHideOpponentSlotForFlight,
+      hasExplicitOpponentFlight: shouldHideOpponentSlotForFlight,
+      hasExplicitPlayerFlight: shouldHideMySlotForFlight,
       displayedMyPlayedCard,
       displayedOpponentPlayedCard,
       closingTableCards,
@@ -1854,15 +3830,30 @@ export function MatchTableShell(props: MatchTableShellProps) {
       resolvedRoundFinished,
       resolvedRoundResult,
       isShowingResolvedRoundCards,
+      isResolutionFlightLanding,
+      canShowResolutionBadges,
+      canShowMyResolutionBadge,
+      canShowOpponentResolutionBadge,
       shouldFadeMyCard,
       shouldFadeOpponentCard,
+      myDomainPlayerId,
+      opponentDomainPlayerId,
       myCardWon,
       opponentCardWon,
+      myCardLost,
+      opponentCardLost,
       isTieRound,
       canPlayCard,
       isMyTurn,
       myCardsCount: myCards.length,
       launchingCardKey,
+      activeOwnFlightKey,
+      pendingOwnFlightRevealKey,
+      settledOwnFlightKey,
+      settledOpponentFlightKey,
+      shouldHideMySlotForFlight,
+      shouldHideOpponentSlotForFlight,
+      canShowPlayerTurnCue,
     });
   }, [
     canPlayCard,
@@ -1875,14 +3866,22 @@ export function MatchTableShell(props: MatchTableShellProps) {
     isMyTurn,
     isResolvingRound,
     isShowingResolvedRoundCards,
+    isResolutionFlightLanding,
+    canShowResolutionBadges,
+    canShowMyResolutionBadge,
+    canShowOpponentResolutionBadge,
     isTieRound,
     launchingCardKey,
+    activeOwnFlightKey,
     myCard,
     myCardLaunching,
     myCardWon,
+    myDomainPlayerId,
     myCards.length,
     opponentCard,
     opponentCardWon,
+    opponentDomainPlayerId,
+    pendingOwnFlightRevealKey,
     props.suppressHandOutcomeModal,
     resolvedMyCardString,
     resolvedOpponentCardString,
@@ -1890,20 +3889,54 @@ export function MatchTableShell(props: MatchTableShellProps) {
     resolvedRoundResult,
     shouldFadeMyCard,
     shouldFadeOpponentCard,
+    shouldHideMySlotForFlight,
+    shouldHideOpponentSlotForFlight,
+    canShowPlayerTurnCue,
+    settledOwnFlightKey,
+    settledOpponentFlightKey,
     tablePhase,
   ]);
 
+  const lastResolutionSoundKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isShowingResolvedRoundCards) {
+    if (!canShowResolutionBadges || !resolvedRoundResult) {
+      lastResolutionSoundKeyRef.current = null;
       return;
     }
 
-    if (resolvedRoundResult === 'P1') {
-      play('round-win', 0.6);
+    const soundKey = `${resolvedRoundResult}|${props.roundResolvedKey}|${myRevealKey}|${opponentRevealKey}`;
+
+    if (lastResolutionSoundKeyRef.current === soundKey) {
+      return;
     }
-  }, [isShowingResolvedRoundCards, play, resolvedRoundResult]);
+
+    lastResolutionSoundKeyRef.current = soundKey;
+
+    if (resolvedRoundResult === 'P1') {
+      play('round-win', 0.65);
+      return;
+    }
+
+    if (resolvedRoundResult === 'P2') {
+      play('round-loss', 0.55);
+      return;
+    }
+
+    if (resolvedRoundResult === 'TIE') {
+      play('round-tie', 0.5);
+    }
+  }, [
+    canShowResolutionBadges,
+    myRevealKey,
+    opponentRevealKey,
+    play,
+    props.roundResolvedKey,
+    resolvedRoundResult,
+  ]);
 
   const climaxFiredRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!climax) {
       climaxFiredRef.current = null;
@@ -1911,15 +3944,20 @@ export function MatchTableShell(props: MatchTableShellProps) {
     }
 
     const signature = `${climax.isMyHand}|${climax.awardedPoints}|${tablePhase}`;
+
     if (climaxFiredRef.current === signature) {
       return;
     }
+
     climaxFiredRef.current = signature;
 
     if (climax.isMyHand) {
       fire();
-      play(isMatchFinished ? 'game-win' : 'round-win', isMatchFinished ? 0.8 : 0.7);
+      play(isMatchFinished ? 'game-win' : 'hand-win', isMatchFinished ? 0.85 : 0.7);
+      return;
     }
+
+    play(isMatchFinished ? 'game-loss' : 'hand-loss', isMatchFinished ? 0.7 : 0.55);
   }, [climax, fire, isMatchFinished, play, tablePhase]);
 
   const lastDismissedClimaxKeyRef = useRef<string | null>(null);
@@ -1968,9 +4006,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
       className="relative flex min-h-[calc(100vh-220px)] w-full flex-col xl:min-h-[720px]"
       style={{
         borderRadius: 28,
-        border: '1px solid rgba(201,168,76,0.14)',
-        boxShadow:
-          '0 0 0 1px rgba(0,0,0,0.50), 0 32px 82px rgba(0,0,0,0.64), inset 0 0 220px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.04)',
+        border: `1px solid ${tableTensionVisuals.shellBorderColor}`,
+        boxShadow: tableTensionVisuals.shellBoxShadow,
       }}
     >
       {/* CHANGE: decorative background layer — clipped to the rounded corners,
@@ -1980,8 +4017,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
         className="pointer-events-none absolute inset-0 overflow-hidden"
         style={{
           borderRadius: 28,
-          background:
-            'radial-gradient(ellipse 120% 92% at 50% -6%, rgba(201,168,76,0.10) 0%, rgba(46,92,53,0.12) 18%, transparent 40%), radial-gradient(ellipse at 50% 55%, #10231a 0%, #0d1a16 34%, #08110f 62%, #04090a 100%)',
+          background: tableTensionVisuals.feltBackground,
         }}
       >
         {/* Felt grain */}
@@ -2010,9 +4046,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
           style={{
             borderTopLeftRadius: '46%',
             borderTopRightRadius: '46%',
-            borderTop: '1px solid rgba(201,168,76,0.12)',
-            borderLeft: '1px solid rgba(201,168,76,0.06)',
-            borderRight: '1px solid rgba(201,168,76,0.06)',
+            borderTop: `1px solid ${tableTensionVisuals.archTopColor}`,
+            borderLeft: `1px solid ${tableTensionVisuals.archSideColor}`,
+            borderRight: `1px solid ${tableTensionVisuals.archSideColor}`,
           }}
         />
 
@@ -2020,38 +4056,30 @@ export function MatchTableShell(props: MatchTableShellProps) {
         <div
           className="felt-breathe-anim absolute inset-x-[22%] top-[28%] h-[44%] rounded-full"
           style={{
-            background: 'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 36%, transparent 68%)',
+            background: tableTensionVisuals.centreAmbientBackground,
             filter: 'blur(24px)',
           }}
         />
 
         {/* Central reactive pulse */}
         <motion.div
-          key={`centre-pulse-${isAwaitingBet}-${isResolvingRound}`}
+          key={`centre-pulse-${tableTensionVisuals.pulseKey}`}
           className="absolute left-1/2 top-[46%] z-[1] h-[220px] w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-full"
           initial={{ opacity: 0.12, scale: 0.94 }}
           animate={{
-            opacity: isResolvingRound
-              ? [0.22, 0.4, 0.22]
-              : isAwaitingBet
-                ? [0.16, 0.3, 0.16]
-                : isMyTurn && canPlayCard
-                  ? [0.1, 0.18, 0.1]
-                  : [0.06, 0.1, 0.06],
-            scale: isResolvingRound ? [0.96, 1.03, 0.98] : [0.98, 1.01, 0.98],
+            opacity: tableTensionVisuals.pulseOpacity,
+            scale: tableTensionVisuals.pulseScale,
           }}
-          transition={{ duration: isResolvingRound ? 1.0 : 1.9, repeat: Infinity }}
+          transition={{
+            duration: tableTensionVisuals.pulseDuration,
+            repeat: Infinity,
+          }}
           style={{
-            background: isResolvingRound
-              ? 'radial-gradient(circle, rgba(255,223,128,0.22) 0%, rgba(201,168,76,0.10) 40%, transparent 72%)'
-              : isAwaitingBet
-                ? 'radial-gradient(circle, rgba(220,38,38,0.18) 0%, rgba(127,29,29,0.08) 40%, transparent 72%)'
-                : isMyTurn && canPlayCard
-                  ? 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, rgba(255,255,255,0.03) 42%, transparent 72%)'
-                  : 'radial-gradient(circle, rgba(201,168,76,0.05) 0%, rgba(36,78,44,0.03) 42%, transparent 70%)',
+            background: tableTensionVisuals.pulseBackground,
             filter: 'blur(24px)',
           }}
         />
+
 
         <AnimatePresence>
           {shouldShowTrucoDrama ? (
@@ -2076,6 +4104,15 @@ export function MatchTableShell(props: MatchTableShellProps) {
         </AnimatePresence>
       </div>
 
+      <AnimatePresence>
+        {isMaoDeOnzeTensionOpen ? (
+          <MaoDeOnzeTableTension
+            isOpen={isMaoDeOnzeTensionOpen}
+            isDecisionPending={props.specialDecisionPending}
+          />
+        ) : null}
+      </AnimatePresence>
+
       {/* Content layer — overflow-visible so the player's hand can breathe
           past the pixel-perfect container bottom during hover-lift. */}
       <div className="relative z-[2] flex min-h-0 flex-1 flex-col px-4 pb-5 pt-3">
@@ -2088,39 +4125,126 @@ export function MatchTableShell(props: MatchTableShellProps) {
           />
 
           <div className="flex min-w-0 flex-1 flex-col items-center justify-between gap-3 py-1">
-            {opponentSeatView ? <OpponentCluster seat={opponentSeatView} isOpponent /> : null}
+            {opponentSeatView ? (
+              <div ref={opponentFlightSourceRef}>
+                <OpponentCluster
+                  seat={opponentSeatView}
+                  cardsRemaining={opponentCardsRemaining}
+                  isOpponent
+                  presenceLine={visibleBotPresenceLine}
+                  presenceQuote={visibleBotPresenceQuote}
+                  presenceTone={visibleBotPresenceTone}
+                  suppressNeutralProfile={shouldMuteBotPresenceForDrama}
+                />
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-center gap-8">
               <ViraCard rank={effectiveViraRank} suit="C" />
 
-              <PlayedSlot
-                card={opponentCard}
-                revealKey={opponentRevealKey}
-                isWinner={opponentCardWon}
-                isFading={shouldFadeOpponentCard}
-                rotation={-6}
-                winnerBadgeLabel="WIN"
-                isTieHighlight={isTieRound}
-              />
+              <div className="relative grid w-[456px] grid-cols-[188px_80px_188px] items-center justify-items-center rounded-[34px] px-2 py-1">
+                <AnimatePresence>
+                  {shouldHideActionSurfaceForRoundHold &&
+                  myResolvedOutcome !== null &&
+                  myCard !== null &&
+                  opponentCard !== null ? (
+                    <RoundClashVerdict
+                      outcome={myResolvedOutcome}
+                      myCard={myCard}
+                      opponentCard={opponentCard}
+                    />
+                  ) : null}
+                </AnimatePresence>
 
-              <PlayedSlot
-                card={myCard}
-                revealKey={myRevealKey}
-                isWinner={myCardWon}
-                isFading={shouldFadeMyCard}
-                rotation={6}
-                isLaunching={myCardLaunching}
-                winnerBadgeLabel="WIN"
-                isTieHighlight={isTieRound}
-              />
+                <RoundClashEffects
+                  outcome={myResolvedOutcome}
+                  clashKey={`${props.roundResolvedKey}-${myRevealKey}-${opponentRevealKey}`}
+                  isOpen={
+                    canShowResolutionBadges &&
+                    myCard !== null &&
+                    opponentCard !== null &&
+                    myResolvedOutcome !== null
+                  }
+                />
+
+                <motion.div
+                  ref={opponentPlayedSlotRef}
+                  className="relative z-20 col-start-1"
+                  animate={
+                    canShowResolutionBadges && opponentResolvedOutcome === 'win'
+                      ? buildKickAnimation('left')
+                      : canShowResolutionBadges && opponentResolvedOutcome === 'loss'
+                        ? buildLoserKick('left')
+                        : { x: 0, y: 0, rotate: 0, scale: 1 }
+                  }
+                  transition={{
+                    duration: 1.08,
+                    times: [0, 0.34, 0.72, 1],
+                    ease: [0.2, 0.9, 0.24, 1],
+                  }}
+                >
+                  <PlayedSlot
+                    card={opponentCard}
+                    revealKey={opponentRevealKey}
+                    isWinner={opponentResolvedOutcome === 'win'}
+                    isFading={shouldFadeOpponentCard}
+                    rotation={-6}
+                    isLaunching={shouldHideOpponentSlotForFlight}
+                    isCoveredByFlight={shouldHideOpponentSlotForFlight}
+                    winnerBadgeLabel="VENCEU"
+                    loserBadgeLabel="PERDEU"
+                    isTieHighlight={opponentResolvedOutcome === 'tie'}
+                    isLoser={opponentResolvedOutcome === 'loss'}
+                    showOutcomeBadge
+                  />
+                </motion.div>
+
+                <div className="relative z-10 col-start-2 flex h-[190px] w-[80px] items-center justify-center" />
+
+                <motion.div
+                  ref={playerPlayedSlotRef}
+                  className="relative z-20 col-start-3"
+                  animate={
+                    canShowResolutionBadges && myResolvedOutcome === 'win'
+                      ? buildKickAnimation('right')
+                      : canShowResolutionBadges && myResolvedOutcome === 'loss'
+                        ? buildLoserKick('right')
+                        : { x: 0, y: 0, rotate: 0, scale: 1 }
+                  }
+                  transition={{
+                    duration: 1.08,
+                    times: [0, 0.34, 0.72, 1],
+                    ease: [0.2, 0.9, 0.24, 1],
+                  }}
+                >
+                  <PlayedSlot
+                    card={myCard}
+                    revealKey={myRevealKey}
+                    isWinner={myResolvedOutcome === 'win'}
+                    isFading={shouldFadeMyCard}
+                    rotation={6}
+                    isLaunching={myCardLaunching}
+                    isCoveredByFlight={shouldHideMySlotForFlight}
+                    winnerBadgeLabel="VENCEU"
+                    loserBadgeLabel="PERDEU"
+                    isTieHighlight={myResolvedOutcome === 'tie'}
+                    isLoser={myResolvedOutcome === 'loss'}
+                    showOutcomeBadge
+                  />
+                </motion.div>
+              </div>
             </div>
 
-            <div className="mt-0">
-              <CenterActionBar
-                availableActions={availableActions}
-                onAction={onAction}
-                isBetDramaActive={shouldShowTrucoDrama}
-              />
+            <div className="mt-0 min-h-[88px] w-full max-w-[380px]">
+              {shouldHideCenterActionBar ? (
+                <div aria-hidden className="min-h-[88px]" />
+              ) : (
+                <CenterActionBar
+                  availableActions={availableActions}
+                  onAction={onAction}
+                  isBetDramaActive={shouldShowTrucoDrama}
+                />
+              )}
             </div>
           </div>
 
@@ -2129,23 +4253,77 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
         {/* Player hand — shrink-0 so it doesn't squeeze, with a bit more
             vertical air. */}
-        <div className="relative mt-3 shrink-0 pb-2">
-          <MatchPlayerHandDock
-            myCards={myCards}
-            canPlayCard={shouldBlockHandDock ? false : canPlayCard}
-            tablePhase={tablePhase}
-            launchingCardKey={launchingCardKey}
-            currentPrivateHand={currentPrivateHand}
-            currentPublicHand={currentPublicHand}
-            onPlayCard={onPlayCard}
-            isMyTurn={isMyTurn}
-            isOneVsOne={props.isOneVsOne}
-            viraRank={effectiveViraRank}
-            isSubdued={Boolean(climax) && !isViewerMaoDeOnzeDecision}
-            isDecisionFocus={isViewerMaoDeOnzeDecision}
-          />
+        <div ref={playerFlightSourceRef} className="relative mt-3 shrink-0 pb-2">
+          <AnimatePresence>
+            {canShowPlayerTurnCue ? (
+              <PlayerHandTurnCue
+                isOpen={canShowPlayerTurnCue}
+                isMaoDeOnze={isMaoDeOnzeTensionOpen}
+              />
+            ) : null}
+          </AnimatePresence>
+
+          <div className="relative z-10">
+            <MatchPlayerHandDock
+              myCards={myCards}
+              canPlayCard={
+                shouldBlockHandDock || isRoundResolutionVisualHoldActive ? false : canPlayCard
+              }
+              tablePhase={tablePhase}
+              launchingCardKey={launchingCardKey}
+              currentPrivateHand={currentPrivateHand}
+              currentPublicHand={currentPublicHand}
+              onPlayCard={onPlayCard}
+              isMyTurn={isMyTurn}
+              isOneVsOne={props.isOneVsOne}
+              viraRank={effectiveViraRank}
+              isSubdued={Boolean(climax) && !isViewerMaoDeOnzeDecision}
+              isDecisionFocus={isViewerMaoDeOnzeDecision}
+              onCardElementChange={handlePlayerCardElementChange}
+            />
+          </div>
         </div>
       </div>
+
+      <PlayerCardFlight
+        revealKey={pendingOwnFlightRevealKey}
+        card={shouldRenderOwnFlight ? pendingOwnFlightCard : null}
+        suppressed={shouldSuppressOwnFlight || !shouldRenderOwnFlight}
+        sourceTargetRef={playerFlightSourceRef}
+        sourceTargetElement={playerCardFlightSourceElement}
+        landTargetRef={playerPlayedSlotRef}
+        outcomeBadge={
+          canShowResolutionBadges && shouldHideMySlotForFlight ? myResolvedOutcome : null
+        }
+        outcomeBadgeLabel={
+          // PATCH B — Localised to PT to match the loser/tie labels and the
+          // rest of the product copy.
+          myResolvedOutcome === 'loss' ? 'PERDEU' : myResolvedOutcome === 'win' ? 'VENCEU' : null
+        }
+        onFlightDone={handleOwnFlightDone}
+      />
+
+      <OpponentCardFlight
+        revealKey={opponentRevealKey}
+        card={shouldRenderOpponentFlight ? opponentCard : null}
+        suppressed={shouldSuppressOpponentFlight || !shouldRenderOpponentFlight}
+        sourceTargetRef={opponentFlightSourceRef}
+        landTargetRef={opponentPlayedSlotRef}
+        outcomeBadge={
+          canShowResolutionBadges && shouldHideOpponentSlotForFlight
+            ? opponentResolvedOutcome
+            : null
+        }
+        outcomeBadgeLabel={
+          // PATCH B — Localised to PT to match the loser/tie labels.
+          opponentResolvedOutcome === 'loss'
+            ? 'PERDEU'
+            : opponentResolvedOutcome === 'win'
+              ? 'VENCEU'
+              : null
+        }
+        onFlightDone={handleOpponentFlightDone}
+      />
 
       <TrucoDramaOverlay
         isOpen={shouldShowTrucoDrama}
@@ -2203,5 +4381,3 @@ export function MatchTableShell(props: MatchTableShellProps) {
     </div>
   );
 }
-
-

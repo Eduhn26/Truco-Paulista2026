@@ -1,7 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import type { MatchAction } from './matchActionTypes';
 import type { CardPayload, MatchStatePayload } from '../../services/socket/socketTypes';
+
+type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+
+type PendingPlayCardEmission = {
+  matchId: string;
+  cardKey: string;
+  serverCard: string;
+  emittedAt: number;
+};
 
 type UseMatchActionBridgeParams = {
   resolvedMatchId: string;
@@ -23,6 +32,15 @@ type UseMatchActionBridgeParams = {
   emitDeclineMaoDeOnze: (matchId: string) => void;
   beginHandTransition: () => void;
   beginOwnCardLaunch: (params: { cardKey: string; serverCard: string }) => void;
+  // P0 turn-gate context. Must be sourced from the authoritative view model
+  // (currentTurnSeatId, nextDecisionType, tablePhase, isResolvingRound) so
+  // the bridge can refuse a play-card emission when the visual UI temporarily
+  // disagrees with the authoritative state.
+  currentTurnSeatId: string | null;
+  nextDecisionType: string | null;
+  tablePhase: TablePhase;
+  isResolvingRound: boolean;
+  isTableInteractionLocked: boolean;
 };
 
 type UseMatchActionBridgeResult = {
@@ -31,6 +49,8 @@ type UseMatchActionBridgeResult = {
   handlePlayCard: (card: CardPayload) => void;
   handleMatchAction: (action: MatchAction) => void;
 };
+
+const DIFFERENT_CARD_EMISSION_LOCK_MS = 900;
 
 export function useMatchActionBridge(
   params: UseMatchActionBridgeParams,
@@ -55,7 +75,23 @@ export function useMatchActionBridge(
     emitDeclineMaoDeOnze,
     beginHandTransition,
     beginOwnCardLaunch,
+    currentTurnSeatId,
+    nextDecisionType,
+    tablePhase,
+    isResolvingRound,
+    isTableInteractionLocked,
   } = params;
+
+  const pendingPlayCardEmissionRef = useRef<PendingPlayCardEmission | null>(null);
+
+  useEffect(() => {
+    const shouldResetPendingPlayCard =
+      !resolvedMatchId || tablePhase !== 'playing' || nextDecisionType !== 'play-card';
+
+    if (shouldResetPendingPlayCard) {
+      pendingPlayCardEmissionRef.current = null;
+    }
+  }, [resolvedMatchId, tablePhase, nextDecisionType]);
 
   return useMemo(
     () => ({
@@ -80,6 +116,8 @@ export function useMatchActionBridge(
           return;
         }
 
+        pendingPlayCardEmissionRef.current = null;
+
         // NOTE: Starting a new hand is the one place where a full table reset is expected.
         beginHandTransition();
         emitStartHand(resolvedMatchId);
@@ -87,13 +125,78 @@ export function useMatchActionBridge(
       },
 
       handlePlayCard(card: CardPayload): void {
-        if (!resolvedMatchId || !mySeat || !canPlayCard) {
-          appendLog('Cannot play card in the current state.');
+        // NOTE (P0 — authoritative turn gate): the bridge is the last line of
+        // defense before a play-card socket emission. The panel already gates
+        // by canPlayCard + isMyTurn + tablePhase, but a click can still slip
+        // through during the tiny window where the visual state lags the
+        // authoritative state (e.g., right after a round resolves on the
+        // server but the resolution hold has not yet expired locally).
+        // Refusing here prevents the "It is not this player turn" server
+        // error and keeps the backend authoritative.
+        if (!resolvedMatchId || !mySeat) {
+          appendLog('Cannot play card: missing match context.');
           return;
         }
 
+        if (!canPlayCard) {
+          appendLog('Ignored play-card: backend reports canAttemptPlayCard=false.');
+          return;
+        }
+
+        if (currentTurnSeatId !== mySeat) {
+          appendLog(
+            `Ignored play-card: turn belongs to ${currentTurnSeatId ?? 'no one'}, not ${mySeat}.`,
+          );
+          return;
+        }
+
+        if (nextDecisionType !== 'play-card') {
+          appendLog(`Ignored play-card: nextDecisionType=${nextDecisionType ?? 'idle'}.`);
+          return;
+        }
+
+        if (tablePhase !== 'playing') {
+          appendLog(`Ignored play-card: tablePhase=${tablePhase}.`);
+          return;
+        }
+
+        if (isResolvingRound) {
+          appendLog('Ignored play-card: a round is currently resolving.');
+          return;
+        }
+
+        if (isTableInteractionLocked) {
+          appendLog('Ignored play-card: table interaction is locked by a visual transition.');
+          return;
+        }
+
+        const now = Date.now();
         const cardKey = `${card.rank}|${card.suit}`;
         const serverCard = `${card.rank}${card.suit}`;
+        const pendingPlayCardEmission = pendingPlayCardEmissionRef.current;
+
+        if (pendingPlayCardEmission?.matchId === resolvedMatchId) {
+          if (pendingPlayCardEmission.cardKey === cardKey) {
+            appendLog(
+              `Ignored play-card: ${pendingPlayCardEmission.serverCard} was already emitted for this turn.`,
+            );
+            return;
+          }
+
+          if (now - pendingPlayCardEmission.emittedAt < DIFFERENT_CARD_EMISSION_LOCK_MS) {
+            appendLog(
+              'Ignored play-card: another card emission is already waiting for server acknowledgement.',
+            );
+            return;
+          }
+        }
+
+        pendingPlayCardEmissionRef.current = {
+          matchId: resolvedMatchId,
+          cardKey,
+          serverCard,
+          emittedAt: now,
+        };
 
         beginOwnCardLaunch({ cardKey, serverCard });
         emitPlayCard(resolvedMatchId, card);
@@ -221,6 +324,11 @@ export function useMatchActionBridge(
       emitDeclineMaoDeOnze,
       beginHandTransition,
       beginOwnCardLaunch,
+      currentTurnSeatId,
+      nextDecisionType,
+      tablePhase,
+      isResolvingRound,
+      isTableInteractionLocked,
     ],
   );
 }

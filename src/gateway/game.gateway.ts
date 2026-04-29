@@ -349,6 +349,12 @@ type CardPlayedActor = {
 // resolução da rodada (hold ~1600ms) antes que o bot jogue a próxima carta.
 const BOT_CHAINED_TURN_DELAY_MS = 1800;
 
+// NOTE: Round-resolution state sync is intentionally delayed so clients can
+// render card settle + WIN/PERDEU/EMPATE climax + clean-frame before receiving
+// the next playable round or hand-finished state. This keeps the backend
+// authoritative while separating game truth from visual pacing.
+const ROUND_RESOLUTION_STATE_SYNC_DELAY_MS = 2050;
+
 // [NEW] Pacing diferenciado para respostas de aposta — um bot "pensante" varia
 // o tempo de resposta conforme a complexidade da decisão. Mantém a partida
 // menos robótica sem mover decisão de jogo para o frontend.
@@ -432,6 +438,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.logger.log(message);
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private maskPlayerToken(playerToken: string): string {
@@ -1388,13 +1400,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(payload.matchId).emit('round-transition', payload);
   }
 
-  private emitRoundTransitionAfterCardPlay(
+  private buildRoundTransitionsAfterCardPlay(
     matchId: string,
     previousState: ViewMatchStateResponseDto,
     updatedState: ViewMatchStateResponseDto,
     roomState: ReturnType<RoomManager['getState']>,
     actor: CardPlayedActor,
-  ): void {
+  ): {
+    resolvedPayload: RoundTransitionPayload | null;
+    nextRoundPayload: RoundTransitionPayload | null;
+  } {
     const openedNewRound = this.didOpenNewRound(previousState, updatedState);
     const roundWinner = openedNewRound
       ? this.getFinishedRoundResultThatOpenedANewRound(previousState, updatedState)
@@ -1408,21 +1423,51 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       actor,
     );
 
-    if (resolvedPayload) {
-      this.emitRoundTransition(resolvedPayload);
-    }
+    const nextRoundPayload = openedNewRound
+      ? this.buildNextRoundOpenedTransitionPayload(
+          matchId,
+          updatedState,
+          roomState,
+          roundWinner,
+          actor,
+        )
+      : null;
 
-    if (!openedNewRound) {
+    return { resolvedPayload, nextRoundPayload };
+  }
+
+  private async emitPostCardPlayStateWithPacing(
+    matchId: string,
+    previousState: ViewMatchStateResponseDto,
+    updatedState: ViewMatchStateResponseDto,
+    roomState: ReturnType<RoomManager['getState']>,
+    actor: CardPlayedActor,
+  ): Promise<void> {
+    const { resolvedPayload, nextRoundPayload } = this.buildRoundTransitionsAfterCardPlay(
+      matchId,
+      previousState,
+      updatedState,
+      roomState,
+      actor,
+    );
+
+    if (!resolvedPayload) {
+      this.server
+        .to(matchId)
+        .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
+      this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
+      await this.emitPrivateMatchState(matchId);
       return;
     }
 
-    const nextRoundPayload = this.buildNextRoundOpenedTransitionPayload(
-      matchId,
-      updatedState,
-      roomState,
-      roundWinner,
-      actor,
-    );
+    this.emitRoundTransition(resolvedPayload);
+    await this.delay(ROUND_RESOLUTION_STATE_SYNC_DELAY_MS);
+
+    this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
+    await this.emitPrivateMatchState(matchId);
+    this.server
+      .to(matchId)
+      .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
 
     if (nextRoundPayload) {
       this.emitRoundTransition(nextRoundPayload);
@@ -1870,9 +1915,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       botTurnContext.seatId as SeatId,
     );
 
-    this.server
-      .to(matchId)
-      .emit('room-state', this.withBotDecisionTelemetry(matchId, nextRoomState));
+    const botCardActor: CardPlayedActor = {
+      seatId: botTurnContext.seatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+      isBot: true,
+    };
 
     this.server.to(matchId).emit('card-played', {
       matchId,
@@ -1884,15 +1932,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       isBot: true,
     });
 
-    this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
-    await this.emitPrivateMatchState(matchId);
-
-    this.emitRoundTransitionAfterCardPlay(matchId, previousState, updatedState, nextRoomState, {
-      seatId: botTurnContext.seatId,
-      teamId: botTurnContext.teamId,
-      playerId: botTurnContext.playerId,
-      isBot: true,
-    });
+    await this.emitPostCardPlayStateWithPacing(
+      matchId,
+      previousState,
+      updatedState,
+      nextRoomState,
+      botCardActor,
+    );
 
     this.logGateway('log', {
       layer: 'gateway',
@@ -2833,7 +2879,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         session.seatId,
       );
 
-      this.server.to(matchId).emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
+      const humanCardActor: CardPlayedActor = {
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        isBot: false,
+      };
 
       this.server.to(matchId).emit('card-played', {
         matchId,
@@ -2844,15 +2895,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
-      this.server.to(matchId).emit('match-state', this.toPublicMatchState(state));
-      await this.emitPrivateMatchState(matchId);
-
-      this.emitRoundTransitionAfterCardPlay(matchId, previousState, state, roomState, {
-        seatId: session.seatId,
-        teamId: session.teamId,
-        playerId: session.domainPlayerId,
-        isBot: false,
-      });
+      await this.emitPostCardPlayStateWithPacing(
+        matchId,
+        previousState,
+        state,
+        roomState,
+        humanCardActor,
+      );
 
       this.logGateway('log', {
         layer: 'gateway',

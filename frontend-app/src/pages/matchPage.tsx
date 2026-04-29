@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../features/auth/authStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useMatchActionBridge } from '../features/match/useMatchActionBridge';
 import type { MatchAction } from '../features/match/matchActionTypes';
 import { MatchPageHeader } from '../features/match/matchPageHeader';
@@ -222,6 +223,16 @@ function shouldShowTrucoDebugBadge(): boolean {
   return new URLSearchParams(window.location.search).get('debugTruco') === '1';
 }
 
+function buildCardRevealKey(card: string | null | undefined): number {
+  if (!card) {
+    return 0;
+  }
+
+  return Array.from(card).reduce((accumulator, character, index) => {
+    return accumulator + character.charCodeAt(0) * (index + 1) * 97;
+  }, card.length * 31);
+}
+
 function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   if (!feedback) {
     return null;
@@ -232,8 +243,7 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
       ? {
           chip: '#f7d98a',
           border: '1px solid rgba(230, 195, 100, 0.34)',
-          background:
-            'linear-gradient(180deg, rgba(38, 27, 7, 0.96), rgba(16, 12, 4, 0.94) 100%)',
+          background: 'linear-gradient(180deg, rgba(38, 27, 7, 0.96), rgba(16, 12, 4, 0.94) 100%)',
           glow: '0 0 24px rgba(201,168,76,0.12), 0 18px 40px rgba(0,0,0,0.38)',
         }
       : feedback.tone === 'warning'
@@ -286,48 +296,158 @@ function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   );
 }
 
+// PATCH C — HandTransitionVeil v2.
+//
+// The legacy veil rendered a tiny 9px chip ("Resultado confirmado" /
+// "Preparando nova mão") sitting on top of a flat radial. Compared to the
+// rest of the table — TrucoDramaOverlay's huge serif word, RoundClashVerdict's
+// gold hairline + crown chip, HandClimaxStage's wine/gold modal — the chip
+// looked like a debug toast, not a premium aviso.
+//
+// v2 design contract:
+//
+//   - Lives inside the felt rounded box (z-58, behind the climax modal but
+//     above the table). Same stage as before.
+//   - Background reads as a "curtain" closing in from the rim — gold hairline
+//     above and below frame a centered serif headline. Mirrors the visual
+//     family of RoundClashVerdict's centered stripe + chip.
+//   - Headline word is a gold-gradient serif at clamp(40px, 5.4vw, 72px).
+//     Shown only briefly; the user does not need to read a sentence — they
+//     need a single beat that signals "we're transitioning".
+//   - A small uppercase kicker pill below states what's happening in plain PT.
+//   - AnimatePresence + spring entry, fade exit. The veil does not block
+//     interactions (pointer-events-none preserved).
+//   - Tone:
+//       hand_intro       → "NOVA MÃO"   / "Preparando próxima mão"
+//       hand_result_hold → "RESULTADO"  / "Confirmando rodada"
+//
+// `aria-live="polite"` so screen readers announce the transition without
+// interrupting any in-progress speech.
 function HandTransitionVeil({ visualBeat }: { visualBeat: VisualBeat }) {
   const isOpeningHand = visualBeat === 'hand_intro';
   const isHoldingResult = visualBeat === 'hand_result_hold';
+  const isVisible = isOpeningHand || isHoldingResult;
 
-  if (!isOpeningHand && !isHoldingResult) {
-    return null;
-  }
+  // Tone palette: hand_intro emphasises "fresh start" with a deeper navy
+  // gradient and a crisp gold rim; hand_result_hold uses a slightly warmer
+  // gold-tinted base to read as "closure" rather than "opening".
+  const tone = isOpeningHand
+    ? {
+        veil:
+          'radial-gradient(ellipse at 50% 56%, rgba(8, 18, 28, 0.18) 0%, rgba(3, 8, 14, 0.52) 70%, rgba(2, 5, 10, 0.74) 100%)',
+        rim: 'rgba(230, 195, 100, 0.36)',
+        rimSoft: 'rgba(230, 195, 100, 0.10)',
+        headline: 'NOVA MÃO',
+        kicker: 'Preparando próxima mão',
+      }
+    : {
+        veil:
+          'radial-gradient(ellipse at 50% 50%, rgba(50, 36, 14, 0.14) 0%, rgba(8, 12, 16, 0.46) 70%, rgba(3, 6, 10, 0.66) 100%)',
+        rim: 'rgba(255, 224, 138, 0.42)',
+        rimSoft: 'rgba(255, 224, 138, 0.10)',
+        headline: 'RESULTADO',
+        kicker: 'Confirmando rodada',
+      };
 
   return (
-    <div
-      className="pointer-events-none absolute inset-0 z-[58] overflow-hidden rounded-[32px] transition-opacity duration-300"
-      style={{
-        background: isOpeningHand
-          ? 'radial-gradient(ellipse at 50% 58%, rgba(8, 18, 14, 0.12) 0%, rgba(3, 8, 10, 0.46) 72%, rgba(2, 5, 8, 0.66) 100%)'
-          : 'radial-gradient(ellipse at 50% 48%, rgba(201, 168, 76, 0.06) 0%, rgba(3, 8, 10, 0.26) 74%, rgba(2, 5, 8, 0.48) 100%)',
-        boxShadow: isOpeningHand
-          ? 'inset 0 0 84px rgba(2, 8, 8, 0.62)'
-          : 'inset 0 0 76px rgba(201, 168, 76, 0.08)',
-      }}
-    >
-      <div
-        className="absolute inset-x-[10%] top-1/2 h-px -translate-y-1/2 opacity-70"
-        style={{
-          background:
-            'linear-gradient(90deg, transparent, rgba(230, 195, 100, 0.42), transparent)',
-        }}
-      />
-
-      <div className="absolute left-1/2 top-[47%] -translate-x-1/2 -translate-y-1/2 text-center">
-        <div
-          className="rounded-full px-4 py-2 text-[9px] font-black uppercase tracking-[0.26em] backdrop-blur-md"
-          style={{
-            color: '#e9d38a',
-            background: 'rgba(7, 11, 9, 0.52)',
-            border: '1px solid rgba(230, 195, 100, 0.18)',
-            boxShadow: '0 14px 34px rgba(0,0,0,0.26)',
-          }}
+    <AnimatePresence>
+      {isVisible ? (
+        <motion.div
+          key={`hand-transition-veil-${visualBeat}`}
+          aria-live="polite"
+          aria-atomic="true"
+          className="pointer-events-none absolute inset-0 z-[58] overflow-hidden rounded-[32px]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.26, ease: [0.2, 0.8, 0.2, 1] }}
         >
-          {isOpeningHand ? 'Preparando nova mão' : 'Resultado confirmado'}
-        </div>
-      </div>
-    </div>
+          {/* Veil — quiet darkening of the felt with a tone-aware tint. */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background: tone.veil,
+              boxShadow: `inset 0 0 96px ${tone.rimSoft}`,
+            }}
+          />
+
+          {/* Top hairline — gold curtain rod sliding in from above. */}
+          <motion.div
+            className="absolute inset-x-[12%] top-[34%] h-px"
+            initial={{ scaleX: 0.18, opacity: 0 }}
+            animate={{ scaleX: 1, opacity: 0.78 }}
+            exit={{ scaleX: 0.6, opacity: 0 }}
+            transition={{ duration: 0.36, ease: [0.2, 0.9, 0.24, 1] }}
+            style={{
+              background: `linear-gradient(90deg, transparent 0%, ${tone.rim} 50%, transparent 100%)`,
+              boxShadow: `0 0 18px ${tone.rim}`,
+              transformOrigin: '50% 50%',
+            }}
+          />
+
+          {/* Bottom hairline — mirrors the top, anchors the headline. */}
+          <motion.div
+            className="absolute inset-x-[12%] top-[64%] h-px"
+            initial={{ scaleX: 0.18, opacity: 0 }}
+            animate={{ scaleX: 1, opacity: 0.78 }}
+            exit={{ scaleX: 0.6, opacity: 0 }}
+            transition={{ duration: 0.36, delay: 0.04, ease: [0.2, 0.9, 0.24, 1] }}
+            style={{
+              background: `linear-gradient(90deg, transparent 0%, ${tone.rim} 50%, transparent 100%)`,
+              boxShadow: `0 0 18px ${tone.rim}`,
+              transformOrigin: '50% 50%',
+            }}
+          />
+
+          {/* Headline + kicker stack, centered between the hairlines. */}
+          <motion.div
+            className="absolute inset-x-0 top-[49%] -translate-y-1/2 text-center"
+            initial={{ y: 14, opacity: 0, scale: 0.96 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -8, opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.34, delay: 0.08, ease: [0.2, 0.9, 0.24, 1] }}
+          >
+            <div
+              className="select-none"
+              style={{
+                fontFamily: 'Georgia, serif',
+                fontWeight: 900,
+                fontSize: 'clamp(40px, 5.4vw, 72px)',
+                letterSpacing: '0.06em',
+                lineHeight: 1,
+                background:
+                  'linear-gradient(135deg, #f6dfa0 0%, #e8c76a 38%, #c9a84c 70%, #8a6a28 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                textShadow: '0 8px 28px rgba(0, 0, 0, 0.55)',
+                filter: 'drop-shadow(0 2px 0 rgba(0, 0, 0, 0.42))',
+              }}
+            >
+              {tone.headline}
+            </div>
+
+            <div
+              className="mt-3 inline-flex items-center justify-center rounded-full px-3.5 py-1.5"
+              style={{
+                background: 'rgba(8, 12, 16, 0.62)',
+                border: `1px solid ${tone.rim}`,
+                color: '#f0e6d3',
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: '0.22em',
+                textTransform: 'uppercase',
+                fontFamily: 'Inter, system-ui, sans-serif',
+                backdropFilter: 'blur(8px)',
+                boxShadow: `0 12px 28px rgba(0, 0, 0, 0.34), 0 0 18px ${tone.rimSoft}`,
+              }}
+            >
+              {tone.kicker}
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
@@ -340,6 +460,7 @@ export function MatchPage() {
   const [viraRank, setViraRank] = useState<Rank>('4');
   const [showSecondary, setShowSecondary] = useState(false);
   const [visualBeat, setVisualBeat] = useState<VisualBeat>('idle');
+  const visualBeatRef = useRef<VisualBeat>('idle');
   const [betFeedback, setBetFeedback] = useState<BetFeedbackState | null>(null);
   const [isAutoNextHandArmed, setIsAutoNextHandArmed] = useState(false);
   const { play } = useGameSound();
@@ -380,9 +501,26 @@ export function MatchPage() {
   const lastRequestedFeedbackAtRef = useRef<number | null>(null);
   const pendingBetCycleRef = useRef<PendingBetCycle | null>(null);
 
+  useEffect(() => {
+    visualBeatRef.current = visualBeat;
+  }, [visualBeat]);
+
+  const shouldBlockRealtimeResolution = useCallback(() => {
+    const currentVisualBeat = visualBeatRef.current;
+
+    return (
+      isDeferringVisualCommitRef.current ||
+      currentVisualBeat === 'hand_intro' ||
+      currentVisualBeat === 'hand_result_hold' ||
+      currentVisualBeat === 'hand_reset'
+    );
+  }, []);
+
   const [isStartHandPending, setIsStartHandPending] = useState(false);
   const startHandLockRef = useRef(false);
   const latestVisualPublicHandRef = useRef<MatchStatePayload['currentHand'] | null>(null);
+  const latestAuthoritativePublicHandRef = useRef<MatchStatePayload['currentHand'] | null>(null);
+  const latestAuthoritativePrivateHandRef = useRef<MatchStatePayload['currentHand'] | null>(null);
 
   const drainNextBetFeedback = useCallback(() => {
     if (betFeedbackQueueRef.current.length === 0) {
@@ -466,6 +604,22 @@ export function MatchPage() {
         return;
       }
 
+      if (shouldBlockRealtimeResolution()) {
+        debugMatchPage('pendingRealtimeResolution:discarded-visual-transition', {
+          pending,
+          visualBeat: visualBeatRef.current,
+          isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+        });
+        pendingRealtimeResolutionRef.current = null;
+
+        if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+          window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+          pendingRealtimeResolutionTimeoutRef.current = null;
+        }
+
+        return;
+      }
+
       const rounds = hand.rounds ?? [];
       const finishedRoundIndex = Math.max(0, pending.finishedRoundsCount - 1);
       const finishedRound = rounds[finishedRoundIndex] ?? null;
@@ -493,7 +647,7 @@ export function MatchPage() {
         roundResult: finishedRound.result ?? pending.roundWinner ?? null,
       });
     },
-    [],
+    [shouldBlockRealtimeResolution],
   );
 
   const handleRealtimeHandStarted = useCallback(
@@ -514,6 +668,13 @@ export function MatchPage() {
       if (autoNextHandTimeoutRef.current !== null) {
         window.clearTimeout(autoNextHandTimeoutRef.current);
         autoNextHandTimeoutRef.current = null;
+      }
+
+      pendingRealtimeResolutionRef.current = null;
+
+      if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+        pendingRealtimeResolutionTimeoutRef.current = null;
       }
 
       pendingAutoNextHandKeyRef.current = null;
@@ -566,83 +727,109 @@ export function MatchPage() {
     [visualBeat],
   );
 
-  const handleRealtimeRoundTransition = useCallback((payload: RoundTransitionPayload) => {
-    debugMatchPage('onRoundTransition', {
-      payload,
-      mySeat: mySeatRef.current,
-      visualPublicHandRounds: latestVisualPublicHandRef.current?.rounds.length ?? 0,
-      isDeferringVisualCommit: isDeferringVisualCommitRef.current,
-    });
-
-    if (payload.phase !== 'round-resolved') {
-      return;
-    }
-
-    const mySeat = mySeatRef.current;
-    const myPlayerId = mapSeatToPlayerId(mySeat);
-
-    if (!myPlayerId) {
-      return;
-    }
-
-    const resolutionKey = [
-      payload.matchId ?? 'unknown-match',
-      payload.phase,
-      payload.finishedRoundsCount,
-      payload.roundWinner ?? 'null',
-    ].join('|');
-
-    const visualPublicHand = latestVisualPublicHandRef.current;
-    const rounds = visualPublicHand?.rounds ?? [];
-    const finishedRoundIndex = Math.max(0, payload.finishedRoundsCount - 1);
-    const finishedRound = rounds[finishedRoundIndex] ?? null;
-
-    if (finishedRound) {
-      const myCard =
-        myPlayerId === 'P1' ? finishedRound.playerOneCard : finishedRound.playerTwoCard;
-      const opponentCard =
-        myPlayerId === 'P1' ? finishedRound.playerTwoCard : finishedRound.playerOneCard;
-
-      debugMatchPage('onRoundTransition:triggerRoundResolution', {
-        resolutionKey,
-        myCard,
-        opponentCard,
-        roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+  const handleRealtimeRoundTransition = useCallback(
+    (payload: RoundTransitionPayload) => {
+      debugMatchPage('onRoundTransition', {
+        payload,
+        mySeat: mySeatRef.current,
+        visualBeat: visualBeatRef.current,
+        visualPublicHandRounds: latestVisualPublicHandRef.current?.rounds.length ?? 0,
+        isDeferringVisualCommit: isDeferringVisualCommitRef.current,
       });
 
-      triggerRoundResolutionRef.current({
+      if (payload.phase !== 'round-resolved') {
+        return;
+      }
+
+      if (shouldBlockRealtimeResolution()) {
+        debugMatchPage('onRoundTransition:ignored-visual-transition', {
+          payload,
+          visualBeat: visualBeatRef.current,
+          isDeferringVisualCommit: isDeferringVisualCommitRef.current,
+        });
+        return;
+      }
+
+      const mySeat = mySeatRef.current;
+      const myPlayerId = mapSeatToPlayerId(mySeat);
+
+      if (!myPlayerId) {
+        return;
+      }
+
+      const resolutionKey = [
+        payload.matchId ?? 'unknown-match',
+        payload.phase,
+        payload.finishedRoundsCount,
+        payload.roundWinner ?? 'null',
+      ].join('|');
+
+      const finishedRoundIndex = Math.max(0, payload.finishedRoundsCount - 1);
+      const handCandidates = [
+        latestAuthoritativePrivateHandRef.current,
+        latestAuthoritativePublicHandRef.current,
+        latestVisualPublicHandRef.current,
+      ];
+      const finishedRound =
+        handCandidates
+          .map((hand) => hand?.rounds?.[finishedRoundIndex] ?? null)
+          .find(
+            (round) =>
+              round !== null &&
+              (round.finished ||
+                round.result !== null ||
+                round.playerOneCard !== null ||
+                round.playerTwoCard !== null),
+          ) ?? null;
+
+      if (finishedRound) {
+        const myCard =
+          myPlayerId === 'P1' ? finishedRound.playerOneCard : finishedRound.playerTwoCard;
+        const opponentCard =
+          myPlayerId === 'P1' ? finishedRound.playerTwoCard : finishedRound.playerOneCard;
+
+        debugMatchPage('onRoundTransition:triggerRoundResolution', {
+          resolutionKey,
+          myCard,
+          opponentCard,
+          roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+        });
+
+        triggerRoundResolutionRef.current({
+          resolutionKey,
+          myCard,
+          opponentCard,
+          roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+        });
+
+        return;
+      }
+
+      debugMatchPage('onRoundTransition:pendingRealtimeResolution', {
         resolutionKey,
-        myCard,
-        opponentCard,
-        roundResult: finishedRound.result ?? payload.roundWinner ?? null,
+        finishedRoundsCount: payload.finishedRoundsCount,
+        roundWinner: payload.roundWinner ?? null,
+        graceMs: REALTIME_RESOLUTION_GRACE_MS,
       });
 
-      return;
-    }
+      pendingRealtimeResolutionRef.current = {
+        resolutionKey,
+        finishedRoundsCount: payload.finishedRoundsCount,
+        myPlayerId,
+        roundWinner: payload.roundWinner ?? null,
+      };
 
-    debugMatchPage('onRoundTransition:pendingRealtimeResolution', {
-      resolutionKey,
-      finishedRoundsCount: payload.finishedRoundsCount,
-      roundWinner: payload.roundWinner ?? null,
-      graceMs: REALTIME_RESOLUTION_GRACE_MS,
-    });
+      if (pendingRealtimeResolutionTimeoutRef.current !== null) {
+        window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
+      }
 
-    pendingRealtimeResolutionRef.current = {
-      resolutionKey,
-      finishedRoundsCount: payload.finishedRoundsCount,
-      myPlayerId,
-      roundWinner: payload.roundWinner ?? null,
-    };
-
-    if (pendingRealtimeResolutionTimeoutRef.current !== null) {
-      window.clearTimeout(pendingRealtimeResolutionTimeoutRef.current);
-    }
-
-    pendingRealtimeResolutionTimeoutRef.current = window.setTimeout(() => {
-      pendingRealtimeResolutionTimeoutRef.current = null;
-      pendingRealtimeResolutionRef.current = null;
-    }, REALTIME_RESOLUTION_GRACE_MS);
-  }, []);
+      pendingRealtimeResolutionTimeoutRef.current = window.setTimeout(() => {
+        pendingRealtimeResolutionTimeoutRef.current = null;
+        pendingRealtimeResolutionRef.current = null;
+      }, REALTIME_RESOLUTION_GRACE_MS);
+    },
+    [shouldBlockRealtimeResolution],
+  );
 
   const {
     initialSnapshot,
@@ -696,9 +883,22 @@ export function MatchPage() {
   );
 
   useEffect(() => {
+    latestAuthoritativePublicHandRef.current = publicMatchState?.currentHand ?? null;
+    latestAuthoritativePrivateHandRef.current = privateMatchState?.currentHand ?? null;
+
+    tryFlushPendingRealtimeResolution(
+      privateMatchState?.currentHand ??
+        publicMatchState?.currentHand ??
+        latestVisualPublicHandRef.current,
+    );
+  }, [privateMatchState, publicMatchState, tryFlushPendingRealtimeResolution]);
+
+  useEffect(() => {
     const hand = visualPublicMatchState?.currentHand ?? null;
     latestVisualPublicHandRef.current = hand;
-    tryFlushPendingRealtimeResolution(hand);
+    tryFlushPendingRealtimeResolution(
+      latestAuthoritativePrivateHandRef.current ?? latestAuthoritativePublicHandRef.current ?? hand,
+    );
   }, [visualPublicMatchState, tryFlushPendingRealtimeResolution]);
 
   useEffect(() => {
@@ -857,8 +1057,12 @@ export function MatchPage() {
 
     debugMatchPage('visualCommit:direct-commit', {
       nextVisualBeat: incomingFreshPlayableHand ? 'live' : 'idle',
-      publicIncoming: summarizeMatchStateForDebug(publicMatchState ?? initialSnapshot?.publicMatchState ?? null),
-      privateIncoming: summarizeMatchStateForDebug(privateMatchState ?? initialSnapshot?.privateMatchState ?? null),
+      publicIncoming: summarizeMatchStateForDebug(
+        publicMatchState ?? initialSnapshot?.publicMatchState ?? null,
+      ),
+      privateIncoming: summarizeMatchStateForDebug(
+        privateMatchState ?? initialSnapshot?.privateMatchState ?? null,
+      ),
       roomIncoming: summarizeRoomStateForDebug(roomState ?? initialSnapshot?.roomState ?? null),
     });
 
@@ -962,18 +1166,11 @@ export function MatchPage() {
     const myCards = getViewerCards(currentPrivateHand);
     const lastBotDecision = visualRoomState?.lastBotDecision ?? null;
     const rawRoomCurrentTurnSeatId = visualRoomState?.currentTurnSeatId ?? null;
-    const shouldTrustPrivatePlayableTurn = Boolean(
-      mySeat &&
-        currentPrivateHand &&
-        nextDecisionType === 'play-card' &&
-        viewerCanActNow &&
-        resolvedAvailableActions.canAttemptPlayCard &&
-        myCards.length > 0 &&
-        !pendingBotAction,
-    );
-    const inferredCurrentTurnSeatId = shouldTrustPrivatePlayableTurn
-      ? mySeat
-      : rawRoomCurrentTurnSeatId;
+    // NOTE: The room turn is the only safe visual authority for card clicks.
+    // Private `viewerCanActNow` can arrive in the same sync batch that opens the
+    // next round, while the room still points to the bot. Trusting the private
+    // flag alone caused false card launches and polluted the table transition.
+    const inferredCurrentTurnSeatId = rawRoomCurrentTurnSeatId;
 
     const isOneVsOne = visualRoomState?.mode === '1v1';
     const visibleSeatOrder = isOneVsOne ? TABLE_SEAT_ORDER_1V1 : TABLE_SEAT_ORDER_2V2;
@@ -1021,13 +1218,13 @@ export function MatchPage() {
     const isMyTurn = Boolean(mySeat && inferredCurrentTurnSeatId === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-        !handFinished &&
-        nextDecisionType === 'play-card' &&
-        viewerCanActNow &&
-        isMyTurn &&
-        resolvedAvailableActions.canAttemptPlayCard &&
-        myCards.length > 0 &&
-        !pendingBotAction,
+      !handFinished &&
+      nextDecisionType === 'play-card' &&
+      viewerCanActNow &&
+      isMyTurn &&
+      resolvedAvailableActions.canAttemptPlayCard &&
+      myCards.length > 0 &&
+      !pendingBotAction,
     );
     const presentationRoomState: RoomStatePayload | null = visualRoomState
       ? {
@@ -1053,7 +1250,7 @@ export function MatchPage() {
         visualBeat,
         handFinished,
         matchFinished,
-        shouldTrustPrivatePlayableTurn,
+        trustedRoomTurnOnly: true,
       });
     }
 
@@ -1396,13 +1593,118 @@ export function MatchPage() {
   const suppressHandOutcomeModal =
     betFeedback?.kind === 'requested' || betFeedback?.kind === 'declined';
 
+  const isRoundResolutionVisualHoldActive =
+    liveTableTransition.isResolvingRound ||
+    liveTableTransition.closingTableCards.mine !== null ||
+    liveTableTransition.closingTableCards.opponent !== null ||
+    liveTableTransition.resolvedRoundFinished;
+
+  // PATCH A — A card landing on the felt (own or opponent) is also a
+  // playable-UI suppression reason. Without this, the backend would mark
+  // the next turn as the player's the moment it accepted the opponent's
+  // card, and the hand dock + center action bar would light up while the
+  // opponent's flight clone was still mid-air. The `isAnyCardLandingInProgress`
+  // flag is reactive (state-backed) inside useMatchTableTransition and
+  // auto-clears after the flight window (~590 ms + 40 ms tail).
+  const shouldSuppressPlayableUi =
+    isRoundResolutionVisualHoldActive ||
+    liveTableTransition.isAnyCardLandingInProgress ||
+    visualBeat !== 'live' ||
+    isDeferringVisualCommitRef.current;
+
+  const isBetResponseDecision = viewModel.nextDecisionType === 'respond-bet';
+  const isMaoDeOnzeResponseDecision =
+    Boolean(viewModel.currentPrivateHand?.specialDecisionPending) &&
+    viewModel.currentPrivateHand?.specialDecisionBy === mapSeatToPlayerId(viewModel.mySeat);
+
+  const safeAvailableActions = useMemo<MatchStateHandPayload['availableActions']>(() => {
+    if (!shouldSuppressPlayableUi) {
+      return viewModel.availableActions;
+    }
+
+    if (isBetResponseDecision) {
+      // NOTE: Result holds block cards and new Truco initiatives, but they must
+      // not hide the mandatory response when the backend is waiting on
+      // `respond-bet`.
+      return {
+        ...emptyAvailableActions(),
+        canAcceptBet: viewModel.availableActions.canAcceptBet,
+        canDeclineBet: viewModel.availableActions.canDeclineBet,
+        canRaiseToSix: viewModel.availableActions.canRaiseToSix,
+        canRaiseToNine: viewModel.availableActions.canRaiseToNine,
+        canRaiseToTwelve: viewModel.availableActions.canRaiseToTwelve,
+      };
+    }
+
+    if (isMaoDeOnzeResponseDecision) {
+      return {
+        ...emptyAvailableActions(),
+        canAcceptMaoDeOnze: viewModel.availableActions.canAcceptMaoDeOnze,
+        canDeclineMaoDeOnze: viewModel.availableActions.canDeclineMaoDeOnze,
+      };
+    }
+
+    // NOTE: The backend may already be on the next playable round while the table
+    // is still holding the previous result for readability. Keep card play and
+    // new initiatives inert until the visual transition has fully promoted the
+    // next frame.
+    return emptyAvailableActions();
+  }, [
+    isBetResponseDecision,
+    isMaoDeOnzeResponseDecision,
+    shouldSuppressPlayableUi,
+    viewModel.availableActions,
+  ]);
+
+  const safeCanPlayCard = shouldSuppressPlayableUi ? false : viewModel.canPlayCard;
+
+  useEffect(() => {
+    debugMatchPage('playableUiSuppression:evaluate', {
+      shouldSuppressPlayableUi,
+      isRoundResolutionVisualHoldActive,
+      visualBeat,
+      rawCanPlayCard: viewModel.canPlayCard,
+      safeCanPlayCard,
+      rawCanRequestTruco: viewModel.availableActions.canRequestTruco,
+      safeCanRequestTruco: safeAvailableActions.canRequestTruco,
+      rawCanAcceptBet: viewModel.availableActions.canAcceptBet,
+      safeCanAcceptBet: safeAvailableActions.canAcceptBet,
+      isBetResponseDecision,
+      isResolvingRound: liveTableTransition.isResolvingRound,
+      hasClosingMineCard: liveTableTransition.closingTableCards.mine !== null,
+      hasClosingOpponentCard: liveTableTransition.closingTableCards.opponent !== null,
+      resolvedRoundFinished: liveTableTransition.resolvedRoundFinished,
+      // PATCH A — surface landing flags in the suppression debug trace.
+      isOpponentLandingInProgress: liveTableTransition.isOpponentLandingInProgress,
+      isOwnLandingInProgress: liveTableTransition.isOwnLandingInProgress,
+      isAnyCardLandingInProgress: liveTableTransition.isAnyCardLandingInProgress,
+    });
+  }, [
+    isRoundResolutionVisualHoldActive,
+    liveTableTransition.closingTableCards.mine,
+    liveTableTransition.closingTableCards.opponent,
+    liveTableTransition.isResolvingRound,
+    liveTableTransition.resolvedRoundFinished,
+    liveTableTransition.isOpponentLandingInProgress,
+    liveTableTransition.isOwnLandingInProgress,
+    liveTableTransition.isAnyCardLandingInProgress,
+    isBetResponseDecision,
+    safeAvailableActions.canAcceptBet,
+    safeAvailableActions.canRequestTruco,
+    safeCanPlayCard,
+    shouldSuppressPlayableUi,
+    viewModel.availableActions.canRequestTruco,
+    viewModel.canPlayCard,
+    visualBeat,
+  ]);
+
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
     useMatchActionBridge({
       resolvedMatchId: viewModel.resolvedMatchId,
       mySeat: viewModel.mySeat,
       canStartHand: viewModel.canStartHand,
-      canPlayCard: viewModel.canPlayCard,
-      availableActions: viewModel.availableActions,
+      canPlayCard: safeCanPlayCard,
+      availableActions: safeAvailableActions,
       appendLog,
       emitGetState,
       emitStartHand,
@@ -1417,6 +1719,16 @@ export function MatchPage() {
       emitDeclineMaoDeOnze,
       beginHandTransition: liveTableTransition.beginHandTransition,
       beginOwnCardLaunch: liveTableTransition.beginOwnCardLaunch,
+      // CHANGE (P0 — authoritative turn gate): pipe the authoritative
+      // turn/phase/resolution signals through to the bridge so it can refuse
+      // a play-card emission whenever the visual UI temporarily disagrees
+      // with the backend. This is the last line of defense before the
+      // socket.
+      currentTurnSeatId: viewModel.currentTurnSeatId,
+      nextDecisionType: viewModel.nextDecisionType,
+      tablePhase: viewModel.tablePhase,
+      isResolvingRound: liveTableTransition.isResolvingRound,
+      isTableInteractionLocked: shouldSuppressPlayableUi,
     });
 
   const handleStartHandWithGate = useCallback(() => {
@@ -1922,7 +2234,7 @@ export function MatchPage() {
                   myRevealKey={
                     liveTableTransition.pendingPlayedCard?.owner === 'mine'
                       ? liveTableTransition.pendingPlayedCard.id
-                      : (displayedMyPlayedCard?.length ?? 0)
+                      : buildCardRevealKey(displayedMyPlayedCard)
                   }
                   myCardLaunching={Boolean(
                     liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
@@ -1935,21 +2247,24 @@ export function MatchPage() {
                   currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                   currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
                   viraRank={viraRank}
-                  availableActions={viewModel.availableActions}
+                  availableActions={safeAvailableActions}
                   onAction={handleMatchActionWithSound}
                   myCards={effectiveMyCards}
-                  canPlayCard={viewModel.canPlayCard}
+                  canPlayCard={safeCanPlayCard}
                   launchingCardKey={liveTableTransition.launchingCardKey}
+                  pendingPlayedCard={liveTableTransition.pendingPlayedCard}
                   currentPrivateHand={viewModel.currentPrivateHand}
                   currentPublicHand={viewModel.currentPublicHand}
                   onPlayCard={playCardWithSound}
                   playedRoundsCount={viewModel.playedRoundsCount}
-                  isMyTurn={viewModel.currentTurnSeatId === viewModel.mySeat}
+                  isMyTurn={safeCanPlayCard && viewModel.currentTurnSeatId === viewModel.mySeat}
                   suppressHandOutcomeModal={suppressHandOutcomeModal || shouldDelayHandOutcomeModal}
                   onHandClimaxDismissed={handleHandClimaxDismissed}
                 />
 
-                <BetFeedbackBanner feedback={betFeedback?.kind === 'requested' ? null : betFeedback} />
+                <BetFeedbackBanner
+                  feedback={betFeedback?.kind === 'requested' ? null : betFeedback}
+                />
 
                 <HandTransitionVeil visualBeat={visualBeat} />
 
@@ -1976,10 +2291,10 @@ export function MatchPage() {
                   canStartHand={
                     viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
                   }
-                  canPlayCard={viewModel.canPlayCard}
+                  canPlayCard={safeCanPlayCard}
                   betState={viewModel.betState}
                   specialState={viewModel.specialState}
-                  availableActions={viewModel.availableActions}
+                  availableActions={safeAvailableActions}
                   canRenderLiveState={canRenderLiveState}
                   botDecisionSource={viewModel.lastBotDecision?.source ?? null}
                   botDecisionProfile={viewModel.lastBotDecision?.profile ?? null}
@@ -2009,10 +2324,10 @@ export function MatchPage() {
                 canStartHand={
                   viewModel.canStartHand && !isStartHandPending && !startHandLockRef.current
                 }
-                canPlayCard={viewModel.canPlayCard}
+                canPlayCard={safeCanPlayCard}
                 betState={viewModel.betState}
                 specialState={viewModel.specialState}
-                availableActions={viewModel.availableActions}
+                availableActions={safeAvailableActions}
                 canRenderLiveState={canRenderLiveState}
                 botDecisionSource={viewModel.lastBotDecision?.source ?? null}
                 botDecisionProfile={viewModel.lastBotDecision?.profile ?? null}
@@ -2150,6 +2465,3 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
-
-
-

@@ -19,6 +19,7 @@ type Props = {
   isSubdued?: boolean;
   isDecisionFocus?: boolean;
   actionSurface?: ReactNode;
+  onCardElementChange?: ((cardKey: string, element: HTMLButtonElement | null) => void) | undefined;
 };
 
 // CHANGE (final surgical round — issue B: hand still feels "in the air",
@@ -50,6 +51,7 @@ export function MatchPlayerHandDock({
   isSubdued = false,
   isDecisionFocus = false,
   actionSurface = null,
+  onCardElementChange,
 }: Props) {
   const isInteractive = tablePhase === 'playing' && myCards.length > 0;
   const handCount = myCards.length;
@@ -149,8 +151,10 @@ export function MatchPlayerHandDock({
           isMyTurn={isMyTurn}
           viraRank={viraRank}
           isDecisionFocus={shouldElevateDecision}
+          onCardElementChange={onCardElementChange}
         />
       </div>
     </motion.div>
   );
 }
+

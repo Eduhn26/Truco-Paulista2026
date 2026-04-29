@@ -127,6 +127,13 @@ export function buildMatchScreenViewModel({
   eventLog,
   liveTableTransition,
 }: BuildMatchScreenViewModelParams): MatchScreenViewModel {
+  const pendingPlayedCardValue =
+    liveTableTransition.pendingPlayedCard?.owner === 'mine'
+      ? displayedMyPlayedCard
+      : liveTableTransition.pendingPlayedCard?.owner === 'opponent'
+        ? displayedOpponentPlayedCard
+        : null;
+
   return {
     headerProps: {
       connectionStatus,
@@ -177,6 +184,14 @@ export function buildMatchScreenViewModel({
           : 0,
       myCardLaunching:
         liveTableTransition.pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard,
+      pendingPlayedCard:
+        liveTableTransition.pendingPlayedCard && pendingPlayedCardValue
+          ? {
+              owner: liveTableTransition.pendingPlayedCard.owner,
+              id: liveTableTransition.pendingPlayedCard.id,
+              card: pendingPlayedCardValue,
+            }
+          : null,
       roundIntroKey: liveTableTransition.roundIntroKey,
       roundResolvedKey: liveTableTransition.roundResolvedKey,
       currentPrivateViraRank: viewModel.currentPrivateHand?.viraRank ?? null,

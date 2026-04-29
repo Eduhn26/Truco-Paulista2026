@@ -654,6 +654,37 @@ export function LobbyPage() {
           <div className="relative grid grid-cols-1 items-center gap-5 lg:grid-cols-[1fr_auto]">
             <div>
               <div className="mb-3 flex flex-wrap items-center gap-3">
+                {/* PATCH D — EDIÇÃO PREMIUM tagline matching the Home hero.
+                    Brings the gold dot + uppercase brand chip into the Lobby
+                    so the three product surfaces (Home, Lobby, Match) speak
+                    the same opening word. Sits before the welcome label so
+                    the eyeline is brand → context → status. */}
+                <span
+                  className="inline-flex items-center gap-2 rounded-full px-3 py-1"
+                  style={{
+                    border: '1px solid rgba(201,168,76,0.30)',
+                    background: 'rgba(201,168,76,0.07)',
+                  }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{
+                      background: 'linear-gradient(135deg, #c9a84c, #e8c76a)',
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: '0.30em',
+                      color: 'rgba(255,255,255,0.55)',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Edição Premium
+                  </span>
+                </span>
+
                 <p
                   style={{
                     fontSize: 9,
@@ -796,7 +827,12 @@ export function LobbyPage() {
                 background:
                   'radial-gradient(ellipse at 50% 40%, #1a5c2e 0%, #0f3d1e 40%, #082010 100%)',
                 border: '1.5px solid rgba(201,168,76,0.16)',
-                boxShadow: '0 0 0 1px rgba(201,168,76,0.06), inset 0 0 80px rgba(0,0,0,0.45)',
+                // PATCH D — Match the Match-table chrome on the Lobby preview:
+                // pair the existing inset depth shadow with an outer
+                // ambient drop so the card reads as the same "premium felt"
+                // surface the user is about to play on.
+                boxShadow:
+                  '0 0 0 1px rgba(201,168,76,0.08), 0 28px 72px rgba(0,0,0,0.40), inset 0 0 80px rgba(0,0,0,0.45)',
                 minHeight: derivedMatchId ? 258 : 290,
               }}
             >

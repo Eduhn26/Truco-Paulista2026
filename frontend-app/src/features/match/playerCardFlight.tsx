@@ -14,9 +14,21 @@
 //  our own offset parent on every flight, so the flight always lands where
 //  the slot actually is, regardless of viewport or zoom.
 // =============================================================================
+//
+//  Current adjustment: the player's card now keeps its local flight as the
+//  single visible source until `onFlightDone` and gets a stronger rotateY arc,
+//  closer to the opponent card's emotional flip without exposing a card back.
+// =============================================================================
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 
 type FlightCard = {
   rank: string;
@@ -31,14 +43,21 @@ type FlightPoint = {
 type PlayerCardFlightProps = {
   revealKey: number;
   card: FlightCard | null;
-  onFlightDone?: () => void;
+  onFlightDone?: (revealKey: number) => void;
   suppressed?: boolean;
+  outcomeBadge?: FlightOutcomeBadge;
+  outcomeBadgeLabel?: string | null;
   /**
    * Ref to the visual origin of the flight. For the opponent this is the TP
    * back cluster; for the player this is the hand dock area. If absent, the
    * legacy percentage origin is used.
    */
   sourceTargetRef?: RefObject<HTMLElement | null>;
+  /**
+   * Exact DOM element of the clicked card. This wins over sourceTargetRef so
+   * the flight feels like it leaves the actual card, not the generic dock.
+   */
+  sourceTargetElement?: HTMLElement | null | undefined;
   /**
    * Ref to the DOM node of the PlayerPlayedSlot. If provided, the flight
    * lands at its measured center. If absent (fallback), we land at the
@@ -47,7 +66,14 @@ type PlayerCardFlightProps = {
   landTargetRef?: RefObject<HTMLElement | null>;
 };
 
-const FLIGHT_DURATION_MS = 420;
+const FLIGHT_DURATION_MS = 480;
+const HANDOFF_NOTIFY_MS = FLIGHT_DURATION_MS - 80;
+const HANDOFF_REMOVE_MS = FLIGHT_DURATION_MS + 110;
+// NOTE: Keep the result ribbon behind the landing beat. The card should fly,
+// settle, then receive the WIN/PERDEU/EMPATE stamp. If the round result arrives
+// early in the same socket burst, this delay prevents the badge from appearing
+// while the card is still mid-air.
+const FLIGHT_OUTCOME_BADGE_DELAY_MS = FLIGHT_DURATION_MS + 70;
 
 function parseSuitSymbol(suit: string): string {
   switch (suit) {
@@ -68,12 +94,145 @@ function isRedSuit(suit: string): boolean {
   return suit === 'P' || suit === 'O';
 }
 
+type FlightOutcomeBadge = 'win' | 'loss' | 'tie' | null;
+
+type OutcomeBadgeVisuals = {
+  wrapper: string;
+  border: string;
+  shadow: string;
+  text: string;
+  slash: string;
+};
+
+function resolveOutcomeBadgeLabel(
+  outcomeBadge: FlightOutcomeBadge,
+  outcomeBadgeLabel: string | null | undefined,
+): string {
+  if (outcomeBadgeLabel) {
+    return outcomeBadgeLabel;
+  }
+
+  if (outcomeBadge === 'win') {
+    return 'WIN';
+  }
+
+  if (outcomeBadge === 'loss') {
+    return 'PERDEU';
+  }
+
+  return 'EMPATE';
+}
+
+function resolveOutcomeBadgeVisuals(outcomeBadge: FlightOutcomeBadge): OutcomeBadgeVisuals | null {
+  switch (outcomeBadge) {
+    case 'win':
+      return {
+        wrapper:
+          'linear-gradient(135deg, #fff1b8 0%, #f2d488 38%, #c9a84c 74%, #6f4f14 100%)',
+        border: '1px solid rgba(255,241,184,0.96)',
+        shadow:
+          '0 9px 18px rgba(0,0,0,0.44), 0 0 22px rgba(242,212,136,0.68), inset 0 1px 0 rgba(255,255,255,0.52)',
+        text: '#160f03',
+        slash: 'rgba(255,255,255,0.46)',
+      };
+    case 'loss':
+      return {
+        wrapper:
+          'linear-gradient(135deg, #fecaca 0%, #ef4444 38%, #991b1b 76%, #450a0a 100%)',
+        border: '1px solid rgba(254,202,202,0.80)',
+        shadow:
+          '0 8px 16px rgba(0,0,0,0.34), 0 0 16px rgba(220,38,38,0.32), inset 0 1px 0 rgba(255,255,255,0.30)',
+        text: '#fff7f7',
+        slash: 'rgba(255,255,255,0.30)',
+      };
+    case 'tie':
+      return {
+        wrapper:
+          'linear-gradient(135deg, #f8fafc 0%, #cbd5e1 42%, #64748b 78%, #334155 100%)',
+        border: '1px solid rgba(226,232,240,0.84)',
+        shadow:
+          '0 8px 16px rgba(0,0,0,0.36), 0 0 16px rgba(148,163,184,0.36), inset 0 1px 0 rgba(255,255,255,0.52)',
+        text: '#0f172a',
+        slash: 'rgba(255,255,255,0.48)',
+      };
+    default:
+      return null;
+  }
+}
+
+function FlightOutcomeBadge({
+  outcomeBadge,
+  outcomeBadgeLabel,
+  revealDelayMs,
+}: {
+  outcomeBadge: FlightOutcomeBadge;
+  outcomeBadgeLabel?: string | null;
+  revealDelayMs: number;
+}) {
+  const visuals = resolveOutcomeBadgeVisuals(outcomeBadge);
+
+  if (!outcomeBadge || !visuals) {
+    return null;
+  }
+
+  return (
+    <motion.div
+      aria-hidden
+      className="pointer-events-none absolute -right-4 -top-4 z-30 rounded-full px-3.5 py-1.5"
+      initial={{
+        opacity: 0,
+        scale: 0.74,
+        y: 8,
+        rotate: outcomeBadge === 'loss' ? -8 : 8,
+      }}
+      animate={{
+        opacity: 1,
+        scale: [0.86, 1.12, 1],
+        y: 0,
+        rotate: outcomeBadge === 'loss' ? -5 : 5,
+      }}
+      transition={{
+        duration: 0.34,
+        delay: revealDelayMs / 1000,
+        times: [0, 0.58, 1],
+        ease: [0.2, 0.9, 0.24, 1],
+      }}
+      style={{
+        background: visuals.wrapper,
+        border: visuals.border,
+        boxShadow: visuals.shadow,
+      }}
+    >
+      <span
+        className="relative z-10 text-[10px] font-black uppercase leading-none tracking-[0.20em]"
+        style={{
+          color: visuals.text,
+          fontFamily: 'Georgia, serif',
+          textShadow:
+            outcomeBadge === 'loss'
+              ? '0 1px 0 rgba(0,0,0,0.24)'
+              : '0 1px 0 rgba(255,255,255,0.30)',
+        }}
+      >
+        {resolveOutcomeBadgeLabel(outcomeBadge, outcomeBadgeLabel)}
+      </span>
+      <span
+        className="pointer-events-none absolute left-1/2 top-0 h-full w-[1px] -rotate-[24deg]"
+        style={{ background: visuals.slash }}
+      />
+    </motion.div>
+  );
+}
+
 export function PlayerCardFlight({
   revealKey,
   card,
   onFlightDone,
   suppressed = false,
+  outcomeBadge = null,
+  outcomeBadgeLabel = null,
   sourceTargetRef,
+  sourceTargetElement = null,
   landTargetRef,
 }: PlayerCardFlightProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +240,47 @@ export function PlayerCardFlight({
   const [landingTarget, setLandingTarget] = useState<FlightPoint | null>(null);
   const [sourceTarget, setSourceTarget] = useState<FlightPoint | null>(null);
   const lastTriggeredKeyRef = useRef<number>(-1);
+  const flightNotifyTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const flightRemoveTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const notifiedFlightKeyRef = useRef<number | null>(null);
+  const onFlightDoneRef = useRef(onFlightDone);
+
+  useEffect(() => {
+    onFlightDoneRef.current = onFlightDone;
+  }, [onFlightDone]);
+
+  const clearFlightTimeouts = useCallback(() => {
+    if (flightNotifyTimeoutRef.current) {
+      window.clearTimeout(flightNotifyTimeoutRef.current);
+      flightNotifyTimeoutRef.current = null;
+    }
+
+    if (flightRemoveTimeoutRef.current) {
+      window.clearTimeout(flightRemoveTimeoutRef.current);
+      flightRemoveTimeoutRef.current = null;
+    }
+  }, []);
+
+  const notifyFlightDone = useCallback((flightKey: number) => {
+    if (notifiedFlightKeyRef.current === flightKey) {
+      return;
+    }
+
+    notifiedFlightKeyRef.current = flightKey;
+    onFlightDoneRef.current?.(flightKey);
+  }, []);
+
+  const finishFlight = useCallback((flightKey: number) => {
+    setActiveFlight((current) => (current?.key === flightKey ? null : current));
+    setLandingTarget(null);
+    setSourceTarget(null);
+    flightNotifyTimeoutRef.current = null;
+    flightRemoveTimeoutRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => clearFlightTimeouts();
+  }, [clearFlightTimeouts]);
 
   // Measure the landing target whenever a new flight starts, AFTER DOM layout.
   // useLayoutEffect is correct here because we need the measurement before
@@ -100,7 +300,7 @@ export function PlayerCardFlight({
 
     const containerRect = containerEl.getBoundingClientRect();
     const slotRect = slotEl.getBoundingClientRect();
-    const sourceEl = sourceTargetRef?.current ?? null;
+    const sourceEl = sourceTargetElement ?? sourceTargetRef?.current ?? null;
 
     setLandingTarget({
       left: slotRect.left - containerRect.left + slotRect.width / 2,
@@ -118,7 +318,30 @@ export function PlayerCardFlight({
       left: sourceRect.left - containerRect.left + sourceRect.width / 2,
       top: sourceRect.top - containerRect.top + sourceRect.height / 2,
     });
-  }, [activeFlight, landTargetRef, sourceTargetRef]);
+  }, [activeFlight, landTargetRef, sourceTargetElement, sourceTargetRef]);
+
+  useEffect(() => {
+    if (revealKey === 0) {
+      if (activeFlight) {
+        return;
+      }
+
+      setLandingTarget(null);
+      setSourceTarget(null);
+      return;
+    }
+
+    if (activeFlight) {
+      return;
+    }
+
+    if (card) {
+      return;
+    }
+
+    setLandingTarget(null);
+    setSourceTarget(null);
+  }, [activeFlight, card, revealKey]);
 
   useEffect(() => {
     if (suppressed || !card || revealKey === 0) {
@@ -129,16 +352,28 @@ export function PlayerCardFlight({
       return;
     }
 
+    // NOTE: The card prop can become null/suppressed as soon as the server
+    // acknowledges the play or commits the round result. That must not cancel
+    // the local landing timeout; otherwise the flight clone can persist over
+    // the resolved/next-round felt. The clone owns a fixed lifetime once it
+    // starts, and only revealKey=0/new flight/unmount can cancel it.
     lastTriggeredKeyRef.current = revealKey;
+    notifiedFlightKeyRef.current = null;
+    clearFlightTimeouts();
     setActiveFlight({ key: revealKey, card });
 
-    const timeout = window.setTimeout(() => {
-      setActiveFlight((current) => (current?.key === revealKey ? null : current));
-      onFlightDone?.();
-    }, FLIGHT_DURATION_MS + 40);
+    // NOTE: The real slot needs to become visible before the clone is removed.
+    // This overlap prevents the one-frame blank/flicker seen when the resolver
+    // lands while the card is still handing off from the flight layer.
+    flightNotifyTimeoutRef.current = window.setTimeout(() => {
+      notifyFlightDone(revealKey);
+    }, HANDOFF_NOTIFY_MS);
 
-    return () => window.clearTimeout(timeout);
-  }, [revealKey, card, suppressed, onFlightDone]);
+    flightRemoveTimeoutRef.current = window.setTimeout(() => {
+      notifyFlightDone(revealKey);
+      finishFlight(revealKey);
+    }, HANDOFF_REMOVE_MS);
+  }, [card, clearFlightTimeouts, finishFlight, notifyFlightDone, revealKey, suppressed]);
 
   const flightCard = activeFlight?.card ?? null;
   const symbol = flightCard ? parseSuitSymbol(flightCard.suit) : '';
@@ -152,21 +387,21 @@ export function PlayerCardFlight({
         left: landingTarget.left,
         top: landingTarget.top,
         x: '-50%' as const,
-        y: ['-50%', '-54%', '-50%'] as [string, string, string],
-        opacity: [0, 1, 1] as [number, number, number],
-        scale: [0.78, 1.02, 1] as [number, number, number],
-        rotateY: [0, 0, 0] as [number, number, number],
-        rotate: [7, 2, 5] as [number, number, number],
+        y: ['-50%', '-68%', '-47%', '-50%'] as [string, string, string, string],
+        opacity: [1, 1, 1, 0.98] as [number, number, number, number],
+        scale: [0.96, 1.085, 1.02, 0.99] as [number, number, number, number],
+        rotateY: [-42, 42, -10, 0] as [number, number, number, number],
+        rotate: [2, 9, -4, 2] as [number, number, number, number],
       }
     : {
         left: '57.2%' as const,
         top: '50.2%' as const,
         x: '-50%' as const,
-        y: ['-50%', '-54%', '-50%'] as [string, string, string],
-        opacity: [0, 1, 1] as [number, number, number],
-        scale: [0.78, 1.02, 1] as [number, number, number],
-        rotateY: [0, 0, 0] as [number, number, number],
-        rotate: [7, 2, 5] as [number, number, number],
+        y: ['-50%', '-68%', '-47%', '-50%'] as [string, string, string, string],
+        opacity: [1, 1, 1, 0.98] as [number, number, number, number],
+        scale: [0.96, 1.085, 1.02, 0.99] as [number, number, number, number],
+        rotateY: [-42, 42, -10, 0] as [number, number, number, number],
+        rotate: [2, 9, -4, 2] as [number, number, number, number],
       };
 
   return (
@@ -186,23 +421,41 @@ export function PlayerCardFlight({
               top: sourceTarget ? sourceTarget.top : '84%',
               x: '-50%',
               y: '-50%',
-              opacity: 0,
-              scale: 0.78,
-              rotateY: 0,
-              rotate: 7,
+              opacity: 1,
+              scale: 0.96,
+              rotateY: -42,
+              rotate: 2,
             }}
             animate={animateTarget}
-            exit={{ opacity: 0, scale: 1.01, transition: { duration: 0.12 } }}
+            exit={{ opacity: 0, scale: 1.005, transition: { duration: 0.12 } }}
             transition={{
               duration: FLIGHT_DURATION_MS / 1000,
               ease: [0.2, 0.8, 0.2, 1],
-              y: { duration: FLIGHT_DURATION_MS / 1000, times: [0, 0.55, 1], ease: 'easeOut' },
-              scale: { duration: FLIGHT_DURATION_MS / 1000, times: [0, 0.8, 1], ease: 'easeOut' },
-              rotate: { duration: FLIGHT_DURATION_MS / 1000, times: [0, 0.8, 1], ease: 'easeOut' },
+              y: {
+                duration: FLIGHT_DURATION_MS / 1000,
+                times: [0, 0.5, 0.84, 1],
+                ease: 'easeOut',
+              },
+              scale: {
+                duration: FLIGHT_DURATION_MS / 1000,
+                times: [0, 0.52, 0.86, 1],
+                ease: 'easeOut',
+              },
+              rotate: {
+                duration: FLIGHT_DURATION_MS / 1000,
+                times: [0, 0.48, 0.84, 1],
+                ease: 'easeOut',
+              },
+              rotateY: {
+                duration: FLIGHT_DURATION_MS / 1000,
+                times: [0, 0.38, 0.74, 1],
+                ease: 'easeInOut',
+              },
             }}
             style={{
               transformStyle: 'preserve-3d',
-              filter: 'drop-shadow(0 18px 30px rgba(0,0,0,0.54))',
+              filter:
+                'drop-shadow(0 20px 30px rgba(0,0,0,0.54)) drop-shadow(0 0 14px rgba(201,168,76,0.14))',
             }}
           >
             <div
@@ -214,7 +467,7 @@ export function PlayerCardFlight({
                 background: 'linear-gradient(145deg, #fffefb 0%, #faf6ee 52%, #f2ead6 100%)',
                 border: '1px solid rgba(0,0,0,0.12)',
                 boxShadow:
-                  '0 14px 26px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.94)',
+                  '0 18px 34px rgba(0,0,0,0.46), 0 0 22px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.94)',
                 padding: '8px 10px',
               }}
             >
@@ -272,6 +525,12 @@ export function PlayerCardFlight({
                   {symbol}
                 </span>
               </div>
+              <FlightOutcomeBadge
+                outcomeBadge={outcomeBadge}
+                outcomeBadgeLabel={outcomeBadgeLabel}
+                revealDelayMs={FLIGHT_OUTCOME_BADGE_DELAY_MS}
+              />
+
               <div
                 style={{
                   position: 'relative',
@@ -311,5 +570,9 @@ export function PlayerCardFlight({
 }
 
 export const PLAYER_CARD_FLIGHT_DURATION_MS = FLIGHT_DURATION_MS;
+
+
+
+
 
 
