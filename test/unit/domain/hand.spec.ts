@@ -137,11 +137,11 @@ describe('Hand (Domain)', () => {
     hand.requestTruco('P1');
     hand.acceptBet('P2');
 
-    hand.raiseToSix('P1');
-    hand.declineBet('P2');
+    hand.raiseToSix('P2');
+    hand.declineBet('P1');
 
     expect(hand.isFinished()).toBe(true);
-    expect(hand.getWinner()).toBe('P1');
+    expect(hand.getWinner()).toBe('P2');
     expect(hand.getAwardedPoints()).toBe(3);
   });
 

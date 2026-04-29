@@ -1,5 +1,30 @@
 import { RoomManager } from '@game/gateway/multiplayer/room-manager';
 
+type RoomStatePlayer = ReturnType<RoomManager['getState']>['players'][number];
+
+function expectValidBotIdentity(player: RoomStatePlayer): void {
+  expect(player.botIdentity).toEqual(
+    expect.objectContaining({
+      id: expect.any(String),
+      displayName: expect.any(String),
+      avatarKey: expect.any(String),
+      profile: expect.stringMatching(/^(balanced|aggressive|cautious)$/),
+    }),
+  );
+  expect(player.botProfile).toBe(player.botIdentity?.profile);
+}
+
+function expectValidBotIdentities(players: RoomStatePlayer[]): void {
+  for (const player of players) {
+    if (player.isBot) {
+      expectValidBotIdentity(player);
+    } else {
+      expect(player.botIdentity).toBeNull();
+      expect(player.botProfile).toBeNull();
+    }
+  }
+}
+
 function identity(
   userId: string,
   playerToken?: string,
@@ -309,6 +334,7 @@ describe('RoomManager (1v1)', () => {
         domainPlayerId: 'P1',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T2A',
@@ -319,9 +345,11 @@ describe('RoomManager (1v1)', () => {
         socketId: null,
         domainPlayerId: 'P2',
         isBot: true,
-        botProfile: 'aggressive',
+        botProfile: expect.any(String),
+        botIdentity: expect.any(Object),
       },
     ]);
+    expectValidBotIdentities(roomState.players);
 
     expect(roomManager.canStart('match-1')).toBe(false);
 
@@ -353,6 +381,7 @@ describe('RoomManager (1v1)', () => {
         domainPlayerId: 'P1',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T2A',
@@ -364,8 +393,10 @@ describe('RoomManager (1v1)', () => {
         domainPlayerId: 'P2',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
     ]);
+    expectValidBotIdentities(roomState.players);
   });
 
   it('keeps queue-created 1v1 matches blocked until both assigned humans are ready', () => {
@@ -466,6 +497,7 @@ describe('RoomManager bot fill (2v2)', () => {
         domainPlayerId: 'P1',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T2A',
@@ -477,6 +509,7 @@ describe('RoomManager bot fill (2v2)', () => {
         domainPlayerId: 'P2',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T1B',
@@ -487,7 +520,8 @@ describe('RoomManager bot fill (2v2)', () => {
         socketId: null,
         domainPlayerId: 'P1',
         isBot: true,
-        botProfile: 'cautious',
+        botProfile: expect.any(String),
+        botIdentity: expect.any(Object),
       },
       {
         seatId: 'T2B',
@@ -498,9 +532,11 @@ describe('RoomManager bot fill (2v2)', () => {
         socketId: null,
         domainPlayerId: 'P2',
         isBot: true,
-        botProfile: 'balanced',
+        botProfile: expect.any(String),
+        botIdentity: expect.any(Object),
       },
     ]);
+    expectValidBotIdentities(roomState.players);
 
     expect(roomManager.canStart('match-1')).toBe(false);
 
@@ -549,6 +585,7 @@ describe('RoomManager bot fill (2v2)', () => {
         domainPlayerId: 'P1',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T2A',
@@ -560,6 +597,7 @@ describe('RoomManager bot fill (2v2)', () => {
         domainPlayerId: 'P2',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T1B',
@@ -571,6 +609,7 @@ describe('RoomManager bot fill (2v2)', () => {
         domainPlayerId: 'P1',
         isBot: false,
         botProfile: null,
+        botIdentity: null,
       },
       {
         seatId: 'T2B',
@@ -581,33 +620,45 @@ describe('RoomManager bot fill (2v2)', () => {
         socketId: null,
         domainPlayerId: 'P2',
         isBot: true,
-        botProfile: 'balanced',
+        botProfile: expect.any(String),
+        botIdentity: expect.any(Object),
       },
     ]);
+    expectValidBotIdentities(roomState.players);
   });
 });
 
 describe('RoomManager bot profiles', () => {
-  it('assigns deterministic bot profiles by seat in 2v2 mode', () => {
+  it('assigns bot profiles from the sampled bot identity in 2v2 mode', () => {
     const roomManager = new RoomManager();
 
     roomManager.ensureRoom('match-1', '2v2');
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
-    expect(roomManager.getBotProfile('match-1', 'T1B')).toBe('cautious');
-    expect(roomManager.getBotProfile('match-1', 'T2B')).toBe('balanced');
+    const botPlayers = roomManager.getState('match-1').players.filter((player) => player.isBot);
+
+    expect(botPlayers.map((player) => player.seatId)).toEqual(['T2A', 'T1B', 'T2B']);
+    expectValidBotIdentities(botPlayers);
+    for (const botPlayer of botPlayers) {
+      expect(roomManager.getBotProfile('match-1', botPlayer.seatId)).toBe(botPlayer.botProfile);
+    }
   });
 
-  it('assigns deterministic bot profile by seat in 1v1 mode', () => {
+  it('assigns the 1v1 bot profile from the sampled bot identity', () => {
     const roomManager = new RoomManager();
 
     roomManager.ensureRoom('match-1', '1v1');
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
+    const botPlayer = roomManager
+      .getState('match-1')
+      .players.find((player) => player.seatId === 'T2A');
+
+    expect(botPlayer).toBeDefined();
+    expectValidBotIdentity(botPlayer!);
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe(botPlayer!.botProfile);
   });
 
   it('returns undefined for human seats', () => {
@@ -627,10 +678,88 @@ describe('RoomManager bot profiles', () => {
     roomManager.join('match-1', 'socket-1', identity('user-1', 'token-1'));
     roomManager.fillMissingSeatsWithBots('match-1');
 
-    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe('aggressive');
+    const botPlayer = roomManager
+      .getState('match-1')
+      .players.find((player) => player.seatId === 'T2A');
+
+    expect(botPlayer).toBeDefined();
+    expectValidBotIdentity(botPlayer!);
+    expect(roomManager.getBotProfile('match-1', 'T2A')).toBe(botPlayer!.botProfile);
 
     roomManager.join('match-1', 'socket-2', identity('user-2', 'token-2'));
 
     expect(roomManager.getBotProfile('match-1', 'T2A')).toBeUndefined();
+  });
+});
+
+describe('RoomManager beginHand opener', () => {
+  function seedOneVsOneRoom(): RoomManager {
+    const roomManager = new RoomManager();
+
+    roomManager.ensureRoom('match-opener', '1v1');
+    roomManager.join('match-opener', 'socket-human', identity('user-human', 'token-human'));
+    roomManager.fillMissingSeatsWithBots('match-opener');
+
+    return roomManager;
+  }
+
+  it('keeps the legacy no-argument opener on T1A', () => {
+    const roomManager = seedOneVsOneRoom();
+
+    const started = roomManager.beginHand('match-opener');
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+  });
+
+  it('honors an explicit starting seat hint', () => {
+    const roomManager = seedOneVsOneRoom();
+
+    const started = roomManager.beginHand('match-opener', { startingSeatId: 'T2A' });
+
+    expect(started.currentTurnSeatId).toBe('T2A');
+  });
+
+  it('lets P1 open when P1 lost the previous hand', () => {
+    const roomManager = seedOneVsOneRoom();
+
+    const started = roomManager.beginHand('match-opener', { lastLoserPlayerId: 'P1' });
+
+    expect(started.currentTurnSeatId).toBe('T1A');
+  });
+
+  it('lets P2 open when P2 lost the previous hand', () => {
+    const roomManager = seedOneVsOneRoom();
+
+    const started = roomManager.beginHand('match-opener', { lastLoserPlayerId: 'P2' });
+
+    expect(started.currentTurnSeatId).toBe('T2A');
+  });
+
+  it('randomizes among occupied seats only when requested', () => {
+    const roomManager = seedOneVsOneRoom();
+    const seenSeatIds = new Set<string>();
+
+    for (let index = 0; index < 200; index += 1) {
+      const started = roomManager.beginHand('match-opener', { random: true });
+
+      if (started.currentTurnSeatId) {
+        seenSeatIds.add(started.currentTurnSeatId);
+      }
+    }
+
+    expect(seenSeatIds.has('T1A')).toBe(true);
+    expect(seenSeatIds.has('T2A')).toBe(true);
+
+    for (const seatId of seenSeatIds) {
+      expect(['T1A', 'T2A']).toContain(seatId);
+    }
+  });
+
+  it('keeps the legacy positional starting seat overload working', () => {
+    const roomManager = seedOneVsOneRoom();
+
+    const started = roomManager.beginHand('match-opener', 'T2A');
+
+    expect(started.currentTurnSeatId).toBe('T2A');
   });
 });

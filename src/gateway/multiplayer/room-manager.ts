@@ -65,6 +65,35 @@ type JoinIdentity = {
   userId: string;
 };
 
+// CHANGE (debt #1 — bot never opened the first round):
+// `beginHand` previously fell back to the first seat in the turn order
+// (always T1A in 1v1) whenever no `startingSeatId` was passed. The
+// gateway never passed one. This shape lets the gateway communicate
+// intent in three ways:
+//
+//   • { startingSeatId } — explicit pin for tests / replays. Highest
+//     precedence. Validated against the room's seat occupancy.
+//
+//   • { lastLoserPlayerId } — canonical Truco Paulista rule: the loser
+//     of the previous hand opens the next. Translated to a seat by
+//     mapping P1→T1, P2→T2 and picking the first occupied seat in that
+//     team for the room's mode.
+//
+//   • { random: true } — first hand of a fresh match, or any hand
+//     whose previous result was a true tie. Coin-flip between the
+//     occupied seats in the turn order. Avoids the structural edge
+//     T1A had under the old fallback.
+//
+// When all hint fields are missing, we still fall back to the legacy
+// "first seat in turn order" behaviour so older callers (tests,
+// replays) keep working. The gateway is being patched in tandem to
+// always pass a hint in production paths.
+export type BeginHandHint = {
+  startingSeatId?: SeatId;
+  lastLoserPlayerId?: 'P1' | 'P2' | null;
+  random?: boolean;
+};
+
 const TURN_ORDER_2V2: SeatId[] = ['T1A', 'T2A', 'T1B', 'T2B'];
 const TURN_ORDER_1V1: SeatId[] = ['T1A', 'T2A'];
 
@@ -83,6 +112,15 @@ const TEAM_BY_SEAT: Record<SeatId, TeamId> = {
 const DOMAIN_PLAYER_BY_TEAM: Record<TeamId, 'P1' | 'P2'> = {
   T1: 'P1',
   T2: 'P2',
+};
+
+// CHANGE (debt #1): Reverse of DOMAIN_PLAYER_BY_TEAM. Used to translate a
+// PlayerId hint (P1/P2) coming from the domain into a seat lookup. P1
+// always maps to T1, P2 to T2; we then pick the first occupied seat in
+// that team's slice of the turn order.
+const TEAM_BY_DOMAIN_PLAYER: Record<'P1' | 'P2', TeamId> = {
+  P1: 'T1',
+  P2: 'T2',
 };
 
 export class RoomManager {
@@ -371,7 +409,14 @@ export class RoomManager {
     });
   }
 
-  beginHand(matchId: string, startingSeatId?: SeatId): RoomState {
+  // CHANGE (debt #1): backwards-compatible signature.
+  //   • Old callers passing a raw SeatId still work (via overload).
+  //   • New callers pass a `BeginHandHint` — see the type's docblock for
+  //     precedence rules.
+  //   • No-arg callers retain the previous "first seat in turn order"
+  //     fallback so this patch can be deployed before the gateway is
+  //     updated, without regressing.
+  beginHand(matchId: string, hintOrSeat?: BeginHandHint | SeatId): RoomState {
     const room = this.rooms.get(matchId);
 
     if (!room) {
@@ -382,7 +427,11 @@ export class RoomManager {
     // From this point forward, canStartNextHand() is used instead of canStart().
     room.handEverStarted = true;
 
-    const resolvedStartingSeatId = startingSeatId ?? this.getTurnOrder(room.mode)[0] ?? null;
+    const hint: BeginHandHint =
+      typeof hintOrSeat === 'string' ? { startingSeatId: hintOrSeat } : (hintOrSeat ?? {});
+
+    const resolvedStartingSeatId = this.resolveOpenerFromHint(room, hint);
+
     room.currentTurnSeatId = this.resolveValidSeatForRoom(room, resolvedStartingSeatId);
 
     return this.getState(matchId);
@@ -591,6 +640,68 @@ export class RoomManager {
 
   private getTurnOrder(mode: MatchMode): SeatId[] {
     return mode === '1v1' ? TURN_ORDER_1V1 : TURN_ORDER_2V2;
+  }
+
+  // CHANGE (debt #1): central opener resolver. Translates a `BeginHandHint`
+  // into the actual SeatId that should hold the turn at hand-start time.
+  // Encapsulates the precedence rules and the safe-fallback path so
+  // `beginHand` itself stays small.
+  private resolveOpenerFromHint(room: InternalRoomState, hint: BeginHandHint): SeatId | null {
+    if (hint.startingSeatId) {
+      return hint.startingSeatId;
+    }
+
+    if (hint.lastLoserPlayerId === 'P1' || hint.lastLoserPlayerId === 'P2') {
+      const targetTeam = TEAM_BY_DOMAIN_PLAYER[hint.lastLoserPlayerId];
+      const seatInTeam = this.findFirstOccupiedSeatInTeam(room, targetTeam);
+
+      if (seatInTeam) {
+        return seatInTeam;
+      }
+      // NOTE: if the team has no occupied seats (corrupt room), fall
+      // through to random — better UX than crashing the start-hand call.
+    }
+
+    if (hint.random) {
+      return this.pickRandomOccupiedSeat(room);
+    }
+
+    // Legacy backstop for hint-less callers (tests, older transports).
+    return this.getTurnOrder(room.mode)[0] ?? null;
+  }
+
+  private findFirstOccupiedSeatInTeam(room: InternalRoomState, teamId: TeamId): SeatId | null {
+    const turnOrder = this.getTurnOrder(room.mode);
+
+    for (const seatId of turnOrder) {
+      if (TEAM_BY_SEAT[seatId] !== teamId) {
+        continue;
+      }
+
+      const isOccupied = room.players.some((player) => player.seatId === seatId);
+
+      if (isOccupied) {
+        return seatId;
+      }
+    }
+
+    return null;
+  }
+
+  private pickRandomOccupiedSeat(room: InternalRoomState): SeatId | null {
+    const turnOrder = this.getTurnOrder(room.mode);
+    const occupiedSeats = turnOrder.filter((seatId) =>
+      room.players.some((player) => player.seatId === seatId),
+    );
+
+    if (occupiedSeats.length === 0) {
+      return null;
+    }
+
+    // NOTE: Math.random is fine here — this is a UX-grade coin flip,
+    // not a security-critical RNG. Match outcomes don't depend on it.
+    const index = Math.floor(Math.random() * occupiedSeats.length);
+    return occupiedSeats[index] ?? null;
   }
 
   private resolveValidSeatForRoom(

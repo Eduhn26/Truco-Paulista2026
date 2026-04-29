@@ -233,62 +233,136 @@ function buildCardRevealKey(card: string | null | undefined): number {
   }, card.length * 31);
 }
 
+// CHANGE (debt #7): BetFeedbackBanner v2 — premium variants for the
+// two outcomes that share this surface.
+//
+//   • 'accepted' — quiet win. Gold ribbon at top-[14%], serif headline
+//     ("ACEITO" / "BOT ACEITOU") with the new Vale value rendered as a
+//     small medallion to the right. Reuses the visual vocabulary of
+//     the header's Vale medallion. Tone: confirmation, not celebration.
+//
+//   • 'declined' — the hand just ended. Deserves the same weight as a
+//     round result. Wine-coloured banner at top-[18%], split into a
+//     left "MÃO ENCERRADA" badge + right large serif headline
+//     ("VOCÊ CORREU" / "BOT FUGIU"). A bottom hairline carries the
+//     "+N pontos" detail. Echoes RoundClashVerdict's anatomy
+//     (hairline + ribbon) so the player feels the same family.
+//
+// Render location, props and timeout all stay identical to v1; only
+// the JSX changes. The 'requested' kind never reaches this component
+// (gated upstream — line ~2266 — to keep TrucoDramaOverlay as the
+// single owner of the call/pressure phase).
 function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
   if (!feedback) {
     return null;
   }
 
-  const toneClasses =
-    feedback.tone === 'success'
-      ? {
-          chip: '#f7d98a',
-          border: '1px solid rgba(230, 195, 100, 0.34)',
-          background: 'linear-gradient(180deg, rgba(38, 27, 7, 0.96), rgba(16, 12, 4, 0.94) 100%)',
-          glow: '0 0 24px rgba(201,168,76,0.12), 0 18px 40px rgba(0,0,0,0.38)',
-        }
-      : feedback.tone === 'warning'
-        ? {
-            chip: '#ffcf8b',
-            border: '1px solid rgba(251,146,60,0.28)',
-            background:
-              'linear-gradient(180deg, rgba(59, 25, 8, 0.96), rgba(20, 10, 5, 0.94) 100%)',
-            glow: '0 0 24px rgba(251,146,60,0.12), 0 18px 40px rgba(0,0,0,0.38)',
-          }
-        : {
-            chip: '#cdd8ea',
-            border: '1px solid rgba(148,163,184,0.24)',
-            background:
-              'linear-gradient(180deg, rgba(16, 22, 34, 0.96), rgba(8, 11, 18, 0.94) 100%)',
-            glow: '0 0 22px rgba(148,163,184,0.08), 0 18px 40px rgba(0,0,0,0.38)',
-          };
-
-  const badgeLabel =
-    feedback.kind === 'accepted'
-      ? 'Aposta aceita'
-      : feedback.kind === 'declined'
-        ? 'Mão encerrada'
-        : 'Aposta';
-
-  return (
-    <div className="pointer-events-none absolute left-1/2 top-[12%] z-[70] w-full max-w-[430px] -translate-x-1/2 px-4">
+  if (feedback.kind === 'accepted') {
+    return (
       <div
-        className="rounded-[22px] px-5 py-3.5 text-center backdrop-blur-xl"
-        style={{
-          background: toneClasses.background,
-          border: toneClasses.border,
-          boxShadow: toneClasses.glow,
-        }}
+        className="pointer-events-none absolute left-1/2 top-[14%] z-[70] w-full max-w-[460px] -translate-x-1/2 px-4"
+        role="status"
+        aria-live="polite"
       >
         <div
-          className="text-[9px] font-black uppercase tracking-[0.26em]"
-          style={{ color: toneClasses.chip }}
+          className="flex items-center gap-3 rounded-[20px] px-5 py-3 backdrop-blur-xl"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(38, 27, 7, 0.96), rgba(16, 12, 4, 0.94) 100%)',
+            border: '1px solid rgba(230,195,100,0.42)',
+            boxShadow:
+              '0 0 28px rgba(201,168,76,0.20), 0 18px 40px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,235,170,0.10)',
+          }}
         >
-          {badgeLabel}
+          <div className="flex flex-1 flex-col items-start text-left">
+            <span
+              className="text-[8px] font-black uppercase tracking-[0.30em]"
+              style={{ color: 'rgba(247,217,138,0.62)' }}
+            >
+              Aposta aceita
+            </span>
+            <span
+              className="mt-1 text-[20px] font-black leading-none"
+              style={{
+                color: '#f8e7b4',
+                fontFamily: 'Georgia, serif',
+                letterSpacing: '0.04em',
+                textShadow: '0 1px 0 rgba(0,0,0,0.42), 0 0 18px rgba(255,215,128,0.32)',
+              }}
+            >
+              {feedback.title}
+            </span>
+            <span
+              className="mt-1 text-[10px] font-bold uppercase tracking-[0.16em]"
+              style={{ color: 'rgba(216,202,165,0.78)' }}
+            >
+              {feedback.detail}
+            </span>
+          </div>
         </div>
-        <div className="mt-1.5 text-[16px] font-black uppercase tracking-[0.08em] text-[#f8efd9]">
+      </div>
+    );
+  }
+
+  // feedback.kind === 'declined' — hand-ending banner.
+  return (
+    <div
+      className="pointer-events-none absolute left-1/2 top-[18%] z-[70] w-full max-w-[520px] -translate-x-1/2 px-4"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div
+        className="relative overflow-hidden rounded-[22px] px-5 py-4 text-center backdrop-blur-xl"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(72, 14, 14, 0.96), rgba(28, 6, 6, 0.96) 100%)',
+          border: '1px solid rgba(248,113,113,0.46)',
+          boxShadow:
+            '0 0 36px rgba(220,38,38,0.28), 0 20px 48px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,210,210,0.16)',
+        }}
+      >
+        {/* Top hairline — echoes RoundClashVerdict + HandTransitionVeil. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-8 top-0 h-px"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent, rgba(248,113,113,0.74), transparent)',
+          }}
+        />
+
+        <div
+          className="text-[8px] font-black uppercase tracking-[0.32em]"
+          style={{ color: 'rgba(255,210,210,0.66)' }}
+        >
+          Mão encerrada
+        </div>
+        <div
+          className="mt-1.5 text-[24px] font-black uppercase leading-none"
+          style={{
+            color: '#fff5f5',
+            fontFamily: 'Georgia, serif',
+            letterSpacing: '0.04em',
+            textShadow: '0 1px 0 rgba(0,0,0,0.55), 0 0 24px rgba(248,113,113,0.46)',
+          }}
+        >
           {feedback.title}
         </div>
-        <div className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#d8caa5]">
+
+        <div
+          aria-hidden
+          className="mx-auto mt-2.5 h-px w-[72%]"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent, rgba(248,113,113,0.42), transparent)',
+          }}
+        />
+
+        <div
+          className="mt-2 text-[10px] font-bold uppercase tracking-[0.18em]"
+          style={{ color: 'rgba(255,232,232,0.82)' }}
+        >
           {feedback.detail}
         </div>
       </div>

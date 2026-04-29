@@ -1,5 +1,17 @@
-import type { BotDecisionContext } from '../../../src/application/ports/bot-decision.port';
+import type {
+  BotDecisionContext,
+  BotDecisionMetadata,
+  BotDecisionStrategy,
+} from '../../../src/application/ports/bot-decision.port';
 import { HeuristicBotAdapter } from '../../../src/infrastructure/bots/heuristic-bot.adapter';
+function heuristicMetadata(strategy: BotDecisionStrategy): BotDecisionMetadata {
+  return {
+    source: 'heuristic',
+    rationale: {
+      strategy,
+    },
+  };
+}
 
 describe('HeuristicBotAdapter', () => {
   let adapter: HeuristicBotAdapter;
@@ -40,6 +52,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'pass',
       reason: 'empty-hand',
+      metadata: heuristicMetadata('empty-hand'),
     });
   });
 
@@ -53,6 +66,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'pass',
       reason: 'missing-round',
+      metadata: heuristicMetadata('missing-round'),
     });
   });
 
@@ -76,6 +90,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: 'AO',
+      metadata: heuristicMetadata('opening-middle'),
     });
   });
 
@@ -99,6 +114,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '3P',
+      metadata: heuristicMetadata('opening-strongest'),
     });
   });
 
@@ -122,6 +138,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '4O',
+      metadata: heuristicMetadata('opening-weakest'),
     });
   });
 
@@ -145,6 +162,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: 'KO',
+      metadata: heuristicMetadata('response-winning-weakest'),
     });
   });
 
@@ -168,6 +186,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '3P',
+      metadata: heuristicMetadata('response-winning-strongest'),
     });
   });
 
@@ -191,6 +210,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: 'KO',
+      metadata: heuristicMetadata('response-winning-weakest'),
     });
   });
 
@@ -214,6 +234,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '5C',
+      metadata: heuristicMetadata('response-winning-strongest'),
     });
   });
 
@@ -237,6 +258,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '6C',
+      metadata: heuristicMetadata('response-losing-middle'),
     });
   });
 
@@ -260,6 +282,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '7P',
+      metadata: heuristicMetadata('response-losing-strongest'),
     });
   });
 
@@ -283,6 +306,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '4O',
+      metadata: heuristicMetadata('response-losing-weakest'),
     });
   });
 
@@ -306,6 +330,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '5C',
+      metadata: heuristicMetadata('response-winning-weakest'),
     });
   });
 
@@ -329,6 +354,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '4O',
+      metadata: heuristicMetadata('opening-middle'),
     });
   });
 
@@ -352,6 +378,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: 'AO',
+      metadata: heuristicMetadata('opening-middle'),
     });
   });
 
@@ -375,6 +402,7 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual({
       action: 'play-card',
       card: '3P',
+      metadata: heuristicMetadata('response-winning-strongest'),
     });
   });
 });

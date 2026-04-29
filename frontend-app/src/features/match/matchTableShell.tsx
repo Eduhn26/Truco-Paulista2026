@@ -636,12 +636,6 @@ const BOT_AVATAR_GLYPHS: Record<string, string> = {
   leaf: '🍃',
 };
 
-const BOT_PROFILE_LABELS: Record<string, string> = {
-  balanced: 'Equilibrado',
-  aggressive: 'Agressivo',
-  cautious: 'Cauteloso',
-};
-
 type SeatAvatar = {
   content: string;
   kind: 'glyph' | 'initial';
@@ -658,10 +652,6 @@ function resolveSeatAvatar(seat: TableSeatView, displayName: string): SeatAvatar
 
   const initial = displayName.charAt(0).toUpperCase() || '?';
   return { content: initial, kind: 'initial' };
-}
-
-function resolveProfileLabel(profile: string): string {
-  return BOT_PROFILE_LABELS[profile] ?? profile;
 }
 
 type BotPresenceTone = 'idle' | 'thinking' | 'pressure' | 'maoDeOnze' | 'wonRound' | 'lostRound';
@@ -897,7 +887,6 @@ function OpponentCluster({
   presenceLine = null,
   presenceQuote = null,
   presenceTone = 'idle',
-  suppressNeutralProfile = false,
 }: {
   seat: TableSeatView;
   cardsRemaining: number;
@@ -905,7 +894,6 @@ function OpponentCluster({
   presenceLine?: string | null;
   presenceQuote?: string | null;
   presenceTone?: BotPresenceTone;
-  suppressNeutralProfile?: boolean;
 }) {
   // Defensive clamp — never render negative, never render more than the
   // starting hand size. The "playing" indicator should always be 0–3.
@@ -915,20 +903,18 @@ function OpponentCluster({
   const isCurrentTurn = seat.isCurrentTurn;
   const displayName = seat.isMine ? 'Você' : (seat.botIdentity?.displayName ?? seat.seatId);
   const avatar = resolveSeatAvatar(seat, displayName);
-  const profileLabel =
-    seat.isBot && seat.botIdentity ? resolveProfileLabel(seat.botIdentity.profile) : null;
   const presenceVisuals = getBotPresenceVisuals(presenceTone);
   const shouldShowPresenceLine = presenceLine !== null;
   const shouldShowPresenceQuote = presenceQuote !== null;
   const shouldPulsePresence = presenceTone !== 'idle';
-  // NOTE: Dynamic speech should read like the bot's current state, not like
-  // a second identity label. Keep the profile label only in neutral moments;
-  // when the bot speaks, the avatar pill already owns the character name.
-  const statusLabel = shouldShowPresenceLine
-    ? presenceLine
-    : suppressNeutralProfile
-      ? null
-      : profileLabel;
+  // CHANGE (debt #5): the bot's profile (`balanced` / `aggressive` /
+  // `cautious`) is an internal difficulty label, not a name the player
+  // should see. We used to render the profile as neutral status text under
+  // the avatar, which made the bot look like it was named "Equilibrado",
+  // "Agressivo" or "Cauteloso". Now the slot only shows live presence
+  // lines; when the bot has nothing to say, the avatar pill owns the
+  // character name on its own.
+  const statusLabel = shouldShowPresenceLine ? presenceLine : null;
 
   return (
     <div className="flex flex-col items-center gap-1.5">
@@ -1562,30 +1548,10 @@ function RoundClashVerdict({
         }}
       />
 
-      <motion.div
-        className="absolute left-1/2 top-[37%] flex h-[60px] w-[60px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
-        initial={{ opacity: 0, scale: 0.68, rotate: -18 }}
-        animate={{ opacity: 1, scale: [0.78, 1.18, 1], rotate: 0 }}
-        transition={{ duration: 0.9, ease: [0.2, 0.9, 0.24, 1] }}
-        style={{
-          background:
-            'radial-gradient(circle at 35% 25%, rgba(255,244,214,0.34) 0%, rgba(18,16,11,0.96) 42%, rgba(7,9,8,0.98) 100%)',
-          border: '1px solid rgba(255,223,128,0.66)',
-          boxShadow:
-            '0 0 28px rgba(255,223,128,0.30), 0 16px 34px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.22)',
-        }}
-      >
-        <span
-          className="text-[16px] font-black uppercase tracking-[0.08em]"
-          style={{
-            color: '#f8e7b4',
-            fontFamily: 'Georgia, serif',
-            textShadow: '0 2px 8px rgba(0,0,0,0.44)',
-          }}
-        >
-          VS
-        </span>
-      </motion.div>
+      {/* CHANGE (debt #9): VS medallion removed. The hairline above and
+          the verdict ribbon below already narrate the clash; the
+          medallion was a fourth redundant beat that competed with the
+          cards' own VENCEU / PERDEU badges. */}
 
       <motion.div
         className="absolute left-1/2 top-[72%] -translate-x-1/2 -translate-y-1/2 text-center"
@@ -4134,7 +4100,6 @@ export function MatchTableShell(props: MatchTableShellProps) {
                   presenceLine={visibleBotPresenceLine}
                   presenceQuote={visibleBotPresenceQuote}
                   presenceTone={visibleBotPresenceTone}
-                  suppressNeutralProfile={shouldMuteBotPresenceForDrama}
                 />
               </div>
             ) : null}

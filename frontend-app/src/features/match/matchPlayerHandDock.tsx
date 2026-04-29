@@ -22,22 +22,24 @@ type Props = {
   onCardElementChange?: ((cardKey: string, element: HTMLButtonElement | null) => void) | undefined;
 };
 
-// CHANGE (final surgical round — issue B: hand still feels "in the air",
-// not integrated with the felt):
+// CHANGE (debt #2 — cards clipped at the bottom of the viewport):
+// The dock itself was sized correctly, but the page-level wrappers
+// (h-screen + overflow-hidden + tight pb on <main>) clipped the bottom
+// edge of the player's cards on 1366×768 / 100% zoom. Patch is two-pronged:
+//   • bump the dock's reserved height so the hover lift always has
+//     headroom inside the panel (220 vs. previous 196 — covers the longest
+//     hover lift +28px tail);
+//   • add 28px paddingBottom on the outer wrapper so the cards never
+//     touch the next outer overflow-hidden boundary even when a parent
+//     decides to be aggressive.
 //
-// Previously, the dock was *too* invisible — no panel, no border, no base.
-// While that was better than the old glass-box (which looked like a
-// disconnected widget), it tipped too far the other way: the fan had no
-// "stage" under it and felt ungrounded.
-//
-// New approach: add a very subtle "felt pedestal" — a curved, soft arc
-// behind the hand that reads as a wooden/felt rail receiving the cards.
-// Low-contrast, premium. The cards still feel ON the felt, but now the
-// felt itself has a hint of structure saying "this is the player's rail".
-//
-// We also bumped the outer wrapper height so the hover lift never gets
-// clipped by a parent overflow-hidden — pairing with the shell's overflow
-// fix below.
+// CHANGE (debt #8 — duplicate "Em turno" pill):
+// The "Em turno" badge in the dock duplicated the larger
+// "Sua vez / Jogue uma carta" cue rendered by the table shell. We keep
+// only the *informational* "Decida sua mão" badge for bet-response moments
+// (where the cue isn't present) and drop the redundant turn pill in normal
+// turns. The shell's PlayerHandTurnCue is the single source of truth for
+// "your turn now".
 export function MatchPlayerHandDock({
   myCards,
   canPlayCard,
@@ -60,7 +62,10 @@ export function MatchPlayerHandDock({
   return (
     <motion.div
       layout
-      className="relative mx-auto w-full max-w-[1080px] px-2"
+      // CHANGE (debt #2): pb-7 reserves outer headroom so the bottom of the
+      // fan never gets clipped by the page's overflow boundary, regardless
+      // of viewport height.
+      className="relative mx-auto w-full max-w-[1080px] px-2 pb-7"
       initial={false}
       animate={{
         y: shouldElevateDecision ? -6 : isSubdued ? 4 : isInteractive ? -4 : -2,
@@ -69,11 +74,6 @@ export function MatchPlayerHandDock({
       }}
       transition={{ type: 'spring', stiffness: 200, damping: 26 }}
     >
-      {/* CHANGE (issue B): "Player rail" — a soft arc beneath the hand
-          that gives it structural context on the felt. No visible box,
-          just a gradient that reads as "this bottom portion of the felt
-          is where the player sits". Follows the same dark navy / gold
-          vocabulary of the rest of the table. */}
       {handCount > 0 ? (
         <div
           aria-hidden
@@ -95,8 +95,6 @@ export function MatchPlayerHandDock({
         />
       ) : null}
 
-      {/* Ambient under-glow on the felt — sense of "the hand is illuminated"
-          on the player's turn, without needing a panel. */}
       <div
         className="pointer-events-none absolute inset-x-[14%] -top-2 z-0 h-12 rounded-full transition-opacity duration-300"
         style={{
@@ -110,36 +108,34 @@ export function MatchPlayerHandDock({
         }}
       />
 
-      {/* Turn badge — a single chip, top-right, only when it carries
-          information. Absent from the "empty/waiting" state. */}
-      {handCount > 0 && (shouldElevateDecision || isMyTurn) ? (
+      {/* CHANGE (debt #8): keep the "Decida sua mão" pill only for bet-response
+          decisions (where the table shell doesn't show the turn cue). The
+          neutral "Em turno" pill was duplicating the bigger
+          "Sua vez / Jogue uma carta" cue and has been dropped. */}
+      {handCount > 0 && shouldElevateDecision ? (
         <div className="pointer-events-none absolute right-3 -top-6 z-20">
           <span
             className="rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.20em]"
             style={{
-              background: shouldElevateDecision
-                ? 'rgba(255,223,128,0.14)'
-                : 'rgba(201,168,76,0.14)',
-              border: shouldElevateDecision
-                ? '1px solid rgba(255,223,128,0.42)'
-                : '1px solid rgba(201,168,76,0.34)',
-              color: shouldElevateDecision ? '#f6dfa0' : '#e8c76a',
+              background: 'rgba(255,223,128,0.14)',
+              border: '1px solid rgba(255,223,128,0.42)',
+              color: '#f6dfa0',
               fontFamily: 'Georgia, serif',
               backdropFilter: 'blur(6px)',
               boxShadow: '0 4px 10px rgba(0,0,0,0.28)',
             }}
           >
-            {shouldElevateDecision ? 'Decida sua mão' : 'Em turno'}
+            Decida sua mão
           </span>
         </div>
       ) : null}
 
       {actionSurface ? <div className="relative z-10 mb-1 w-full">{actionSurface}</div> : null}
 
-      {/* CHANGE (issue A — hand still being clipped): minHeight bumped from
-          160 → 196 so the panel's inner 188px container (with its own hover
-          headroom) fits completely without relying on parent overflow. */}
-      <div className="relative z-10" style={{ minHeight: 196 }}>
+      {/* CHANGE (debt #2): minHeight 220 (was 196) — accommodates the panel's
+          inner 188px container plus the hover lift (~26px) without ever
+          relying on parent overflow. */}
+      <div className="relative z-10" style={{ minHeight: 220 }}>
         <MatchPlayerHandPanel
           myCards={myCards}
           canPlayCard={canPlayCard}
@@ -157,4 +153,3 @@ export function MatchPlayerHandDock({
     </motion.div>
   );
 }
-

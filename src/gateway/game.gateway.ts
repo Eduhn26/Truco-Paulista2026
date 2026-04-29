@@ -1452,9 +1452,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     if (!resolvedPayload) {
-      this.server
-        .to(matchId)
-        .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
+      this.server.to(matchId).emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
       this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
       await this.emitPrivateMatchState(matchId);
       return;
@@ -1465,9 +1463,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
     await this.emitPrivateMatchState(matchId);
-    this.server
-      .to(matchId)
-      .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
+    this.server.to(matchId).emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
 
     if (nextRoundPayload) {
       this.emitRoundTransition(nextRoundPayload);
@@ -2764,7 +2760,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         this.clearBotDecisionTelemetry(matchId);
 
-        const roomState = this.roomManager.beginHand(matchId);
+        // CHANGE: The product rule is now winner-opens-next-hand. The first hand
+        // still randomizes, but once a hand has a winner, that same player/team
+        // receives the opener for the next hand. This matches the visible game
+        // expectation: if P1 won the previous hand, the following hand starts at
+        // T1; if P2 won, it starts at T2.
+        const previousHandWinner = authoritativeState.currentHand?.winner ?? null;
+        const previousHandFinished = authoritativeState.currentHand?.finished === true;
+        const nextHandOpenerPlayerId =
+          previousHandFinished && previousHandWinner === 'P1'
+            ? 'P1'
+            : previousHandFinished && previousHandWinner === 'P2'
+              ? 'P2'
+              : null;
+
+        const roomState = this.roomManager.beginHand(matchId, {
+          // NOTE: The RoomManager hint name is historical. It resolves the
+          // provided player/team as the opener; passing the previous winner here
+          // keeps this patch surgical without changing the RoomManager API.
+          lastLoserPlayerId: nextHandOpenerPlayerId,
+          random: nextHandOpenerPlayerId === null,
+        });
         this.server
           .to(matchId)
           .emit('room-state', this.withBotDecisionTelemetry(matchId, roomState));
@@ -3735,4 +3751,3 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
-

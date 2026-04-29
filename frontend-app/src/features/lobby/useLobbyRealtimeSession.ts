@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 
 import { saveMatchSnapshot } from '../match/matchSnapshotStorage';
@@ -54,6 +54,10 @@ type UseLobbyRealtimeSessionResult = {
   currentReady: boolean;
   hasLobbySnapshot: boolean;
   isSocketOnline: boolean;
+  // NOTE: We expose `isHydratingHistory` so the lobby UI can show a quiet
+  // "Carregando histórico..." instead of the misleading "Suas partidas
+  // ainda não começaram" while the auto-reconnect is still in flight.
+  isHydratingHistory: boolean;
   canConnect: boolean;
   canCreateMatch: boolean;
   canJoinMatch: boolean;
@@ -72,6 +76,14 @@ type UseLobbyRealtimeSessionResult = {
 const LOBBY_RANKING_STORAGE_KEY = 'truco:lobby:ranking';
 const DEFAULT_RANKING_LIMIT = 10;
 const DEFAULT_HISTORY_LIMIT = 5;
+// CHANGE (debt #4): backoff window between reconnect attempts. The lobby
+// auto-reconnects after a match (we land here with the socket disconnected),
+// but if the backend or auth is genuinely unavailable we must not flood it.
+const AUTO_RECONNECT_RETRY_MS = 4500;
+// CHANGE (debt #4): grace window before declaring the history fetch
+// "settled". Used to drive `isHydratingHistory` so the empty-state copy
+// doesn't flash before the socket has had a chance to land.
+const HISTORY_HYDRATION_GRACE_MS = 1500;
 
 function readStoredRanking(): RankingPayload['ranking'] {
   if (typeof window === 'undefined') {
@@ -233,6 +245,13 @@ export function useLobbyRealtimeSession(
 ): UseLobbyRealtimeSessionResult {
   const clientRef = useRef<GameSocketClient | null>(null);
   const rawSocketRef = useRef<Socket | null>(null);
+  // CHANGE (debt #4): a single in-flight reconnect attempt at a time. The
+  // ref guards against an effect re-run firing two `connect()` calls when
+  // React StrictMode mounts the lobby twice in development.
+  const isConnectingRef = useRef(false);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyHydrationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasReceivedHistoryRef = useRef(false);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
   const [roomState, setRoomState] = useState<RoomStatePayload | null>(null);
@@ -242,6 +261,11 @@ export function useLobbyRealtimeSession(
   const [ranking, setRanking] = useState<RankingPayload['ranking']>(() => readStoredRanking());
   const [matchHistory, setMatchHistory] = useState<MatchHistoryListItemPayload[]>([]);
   const [eventLog, setEventLog] = useState<string[]>([]);
+  // CHANGE (debt #4): we hold this true the moment the socket connects and
+  // until either the first match-history frame arrives or the grace window
+  // elapses. The lobby uses it to suppress the "no matches yet" copy during
+  // the brief reconnect-fetch window after a finished match.
+  const [isHydratingHistory, setIsHydratingHistory] = useState(false);
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
   const normalizedMatchId = matchIdInput.trim();
@@ -253,63 +277,83 @@ export function useLobbyRealtimeSession(
     playerAssigned?.matchId ||
     normalizedMatchId;
 
-  function appendLog(line: string): void {
+  const appendLog = useCallback((line: string): void => {
     setEventLog((current) =>
       [`[${new Date().toLocaleTimeString('pt-BR')}] ${line}`, ...current].slice(0, 30),
     );
-  }
+  }, []);
 
-  function requestRanking(reason: 'connect' | 'create-match' | 'join-match' | 'get-state'): void {
-    clientRef.current?.emitGetRanking(DEFAULT_RANKING_LIMIT);
-    appendLog(`Emitted get-ranking (${DEFAULT_RANKING_LIMIT}) [${reason}].`);
-  }
+  const requestRanking = useCallback(
+    (reason: 'connect' | 'create-match' | 'join-match' | 'get-state' | 'auto-refresh'): void => {
+      clientRef.current?.emitGetRanking(DEFAULT_RANKING_LIMIT);
+      appendLog(`Emitted get-ranking (${DEFAULT_RANKING_LIMIT}) [${reason}].`);
+    },
+    [appendLog],
+  );
 
-  function requestMatchHistory(reason: 'connect' | 'get-state' | 'manual-refresh'): void {
-    const userId = session?.user?.id?.trim();
+  const requestMatchHistory = useCallback(
+    (reason: 'connect' | 'get-state' | 'manual-refresh' | 'auto-refresh'): void => {
+      const userId = session?.user?.id?.trim();
 
-    if (!userId) {
-      appendLog(`Skipped get-match-history [${reason}] because userId is missing.`);
-      return;
-    }
+      if (!userId) {
+        appendLog(`Skipped get-match-history [${reason}] because userId is missing.`);
+        return;
+      }
 
-    rawSocketRef.current?.emit('get-match-history', {
-      userId,
-      limit: DEFAULT_HISTORY_LIMIT,
-    });
+      rawSocketRef.current?.emit('get-match-history', {
+        userId,
+        limit: DEFAULT_HISTORY_LIMIT,
+      });
 
-    appendLog(`Emitted get-match-history (${DEFAULT_HISTORY_LIMIT}) [${reason}].`);
-  }
+      appendLog(`Emitted get-match-history (${DEFAULT_HISTORY_LIMIT}) [${reason}].`);
+    },
+    [appendLog, session?.user?.id],
+  );
 
-  function persistSnapshot(next: {
-    nextRoomState?: RoomStatePayload | null;
-    nextPublicMatchState?: MatchStatePayload | null;
-    nextPrivateMatchState?: MatchStatePayload | null;
-    nextPlayerAssigned?: PlayerAssignedPayload | null;
-  }): void {
-    const snapshotMatchId =
-      next.nextPrivateMatchState?.matchId ||
-      next.nextPublicMatchState?.matchId ||
-      next.nextRoomState?.matchId ||
-      next.nextPlayerAssigned?.matchId ||
-      derivedMatchId;
+  const persistSnapshot = useCallback(
+    (next: {
+      nextRoomState?: RoomStatePayload | null;
+      nextPublicMatchState?: MatchStatePayload | null;
+      nextPrivateMatchState?: MatchStatePayload | null;
+      nextPlayerAssigned?: PlayerAssignedPayload | null;
+    }): void => {
+      const snapshotMatchId =
+        next.nextPrivateMatchState?.matchId ||
+        next.nextPublicMatchState?.matchId ||
+        next.nextRoomState?.matchId ||
+        next.nextPlayerAssigned?.matchId ||
+        derivedMatchId;
 
-    if (!snapshotMatchId) {
-      return;
-    }
+      if (!snapshotMatchId) {
+        return;
+      }
 
-    saveMatchSnapshot(snapshotMatchId, {
-      roomState: next.nextRoomState ?? roomState,
-      publicMatchState: next.nextPublicMatchState ?? publicMatchState,
-      privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
-      playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
-    });
-  }
+      saveMatchSnapshot(snapshotMatchId, {
+        roomState: next.nextRoomState ?? roomState,
+        publicMatchState: next.nextPublicMatchState ?? publicMatchState,
+        privateMatchState: next.nextPrivateMatchState ?? privateMatchState,
+        playerAssigned: next.nextPlayerAssigned ?? playerAssigned,
+      });
+    },
+    [derivedMatchId, playerAssigned, privateMatchState, publicMatchState, roomState],
+  );
 
-  function handleConnect(): void {
+  const handleConnect = useCallback((): void => {
     if (!session?.backendUrl || !session?.authToken) {
       appendLog('Missing backendUrl or authToken.');
       return;
     }
+
+    // CHANGE (debt #4): guard against double-connect from auto-reconnect +
+    // user click + StrictMode double-mount.
+    if (isConnectingRef.current || clientRef.current) {
+      appendLog('Connect requested but a session is already active.');
+      return;
+    }
+
+    isConnectingRef.current = true;
+    hasReceivedHistoryRef.current = false;
+    setIsHydratingHistory(true);
 
     const client = new GameSocketClient();
     clientRef.current = client;
@@ -321,12 +365,27 @@ export function useLobbyRealtimeSession(
       },
       {
         onConnect: (socketId) => {
+          isConnectingRef.current = false;
           setConnectionStatus('online');
           appendLog(`Socket connected (${socketId}).`);
           requestRanking('connect');
           requestMatchHistory('connect');
+
+          // NOTE: even if the backend never emits match-history (no userId,
+          // network hiccup), release the hydration flag after the grace so
+          // the empty-state copy is allowed to render.
+          if (historyHydrationTimeoutRef.current !== null) {
+            clearTimeout(historyHydrationTimeoutRef.current);
+          }
+          historyHydrationTimeoutRef.current = setTimeout(() => {
+            historyHydrationTimeoutRef.current = null;
+            if (!hasReceivedHistoryRef.current) {
+              setIsHydratingHistory(false);
+            }
+          }, HISTORY_HYDRATION_GRACE_MS);
         },
         onDisconnect: (reason) => {
+          isConnectingRef.current = false;
           setConnectionStatus('offline');
           appendLog(`Socket disconnected (${reason}).`);
         },
@@ -371,17 +430,101 @@ export function useLobbyRealtimeSession(
     socket.on('match-history', (payload: unknown) => {
       const normalizedPayload = normalizeMatchHistoryPayload(payload);
       setMatchHistory(normalizedPayload.items);
+      hasReceivedHistoryRef.current = true;
+      setIsHydratingHistory(false);
+      if (historyHydrationTimeoutRef.current !== null) {
+        clearTimeout(historyHydrationTimeoutRef.current);
+        historyHydrationTimeoutRef.current = null;
+      }
       appendLog(`Received match-history (${normalizedPayload.items.length}).`);
     });
-  }
+  }, [appendLog, persistSnapshot, requestMatchHistory, requestRanking, session]);
 
-  function handleDisconnect(): void {
+  const handleDisconnect = useCallback((): void => {
     rawSocketRef.current?.off('match-history');
     rawSocketRef.current = null;
     clientRef.current?.disconnect();
+    clientRef.current = null;
+    isConnectingRef.current = false;
     setConnectionStatus('offline');
     appendLog('Socket disconnected manually.');
-  }
+  }, [appendLog]);
+
+  // CHANGE (debt #4): auto-reconnect. When the user lands on /lobby after a
+  // finished match the lobby socket is offline and the previous behaviour
+  // was to stare at "OFFLINE / Conecte-se ao lobby". We now connect on mount
+  // (whenever we have credentials) and on retry timer if a previous attempt
+  // failed. This is the *whole* fix for "lobby not accumulating wins" — the
+  // backend already streams ranking + match-history, we just weren't asking.
+  useEffect(() => {
+    if (!hasMinimumSession) {
+      return;
+    }
+
+    if (connectionStatus === 'online' || isConnectingRef.current || clientRef.current) {
+      return;
+    }
+
+    handleConnect();
+
+    return () => {
+      if (reconnectTimeoutRef.current !== null) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+  }, [connectionStatus, handleConnect, hasMinimumSession]);
+
+  // CHANGE (debt #4): if the connect attempt above silently failed (still
+  // offline after the synchronous call returned), schedule a single retry.
+  // This handles transient network errors and backend cold-starts without
+  // hammering the server.
+  useEffect(() => {
+    if (
+      !hasMinimumSession ||
+      connectionStatus === 'online' ||
+      isConnectingRef.current ||
+      clientRef.current ||
+      reconnectTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      if (!clientRef.current && !isConnectingRef.current) {
+        appendLog('Auto-reconnect: retry tick.');
+        handleConnect();
+      }
+    }, AUTO_RECONNECT_RETRY_MS);
+
+    return () => {
+      if (reconnectTimeoutRef.current !== null) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+  }, [appendLog, connectionStatus, handleConnect, hasMinimumSession]);
+
+  // CHANGE (debt #4): clean shutdown on unmount. Without this the socket
+  // would leak across navigation back and forth between Lobby and Match.
+  useEffect(() => {
+    return () => {
+      if (historyHydrationTimeoutRef.current !== null) {
+        clearTimeout(historyHydrationTimeoutRef.current);
+        historyHydrationTimeoutRef.current = null;
+      }
+      if (reconnectTimeoutRef.current !== null) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      rawSocketRef.current?.off('match-history');
+      rawSocketRef.current = null;
+      clientRef.current?.disconnect();
+      clientRef.current = null;
+      isConnectingRef.current = false;
+    };
+  }, []);
 
   function handleCreateMatch(): void {
     clientRef.current?.emitCreateMatch('1v1', 12);
@@ -449,6 +592,7 @@ export function useLobbyRealtimeSession(
     currentReady,
     hasLobbySnapshot,
     isSocketOnline,
+    isHydratingHistory,
     canConnect: hasMinimumSession,
     canCreateMatch: hasMinimumSession && isSocketOnline,
     canJoinMatch: hasMinimumSession && isSocketOnline && Boolean(normalizedMatchId),

@@ -113,6 +113,7 @@ describe('GameGateway bot profile flow', () => {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
     const viewMatchStateUseCase = { execute: jest.fn() };
+    const saveMatchRecordUseCase = { execute: jest.fn() };
     const getOrCreatePlayerProfileUseCase = {
       execute: jest.fn<Promise<PlayerProfileResult>, [{ userId: string }]>(),
     };
@@ -135,6 +136,10 @@ describe('GameGateway bot profile flow', () => {
       join: jest.fn(),
       getState: jest.fn().mockReturnValue({
         currentTurnSeatId: null,
+        players: [],
+      }),
+      setCurrentTurnSeat: jest.fn().mockReturnValue({
+        currentTurnSeatId: 'T1A',
         players: [],
       }),
       getBotProfile: jest.fn(),
@@ -439,6 +444,7 @@ describe('GameGateway bot profile flow', () => {
       raiseToNineUseCase as never,
       raiseToTwelveUseCase as never,
       viewMatchStateUseCase as never,
+      saveMatchRecordUseCase as never,
       getOrCreatePlayerProfileUseCase as never,
       updateRatingUseCase as never,
       getRankingUseCase as never,
@@ -480,6 +486,7 @@ describe('GameGateway bot profile flow', () => {
         raiseToNineUseCase,
         raiseToTwelveUseCase,
         viewMatchStateUseCase,
+        saveMatchRecordUseCase,
         getOrCreatePlayerProfileUseCase,
         updateRatingUseCase,
         getRankingUseCase,
@@ -574,21 +581,23 @@ describe('GameGateway bot profile flow', () => {
 
     await gatewayBotTurnAccess.processBotTurns('match-1');
 
-    expect(deps.botDecisionPort.decide).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      profile: 'aggressive',
-      viraRank: '4',
-      currentRound: {
-        playerOneCard: null,
-        playerTwoCard: null,
-        finished: false,
-        result: null,
-      },
-      player: {
-        playerId: 'P1',
-        hand: ['4O', 'AO', '3P'],
-      },
-    });
+    expect(deps.botDecisionPort.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        matchId: 'match-1',
+        profile: 'aggressive',
+        viraRank: '4',
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        player: {
+          playerId: 'P1',
+          hand: ['4O', 'AO', '3P'],
+        },
+      }),
+    );
 
     expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
       matchId: 'match-1',
@@ -1289,7 +1298,7 @@ describe('GameGateway bot profile flow', () => {
     });
 
     expect(response).toEqual({
-      event: 'match-history',
+      event: 'match-history-ack',
       data: {
         ok: true,
       },

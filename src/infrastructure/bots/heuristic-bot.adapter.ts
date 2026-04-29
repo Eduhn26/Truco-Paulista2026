@@ -586,14 +586,18 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (winningCards.length === 0) {
       const card = this.pickLosingCard(hand, profile);
       const strategy: BotDecisionStrategy =
-        profile === 'cautious' ? 'response-losing-weakest' : 'response-losing-middle';
+        profile === 'aggressive'
+          ? 'response-losing-strongest'
+          : profile === 'cautious'
+            ? 'response-losing-weakest'
+            : 'response-losing-middle';
 
       return { card, strategy };
     }
 
     const card = this.pickCardByProfile(winningCards, profile, {
       aggressive: 'strongest',
-      balanced: 'middle',
+      balanced: 'weakest',
       cautious: 'weakest',
     });
 
@@ -605,7 +609,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
   private pickLosingCard(hand: string[], profile: BotProfile): string {
     return this.pickCardByProfile(hand, profile, {
-      aggressive: 'middle',
+      aggressive: 'strongest',
       balanced: 'middle',
       cautious: 'weakest',
     });

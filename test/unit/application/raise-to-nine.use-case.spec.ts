@@ -47,8 +47,8 @@ describe('RaiseToNineUseCase (Application)', () => {
     match.start('4');
     match.requestTruco('P1');
     match.acceptBet('P2');
-    match.raiseToSix('P1');
-    match.acceptBet('P2');
+    match.raiseToSix('P2');
+    match.acceptBet('P1');
 
     const { repo, mocks } = makeRepo(match);
     const useCase = new RaiseToNineUseCase(repo);
