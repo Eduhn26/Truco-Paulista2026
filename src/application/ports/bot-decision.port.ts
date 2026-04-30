@@ -108,6 +108,12 @@ export type BotDecisionStrategy =
   | 'bet-initiative-value'
   | 'bet-initiative-pressure'
   | 'bet-initiative-bluff'
+  | 'mao-de-onze-accept-strong-hand'
+  | 'mao-de-onze-accept-aggressive-risk'
+  | 'mao-de-onze-accept-balanced-hand'
+  | 'mao-de-onze-decline-weak-hand'
+  | 'mao-de-onze-decline-cautious-risk'
+  | 'mao-de-onze-decline-match-risk'
   | 'empty-hand'
   | 'missing-round'
   | 'unsupported-state';
@@ -153,6 +159,14 @@ export type BotDecision =
     }
   | {
       action: 'raise-to-twelve';
+      metadata?: BotDecisionMetadata;
+    }
+  | {
+      action: 'accept-mao-de-onze';
+      metadata?: BotDecisionMetadata;
+    }
+  | {
+      action: 'decline-mao-de-onze';
       metadata?: BotDecisionMetadata;
     }
   | {

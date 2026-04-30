@@ -691,6 +691,236 @@ describe('GameGateway bot profile flow', () => {
     });
   });
 
+  it('calls acceptMaoDeOnzeUseCase when the bot decision accepts mao de onze', async () => {
+    jest.useFakeTimers();
+
+    try {
+      const { gatewayBotTurnAccess, deps } = createGateway();
+
+      const botRoomState = {
+        currentTurnSeatId: 'T2A',
+        players: [
+          {
+            seatId: 'T2A',
+            teamId: 'T2',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      };
+
+      const pendingMaoDeOnzeState = {
+        matchId: 'match-mao-de-onze-bot',
+        state: 'in_progress',
+        score: {
+          playerOne: 8,
+          playerTwo: 11,
+        },
+        currentHand: {
+          viraRank: '4',
+          finished: false,
+          viewerPlayerId: 'P2',
+          currentValue: 1,
+          betState: 'idle',
+          pendingValue: null,
+          requestedBy: null,
+          specialState: 'mao_de_onze',
+          specialDecisionPending: true,
+          specialDecisionBy: 'P2',
+          nextDecisionType: 'resolve-mao-de-onze',
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: false,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: false,
+            canDeclineBet: false,
+            canAcceptMaoDeOnze: true,
+            canDeclineMaoDeOnze: true,
+            canAttemptPlayCard: false,
+          },
+          playerOneHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+          playerTwoHand: ['5P', '3P', 'AO'],
+          rounds: [
+            {
+              playerOneCard: null,
+              playerTwoCard: null,
+              result: null,
+              finished: false,
+            },
+          ],
+        },
+      };
+
+      const acceptedMaoDeOnzeState = {
+        ...pendingMaoDeOnzeState,
+        currentHand: {
+          ...pendingMaoDeOnzeState.currentHand,
+          currentValue: 3,
+          specialDecisionPending: false,
+          nextDecisionType: 'play-card',
+          availableActions: {
+            ...pendingMaoDeOnzeState.currentHand.availableActions,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: true,
+          },
+        },
+      };
+
+      deps.roomManager.getState.mockReturnValueOnce(botRoomState).mockReturnValueOnce(botRoomState);
+
+      deps.roomManager.getBotProfile.mockReturnValue('aggressive');
+      deps.roomManager.setCurrentTurnSeat.mockReturnValue(botRoomState);
+
+      deps.viewMatchStateUseCase.execute
+        .mockResolvedValueOnce(pendingMaoDeOnzeState)
+        .mockResolvedValueOnce(pendingMaoDeOnzeState)
+        .mockResolvedValueOnce(pendingMaoDeOnzeState)
+        .mockResolvedValueOnce(acceptedMaoDeOnzeState)
+        .mockResolvedValueOnce(acceptedMaoDeOnzeState);
+
+      deps.botDecisionPort.decide.mockReturnValue({
+        action: 'accept-mao-de-onze',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'mao-de-onze-accept-strong-hand',
+            handStrength: 0.86,
+          },
+        },
+      });
+
+      await gatewayBotTurnAccess.processBotTurns('match-mao-de-onze-bot');
+
+      expect(deps.botDecisionPort.decide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          matchId: 'match-mao-de-onze-bot',
+          profile: 'aggressive',
+          player: {
+            playerId: 'P2',
+            hand: ['5P', '3P', 'AO'],
+          },
+          bet: expect.objectContaining({
+            specialState: 'mao_de_onze',
+            specialDecisionPending: true,
+          }),
+        }),
+      );
+
+      expect(deps.acceptMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+        matchId: 'match-mao-de-onze-bot',
+        playerId: 'P2',
+      });
+      expect(deps.declineMaoDeOnzeUseCase.execute).not.toHaveBeenCalled();
+      expect(deps.roomManager.setCurrentTurnSeat).toHaveBeenCalledWith(
+        'match-mao-de-onze-bot',
+        'T2A',
+      );
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  });
+
+  it('calls declineMaoDeOnzeUseCase when the bot decision declines mao de onze', async () => {
+    const { gatewayBotTurnAccess, deps } = createGateway();
+
+    const botRoomState = {
+      currentTurnSeatId: null,
+      players: [
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+      ],
+    };
+
+    const pendingMaoDeOnzeState = {
+      matchId: 'match-mao-de-onze-bot',
+      state: 'in_progress',
+      score: {
+        playerOne: 8,
+        playerTwo: 11,
+      },
+      currentHand: {
+        viraRank: '3',
+        finished: false,
+        viewerPlayerId: 'P2',
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        specialDecisionBy: 'P2',
+        nextDecisionType: 'resolve-mao-de-onze',
+        availableActions: {
+          canRequestTruco: false,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: true,
+          canDeclineMaoDeOnze: true,
+          canAttemptPlayCard: false,
+        },
+        playerOneHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        playerTwoHand: ['5O', '6C', '7E'],
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    };
+
+    const declinedMaoDeOnzeState = {
+      matchId: 'match-mao-de-onze-bot',
+      state: 'waiting',
+      score: {
+        playerOne: 9,
+        playerTwo: 11,
+      },
+      currentHand: null,
+    };
+
+    deps.roomManager.getState.mockReturnValue(botRoomState);
+    deps.roomManager.getBotProfile.mockReturnValue('cautious');
+
+    deps.viewMatchStateUseCase.execute
+      .mockResolvedValueOnce(pendingMaoDeOnzeState)
+      .mockResolvedValueOnce(pendingMaoDeOnzeState)
+      .mockResolvedValueOnce(pendingMaoDeOnzeState)
+      .mockResolvedValueOnce(declinedMaoDeOnzeState);
+
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'decline-mao-de-onze',
+      metadata: {
+        source: 'heuristic',
+        rationale: {
+          strategy: 'mao-de-onze-decline-weak-hand',
+          handStrength: 0.24,
+        },
+      },
+    });
+
+    await gatewayBotTurnAccess.processBotTurns('match-mao-de-onze-bot');
+
+    expect(deps.declineMaoDeOnzeUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-mao-de-onze-bot',
+      playerId: 'P2',
+    });
+    expect(deps.acceptMaoDeOnzeUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.roomManager.setCurrentTurnSeat).not.toHaveBeenCalled();
+  });
+
   it('joins the public queue using authenticated user rating', async () => {
     const { gateway, deps, server } = createGateway();
     const socket = createSocket({

@@ -39,6 +39,61 @@ describe('HeuristicBotAdapter', () => {
     };
   }
 
+  function createMaoDeOnzeContext(overrides: Partial<BotDecisionContext> = {}): BotDecisionContext {
+    return createContext({
+      profile: 'balanced',
+      viraRank: '4',
+      player: {
+        playerId: 'P1',
+        hand: ['3P', 'AO', 'KO'],
+      },
+      bet: {
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'mao_de_onze',
+        specialDecisionPending: true,
+        availableActions: {
+          canRequestTruco: false,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: true,
+          canDeclineMaoDeOnze: true,
+          canAttemptPlayCard: false,
+        },
+      },
+      score: {
+        playerOne: 11,
+        playerTwo: 8,
+        pointsToWin: 12,
+      },
+      ...overrides,
+    });
+  }
+
+  function expectMaoDeOnzeDecision(
+    decision: ReturnType<HeuristicBotAdapter['decide']>,
+    action: 'accept-mao-de-onze' | 'decline-mao-de-onze',
+    strategy: BotDecisionStrategy,
+  ): void {
+    expect(decision).toEqual(
+      expect.objectContaining({
+        action,
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy,
+            handStrength: expect.any(Number),
+          },
+        },
+      }),
+    );
+  }
+
   it('returns pass when the bot hand is empty', () => {
     const decision = adapter.decide(
       createContext({
@@ -404,5 +459,117 @@ describe('HeuristicBotAdapter', () => {
       card: '3P',
       metadata: heuristicMetadata('response-winning-strongest'),
     });
+  });
+  it('accepts mao de onze with a medium-good hand when the profile is aggressive', () => {
+    const decision = adapter.decide(
+      createMaoDeOnzeContext({
+        profile: 'aggressive',
+        player: {
+          playerId: 'P1',
+          hand: ['AO', 'KO', '7C'],
+        },
+      }),
+    );
+
+    expectMaoDeOnzeDecision(decision, 'accept-mao-de-onze', 'mao-de-onze-accept-aggressive-risk');
+  });
+
+  it('accepts mao de onze with a good hand when the profile is balanced', () => {
+    const decision = adapter.decide(
+      createMaoDeOnzeContext({
+        profile: 'balanced',
+        player: {
+          playerId: 'P1',
+          hand: ['3P', 'AO', 'KO'],
+        },
+      }),
+    );
+
+    expectMaoDeOnzeDecision(decision, 'accept-mao-de-onze', 'mao-de-onze-accept-balanced-hand');
+  });
+
+  it('declines mao de onze with a medium hand when the profile is cautious', () => {
+    const decision = adapter.decide(
+      createMaoDeOnzeContext({
+        profile: 'cautious',
+        player: {
+          playerId: 'P1',
+          hand: ['AO', 'KO', '7C'],
+        },
+      }),
+    );
+
+    expectMaoDeOnzeDecision(decision, 'decline-mao-de-onze', 'mao-de-onze-decline-cautious-risk');
+  });
+
+  it('accepts mao de onze with a very strong hand for every profile', () => {
+    for (const profile of ['aggressive', 'balanced', 'cautious'] as const) {
+      const decision = adapter.decide(
+        createMaoDeOnzeContext({
+          profile,
+          player: {
+            playerId: 'P1',
+            hand: ['5P', '3P', 'AO'],
+          },
+        }),
+      );
+
+      expect(decision).toEqual(
+        expect.objectContaining({
+          action: 'accept-mao-de-onze',
+          metadata: expect.objectContaining({
+            rationale: expect.objectContaining({
+              handStrength: expect.any(Number),
+            }),
+          }),
+        }),
+      );
+    }
+  });
+
+  it('declines mao de onze with a very weak hand for every profile', () => {
+    for (const profile of ['aggressive', 'balanced', 'cautious'] as const) {
+      const decision = adapter.decide(
+        createMaoDeOnzeContext({
+          profile,
+          viraRank: '3',
+          player: {
+            playerId: 'P1',
+            hand: ['5O', '6C', '7E'],
+          },
+        }),
+      );
+
+      expect(decision).toEqual(
+        expect.objectContaining({
+          action: 'decline-mao-de-onze',
+          metadata: expect.objectContaining({
+            rationale: expect.objectContaining({
+              strategy: expect.stringMatching(/^mao-de-onze-decline-/),
+              handStrength: expect.any(Number),
+            }),
+          }),
+        }),
+      );
+    }
+  });
+
+  it('declines mao de onze by match risk when accepting can lose the match', () => {
+    const decision = adapter.decide(
+      createMaoDeOnzeContext({
+        profile: 'balanced',
+        player: {
+          playerId: 'P1',
+          hand: ['AO', 'KO', '7C'],
+        },
+        score: {
+          playerOne: 11,
+          playerTwo: 9,
+          pointsToWin: 12,
+        },
+      }),
+    );
+
+    expectMaoDeOnzeDecision(decision, 'decline-mao-de-onze', 'mao-de-onze-decline-match-risk');
   });
 });

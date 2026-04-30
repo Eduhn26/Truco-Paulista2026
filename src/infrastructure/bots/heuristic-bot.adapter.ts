@@ -10,7 +10,7 @@ import type {
   BotProfile,
   BotRoundView,
 } from '@game/application/ports/bot-decision.port';
-import { compareCards } from '@game/domain/services/truco-rules';
+import { compareCards, manilhaRankFromVira } from '@game/domain/services/truco-rules';
 import { Card } from '@game/domain/value-objects/card';
 import type { Rank } from '@game/domain/value-objects/rank';
 
@@ -50,6 +50,8 @@ type ScorePressure = {
   acceptRisksMatch: boolean;
 };
 
+type MaoDeOnzeDecisionAction = 'accept-mao-de-onze' | 'decline-mao-de-onze';
+
 const FULL_DECK_SUITS = ['C', 'O', 'P', 'E'] as const;
 const FULL_DECK_RANKS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'] as const;
 const FULL_DECK = FULL_DECK_RANKS.flatMap((rank) =>
@@ -59,6 +61,11 @@ const FULL_DECK = FULL_DECK_RANKS.flatMap((rank) =>
 @Injectable()
 export class HeuristicBotAdapter implements BotDecisionPort {
   decide(context: BotDecisionContext): BotDecision {
+    const maoDeOnzeDecision = this.decideMaoDeOnze(context);
+    if (maoDeOnzeDecision) {
+      return maoDeOnzeDecision;
+    }
+
     const betResponse = this.decideBetResponse(context);
     if (betResponse) {
       return betResponse;
@@ -113,6 +120,226 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       // calculateHandStrength on every bot turn. It is only populated on bet-response decisions.
       metadata: this.buildMetadata(selection.strategy),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mão de 11 decision (bot owns the special accept/decline step)
+  // ---------------------------------------------------------------------------
+  private decideMaoDeOnze(context: BotDecisionContext): BotDecision | null {
+    const bet = context.bet;
+    if (!bet) return null;
+    if (bet.specialState !== 'mao_de_onze') return null;
+    if (!bet.specialDecisionPending) return null;
+
+    const canAccept = bet.availableActions.canAcceptMaoDeOnze;
+    const canDecline = bet.availableActions.canDeclineMaoDeOnze;
+
+    if (!canAccept && !canDecline) return null;
+
+    const handStrength = this.calculateMaoDeOnzeHandStrength(context);
+    const forcedAction = this.resolveForcedMaoDeOnzeAction(handStrength, canAccept, canDecline);
+
+    if (forcedAction === 'accept-mao-de-onze') {
+      return {
+        action: 'accept-mao-de-onze',
+        metadata: this.buildMetadata('mao-de-onze-accept-strong-hand', handStrength),
+      };
+    }
+
+    if (forcedAction === 'decline-mao-de-onze') {
+      return {
+        action: 'decline-mao-de-onze',
+        metadata: this.buildMetadata('mao-de-onze-decline-weak-hand', handStrength),
+      };
+    }
+
+    const threshold = this.resolveMaoDeOnzeThreshold(context.profile);
+
+    if (canAccept && handStrength >= threshold) {
+      return {
+        action: 'accept-mao-de-onze',
+        metadata: this.buildMetadata(
+          this.resolveMaoDeOnzeAcceptStrategy(context.profile),
+          handStrength,
+        ),
+      };
+    }
+
+    if (canDecline) {
+      return {
+        action: 'decline-mao-de-onze',
+        metadata: this.buildMetadata(this.resolveMaoDeOnzeDeclineStrategy(context), handStrength),
+      };
+    }
+
+    return {
+      action: 'accept-mao-de-onze',
+      metadata: this.buildMetadata(
+        this.resolveMaoDeOnzeAcceptStrategy(context.profile),
+        handStrength,
+      ),
+    };
+  }
+
+  private resolveForcedMaoDeOnzeAction(
+    handStrength: number,
+    canAccept: boolean,
+    canDecline: boolean,
+  ): MaoDeOnzeDecisionAction | null {
+    if (canAccept && handStrength >= 0.78) {
+      return 'accept-mao-de-onze';
+    }
+
+    if (canDecline && handStrength <= 0.38) {
+      return 'decline-mao-de-onze';
+    }
+
+    return null;
+  }
+
+  private resolveMaoDeOnzeThreshold(profile: BotProfile): number {
+    if (profile === 'aggressive') return 0.5;
+    if (profile === 'cautious') return 0.66;
+    return 0.58;
+  }
+
+  private resolveMaoDeOnzeAcceptStrategy(profile: BotProfile): BotDecisionStrategy {
+    if (profile === 'aggressive') {
+      return 'mao-de-onze-accept-aggressive-risk';
+    }
+
+    return 'mao-de-onze-accept-balanced-hand';
+  }
+
+  private resolveMaoDeOnzeDeclineStrategy(context: BotDecisionContext): BotDecisionStrategy {
+    if (this.isMaoDeOnzeAcceptingMatchRisk(context)) {
+      return 'mao-de-onze-decline-match-risk';
+    }
+
+    if (context.profile === 'cautious') {
+      return 'mao-de-onze-decline-cautious-risk';
+    }
+
+    return 'mao-de-onze-decline-weak-hand';
+  }
+
+  private calculateMaoDeOnzeHandStrength(context: BotDecisionContext): number {
+    const hand = context.player.hand;
+
+    if (hand.length === 0) {
+      return 0;
+    }
+
+    const orderedHand = [...hand].sort((left, right) =>
+      this.compareCardStrength(left, right, context.viraRank),
+    );
+    const strongestCards = orderedHand.reverse();
+
+    const bestCardStrength = this.calculateCardStrengthScore(strongestCards[0], context.viraRank);
+    const secondCardStrength = this.calculateCardStrengthScore(strongestCards[1], context.viraRank);
+    const thirdCardStrength = this.calculateCardStrengthScore(strongestCards[2], context.viraRank);
+
+    const cardCore = bestCardStrength * 0.3 + secondCardStrength * 0.3 + thirdCardStrength * 0.1;
+    const manilhaBonus = this.calculateMaoDeOnzeManilhaBonus(hand, context.viraRank);
+    const pressureAdjustment = this.computeMaoDeOnzePressureAdjustment(context);
+
+    return this.roundStrength(this.clamp01(cardCore + manilhaBonus + pressureAdjustment));
+  }
+
+  private calculateCardStrengthScore(card: string | undefined, viraRank: Rank): number {
+    if (!card) {
+      return 0;
+    }
+
+    const totalPossibleWins = FULL_DECK.length - 1;
+
+    if (totalPossibleWins <= 0) {
+      return 0;
+    }
+
+    let wins = 0;
+
+    for (const opponentCard of FULL_DECK) {
+      if (opponentCard === card) {
+        continue;
+      }
+
+      if (this.beats(card, opponentCard, viraRank)) {
+        wins += 1;
+      }
+    }
+
+    // Square root makes the two best cards more legible for mão de 11. Raw win-rate is too
+    // conservative because even excellent non-manilhas still lose to all four manilhas.
+    return Math.sqrt(wins / totalPossibleWins);
+  }
+
+  private calculateMaoDeOnzeManilhaBonus(hand: string[], viraRank: Rank): number {
+    const manilhaRank = manilhaRankFromVira(viraRank);
+    const manilhaCount = hand.filter((card) => Card.from(card).getRank() === manilhaRank).length;
+
+    if (manilhaCount === 0) {
+      return 0;
+    }
+
+    if (manilhaCount === 1) {
+      return 0.2;
+    }
+
+    return 0.24;
+  }
+
+  private computeMaoDeOnzePressureAdjustment(context: BotDecisionContext): number {
+    const score = context.score;
+    const profileAdjustment =
+      context.profile === 'aggressive' ? 0.04 : context.profile === 'cautious' ? -0.04 : 0;
+
+    if (!score) {
+      return profileAdjustment;
+    }
+
+    const opponentScore = context.player.playerId === 'P1' ? score.playerTwo : score.playerOne;
+
+    let adjustment = profileAdjustment;
+
+    if (this.isMaoDeOnzeDecliningMatchRisk(context)) {
+      adjustment += 0.1;
+    }
+
+    if (this.isMaoDeOnzeAcceptingMatchRisk(context)) {
+      adjustment +=
+        context.profile === 'cautious' ? -0.1 : context.profile === 'balanced' ? -0.06 : -0.02;
+    }
+
+    if (opponentScore <= score.pointsToWin - 4) {
+      adjustment += context.profile === 'aggressive' ? 0.04 : 0.02;
+    }
+
+    return Math.max(-0.1, Math.min(0.1, adjustment));
+  }
+
+  private isMaoDeOnzeDecliningMatchRisk(context: BotDecisionContext): boolean {
+    const score = context.score;
+
+    if (!score) {
+      return false;
+    }
+
+    const opponentScore = context.player.playerId === 'P1' ? score.playerTwo : score.playerOne;
+
+    return opponentScore + 1 >= score.pointsToWin;
+  }
+
+  private isMaoDeOnzeAcceptingMatchRisk(context: BotDecisionContext): boolean {
+    const score = context.score;
+
+    if (!score) {
+      return false;
+    }
+
+    const opponentScore = context.player.playerId === 'P1' ? score.playerTwo : score.playerOne;
+
+    return opponentScore + 3 >= score.pointsToWin;
   }
 
   // ---------------------------------------------------------------------------
@@ -546,6 +773,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (value < 0) return 0;
     if (value > 1) return 1;
     return value;
+  }
+
+  private roundStrength(value: number): number {
+    return Math.round(value * 100) / 100;
   }
 
   // ---------------------------------------------------------------------------

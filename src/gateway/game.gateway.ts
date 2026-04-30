@@ -656,6 +656,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return metadata?.source ?? 'unknown';
   }
 
+  private buildFallbackMaoDeOnzeDecision(metadata: BotDecisionMetadata | undefined): BotDecision {
+    if (!metadata) {
+      return { action: 'accept-mao-de-onze' };
+    }
+
+    return {
+      action: 'accept-mao-de-onze',
+      metadata,
+    };
+  }
+
   private rememberBotDecision(
     matchId: string,
     botTurnContext: BotTurnDecisionContext,
@@ -1823,17 +1834,60 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
+    const decision = this.botDecisionPort.decide(botTurnContext.context);
+
     if (
       currentHand.specialState === 'mao_de_onze' &&
       currentHand.specialDecisionPending &&
       currentHand.specialDecisionBy === botTurnContext.playerId
     ) {
+      const maoDeOnzeDecision: BotDecision =
+        decision.action === 'accept-mao-de-onze' || decision.action === 'decline-mao-de-onze'
+          ? decision
+          : this.buildFallbackMaoDeOnzeDecision(decision.metadata);
+
+      this.rememberBotDecision(matchId, botTurnContext, maoDeOnzeDecision);
+
+      if (maoDeOnzeDecision.action === 'decline-mao-de-onze') {
+        const dto: DeclineMaoDeOnzeRequestDto = {
+          matchId,
+          playerId: botTurnContext.playerId,
+        };
+
+        await this.declineMaoDeOnzeUseCase.execute(dto);
+        await this.continueAutomaticGameFlow(matchId);
+
+        this.logGateway('log', {
+          layer: 'gateway',
+          event: 'decline_mao_de_onze_succeeded',
+          status: 'succeeded',
+          matchId,
+          seatId: botTurnContext.seatId,
+          teamId: botTurnContext.teamId,
+          playerId: botTurnContext.playerId,
+        });
+
+        return false;
+      }
+
       const dto: AcceptMaoDeOnzeRequestDto = {
         matchId,
         playerId: botTurnContext.playerId,
       };
 
       await this.acceptMaoDeOnzeUseCase.execute(dto);
+
+      // NOTE: Bot-owned mao de onze is a two-step automatic flow. Accepting the
+      // special decision only unlocks play-card; the same bot may still own the
+      // opening turn and must be allowed to continue through the scheduled bot
+      // loop instead of stopping the chain here.
+      const resumedRoomState = this.roomManager.setCurrentTurnSeat(
+        matchId,
+        botTurnContext.seatId as SeatId,
+      );
+      this.server
+        .to(matchId)
+        .emit('room-state', this.withBotDecisionTelemetry(matchId, resumedRoomState));
 
       const updatedState = await this.emitSyncedMatchState(matchId);
       await this.finalizeMatchIfFinished(matchId, updatedState);
@@ -1848,10 +1902,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: botTurnContext.playerId,
       });
 
-      return false;
+      if (updatedState.state !== 'in_progress' || !updatedState.currentHand) {
+        return false;
+      }
+
+      if (
+        updatedState.currentHand.finished ||
+        updatedState.currentHand.nextDecisionType !== 'play-card'
+      ) {
+        return false;
+      }
+
+      const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
+
+      return Boolean(nextBotTurnContext);
     }
 
-    const decision = this.botDecisionPort.decide(botTurnContext.context);
     this.rememberBotDecision(matchId, botTurnContext, decision);
 
     const isRespondingToBet =
