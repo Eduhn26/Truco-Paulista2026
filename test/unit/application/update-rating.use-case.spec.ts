@@ -139,6 +139,69 @@ describe('UpdateRatingUseCase', () => {
     });
   });
 
+  it('raises the human winner rating against a bot opponent', async () => {
+    const repo = new FakePlayerProfileRepository();
+
+    repo.seed({
+      id: 'winner',
+      userId: 'human-winner',
+      displayName: null,
+      rating: 1000,
+      wins: 4,
+      losses: 2,
+      matchesPlayed: 6,
+    });
+
+    const useCase = new UpdateRatingUseCase(repo);
+
+    await useCase.execute({
+      winnerUserIds: ['human-winner'],
+      loserUserIds: [],
+    });
+
+    expect(repo.getByUserId('human-winner')).toEqual({
+      id: 'winner',
+      userId: 'human-winner',
+      displayName: null,
+      rating: 1025,
+      wins: 5,
+      losses: 2,
+      matchesPlayed: 7,
+    });
+  });
+
+  it('lowers the human loser rating against a bot opponent', async () => {
+    const repo = new FakePlayerProfileRepository();
+
+    repo.seed({
+      id: 'loser',
+      userId: 'human-loser',
+      displayName: null,
+      rating: 1000,
+      wins: 4,
+      losses: 2,
+      matchesPlayed: 6,
+    });
+
+    const useCase = new UpdateRatingUseCase(repo);
+
+    await useCase.execute({
+      winnerUserIds: [],
+      loserUserIds: ['human-loser'],
+    });
+
+    expect(repo.getByUserId('human-loser')).toEqual({
+      id: 'loser',
+      userId: 'human-loser',
+      displayName: null,
+      rating: 975,
+      wins: 4,
+      losses: 3,
+      matchesPlayed: 7,
+    });
+  });
+
+
   it('enforces the current rating floor of 100 for losers', async () => {
     const repo = new FakePlayerProfileRepository();
 

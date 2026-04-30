@@ -15,27 +15,19 @@ type UpdateRatingResponseDto = {
 const RATING_DELTA = 25;
 const RATING_FLOOR = 100;
 
-function applyWin(
-  profile: PlayerProfileSnapshot,
-  options: { adjustRating: boolean },
-): PlayerProfileSnapshot {
+function applyWin(profile: PlayerProfileSnapshot): PlayerProfileSnapshot {
   return {
     ...profile,
-    rating: options.adjustRating ? profile.rating + RATING_DELTA : profile.rating,
+    rating: profile.rating + RATING_DELTA,
     wins: profile.wins + 1,
     matchesPlayed: profile.matchesPlayed + 1,
   };
 }
 
-function applyLoss(
-  profile: PlayerProfileSnapshot,
-  options: { adjustRating: boolean },
-): PlayerProfileSnapshot {
+function applyLoss(profile: PlayerProfileSnapshot): PlayerProfileSnapshot {
   return {
     ...profile,
-    rating: options.adjustRating
-      ? Math.max(RATING_FLOOR, profile.rating - RATING_DELTA)
-      : profile.rating,
+    rating: Math.max(RATING_FLOOR, profile.rating - RATING_DELTA),
     losses: profile.losses + 1,
     matchesPlayed: profile.matchesPlayed + 1,
   };
@@ -61,15 +53,16 @@ export class UpdateRatingUseCase {
       throw new Error('Player profile not found');
     }
 
-    const shouldAdjustRating = winnerUserIds.length > 0 && loserUserIds.length > 0;
     const profilesToSave: PlayerProfileSnapshot[] = [];
 
+    // NOTE: Bot opponents do not have profile rows, but human-vs-bot matches
+    // are still competitive lobby sessions and must move the human rating.
     for (const profile of winners as PlayerProfileSnapshot[]) {
-      profilesToSave.push(applyWin(profile, { adjustRating: shouldAdjustRating }));
+      profilesToSave.push(applyWin(profile));
     }
 
     for (const profile of losers as PlayerProfileSnapshot[]) {
-      profilesToSave.push(applyLoss(profile, { adjustRating: shouldAdjustRating }));
+      profilesToSave.push(applyLoss(profile));
     }
 
     await Promise.all(profilesToSave.map((profile) => this.repo.save(profile)));
