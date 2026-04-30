@@ -75,7 +75,7 @@ type UseLobbyRealtimeSessionResult = {
 
 const LOBBY_RANKING_STORAGE_KEY = 'truco:lobby:ranking';
 const DEFAULT_RANKING_LIMIT = 10;
-const DEFAULT_HISTORY_LIMIT = 5;
+const DEFAULT_HISTORY_LIMIT = 50;
 // CHANGE (debt #4): backoff window between reconnect attempts. The lobby
 // auto-reconnects after a match (we land here with the socket disconnected),
 // but if the backend or auth is genuinely unavailable we must not flood it.

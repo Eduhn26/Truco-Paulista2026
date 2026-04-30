@@ -51,6 +51,12 @@ type ProgressSnapshot = {
   summary: string;
 };
 
+type HistoryProgressStats = {
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+};
+
 type RecentMatchViewModel = {
   resultLabel: string;
   resultTone: string;
@@ -427,9 +433,54 @@ function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
   };
 }
 
+function resolveHistoryProgressStats(
+  matchHistory: MatchHistoryListItemPayload[],
+  currentUserId: string | undefined,
+): HistoryProgressStats {
+  if (!currentUserId) {
+    return { matchesPlayed: 0, wins: 0, losses: 0 };
+  }
+
+  return matchHistory.reduce<HistoryProgressStats>(
+    (accumulator, historyItem) => {
+      if (historyItem.status !== 'completed') {
+        return accumulator;
+      }
+
+      const myParticipant = historyItem.participants.find(
+        (participant) => participant.userId === currentUserId,
+      );
+
+      if (!myParticipant) {
+        return accumulator;
+      }
+
+      const myTeamPlayerId = myParticipant.seatId.startsWith('T1')
+        ? 'P1'
+        : myParticipant.seatId.startsWith('T2')
+          ? 'P2'
+          : null;
+
+      if (!myTeamPlayerId || !historyItem.winnerPlayerId) {
+        return accumulator;
+      }
+
+      const didWin = historyItem.winnerPlayerId === myTeamPlayerId;
+
+      return {
+        matchesPlayed: accumulator.matchesPlayed + 1,
+        wins: accumulator.wins + (didWin ? 1 : 0),
+        losses: accumulator.losses + (didWin ? 0 : 1),
+      };
+    },
+    { matchesPlayed: 0, wins: 0, losses: 0 },
+  );
+}
+
 function resolveProgressSnapshot(params: {
   ranking: RankingEntryLike[];
   currentUserId: string | undefined;
+  matchHistory: MatchHistoryListItemPayload[];
   latestHistoryItem: MatchHistoryListItemPayload | null;
   recentMatchViewModel: RecentMatchViewModel | null;
 }): ProgressSnapshot {
@@ -444,16 +495,20 @@ function resolveProgressSnapshot(params: {
   const rankingWins = currentUserRankingEntry?.wins ?? 0;
   const rankingLosses = currentUserRankingEntry?.losses ?? 0;
   const rating = currentUserRankingEntry?.rating ?? null;
+  const historyProgressStats = resolveHistoryProgressStats(
+    params.matchHistory,
+    params.currentUserId,
+  );
 
   const hasRecentMatch = params.latestHistoryItem !== null;
-  const recentWin =
-    hasRecentMatch && params.recentMatchViewModel?.didCurrentUserWin === true ? 1 : 0;
-  const recentLoss =
-    hasRecentMatch && params.recentMatchViewModel?.didCurrentUserWin === false ? 1 : 0;
 
-  const matchesPlayed = Math.max(rankingMatchesPlayed, hasRecentMatch ? 1 : 0);
-  const wins = Math.max(rankingWins, recentWin);
-  const losses = Math.max(rankingLosses, recentLoss);
+  const matchesPlayed = Math.max(
+    rankingMatchesPlayed,
+    historyProgressStats.matchesPlayed,
+    hasRecentMatch ? 1 : 0,
+  );
+  const wins = Math.max(rankingWins, historyProgressStats.wins);
+  const losses = Math.max(rankingLosses, historyProgressStats.losses);
   const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
 
   let momentumLabel = 'Começo de jornada';
@@ -511,6 +566,7 @@ export function LobbyPage() {
     roomState,
     playerAssigned,
     ranking,
+    matchHistory,
     latestHistoryItem,
     derivedMatchId,
     roomPlayers,
@@ -596,10 +652,11 @@ export function LobbyPage() {
     return resolveProgressSnapshot({
       ranking,
       currentUserId,
+      matchHistory,
       latestHistoryItem,
       recentMatchViewModel,
     });
-  }, [currentUserId, latestHistoryItem, ranking, recentMatchViewModel]);
+  }, [currentUserId, latestHistoryItem, matchHistory, ranking, recentMatchViewModel]);
   const hasAnyMatchesPlayed = progressSnapshot.matchesPlayed > 0;
 
   return (
