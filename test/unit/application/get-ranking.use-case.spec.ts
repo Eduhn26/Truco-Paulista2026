@@ -20,6 +20,7 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
     const created: PlayerProfileSnapshot = {
       id: `profile-${userId}`,
       userId,
+      displayName: null,
       rating: 1000,
       wins: 0,
       losses: 0,
@@ -65,6 +66,7 @@ describe('GetRankingUseCase', () => {
     repo.seed({
       id: 'p1',
       userId: 'user-1',
+      displayName: null,
       rating: 1200,
       wins: 10,
       losses: 2,
@@ -74,6 +76,7 @@ describe('GetRankingUseCase', () => {
     repo.seed({
       id: 'p2',
       userId: 'user-2',
+      displayName: null,
       rating: 1100,
       wins: 7,
       losses: 4,
@@ -83,6 +86,7 @@ describe('GetRankingUseCase', () => {
     repo.seed({
       id: 'p3',
       userId: 'user-3',
+      displayName: null,
       rating: 1300,
       wins: 14,
       losses: 1,
@@ -98,6 +102,7 @@ describe('GetRankingUseCase', () => {
         {
           profileId: 'p3',
           userId: 'user-3',
+          displayName: null,
           rating: 1300,
           wins: 14,
           losses: 1,
@@ -106,6 +111,7 @@ describe('GetRankingUseCase', () => {
         {
           profileId: 'p1',
           userId: 'user-1',
+          displayName: null,
           rating: 1200,
           wins: 10,
           losses: 2,

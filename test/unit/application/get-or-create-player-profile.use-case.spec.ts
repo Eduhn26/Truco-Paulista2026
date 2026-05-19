@@ -22,6 +22,7 @@ class FakePlayerProfileRepository implements PlayerProfileRepository {
     const created: PlayerProfileSnapshot = {
       id: `profile-${this.sequence}`,
       userId,
+      displayName: null,
       rating: 1000,
       wins: 0,
       losses: 0,
@@ -50,6 +51,7 @@ describe('GetOrCreatePlayerProfileUseCase', () => {
     const existing: PlayerProfileSnapshot = {
       id: 'profile-1',
       userId: 'user-a',
+      displayName: null,
       rating: 1125,
       wins: 3,
       losses: 1,
@@ -76,6 +78,7 @@ describe('GetOrCreatePlayerProfileUseCase', () => {
       profile: {
         id: 'profile-1',
         userId: 'user-new',
+        displayName: null,
         rating: 1000,
         wins: 0,
         losses: 0,

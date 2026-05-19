@@ -1,0 +1,916 @@
+/* =============================================================================
+   PREMIUM VISUAL PATCH — PART 2 — Truco Paulista
+   -----------------------------------------------------------------------------
+   Extends premium-patch.css with deeper cinematic effects:
+     • Truco drama overlay — shock waves, particle bursts, chromatic glow
+     • Match table — turn vignette, card-drop ripple, ambient table light
+     • Lobby cards — 3D tilt, entry cascade, hover depth
+     • Player avatars — sophisticated turn rings
+     • Score/Header — counter roll, breathing numbers
+     • Transition overlays — "NOVA MÃO" with chromatic aberration
+     • Loading skeletons — premium gold shimmer
+     • Glass morphism refinement on panels
+     • Custom cursor hints
+
+   Same guarantees as Part 1: additive, GPU-friendly, reduced-motion aware,
+   zero TSX changes required, no keyframe-name collisions.
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   22. TRUCO DRAMA OVERLAY — shockwave and particle burst
+   The overlay shows the giant "TRUCO!" / "SEIS!" / "NOVE!" / "DOZE!" word.
+   We target the highest-z-index motion.div the overlay paints, plus add
+   pseudo-elements with radiating shock rings.
+   -------------------------------------------------------------------------- */
+
+/* The drama overlay uses inline styles with strong filter/glow. We hook on
+   the parent z-index marker (tooltip + decision modals sit around z-index 160).
+   The overlay paints between 65 and 160 — we target by aria/role or by
+   pre-existing aura backgrounds. Safe: only applies if a child with those
+   markers exists. */
+
+/* Shock ring — single-shot ring expanding outward each time the drama
+   announcement mounts. Triggered by class `.px-drama-shock`. The truco
+   overlay TSX can add this class via Motion `onAnimationStart` later;
+   for now it's also useful as a manual prop. The rule itself is harmless
+   if the class is never present. */
+.px-drama-shock {
+  position: relative;
+}
+
+.px-drama-shock::before,
+.px-drama-shock::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 241, 184, 0.5);
+  transform: translate(-50%, -50%) scale(1);
+  pointer-events: none;
+  animation: px-shock-ring 1.4s cubic-bezier(0.20, 0.90, 0.24, 1) forwards;
+}
+
+.px-drama-shock::after {
+  animation-delay: 0.18s;
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
+@keyframes px-shock-ring {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    border-width: 3px;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(28);
+    opacity: 0;
+    border-width: 0.5px;
+  }
+}
+
+/* Chromatic aberration text — for big announcement words. Add class
+   `.px-chromatic` to any heading; produces a soft RGB-split that reads
+   like a high-end title sequence. */
+.px-chromatic {
+  position: relative;
+  text-shadow:
+    -1.5px 0 0 rgba(248, 113, 113, 0.42),
+     1.5px 0 0 rgba(96, 165, 250, 0.38),
+     0 3px 16px rgba(0, 0, 0, 0.55),
+     0 0 28px rgba(255, 223, 128, 0.32);
+  animation: px-chromatic-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes px-chromatic-pulse {
+  0%, 100% {
+    text-shadow:
+      -1.5px 0 0 rgba(248, 113, 113, 0.42),
+       1.5px 0 0 rgba(96, 165, 250, 0.38),
+       0 3px 16px rgba(0, 0, 0, 0.55),
+       0 0 28px rgba(255, 223, 128, 0.32);
+  }
+  50% {
+    text-shadow:
+      -2.5px 0 0 rgba(248, 113, 113, 0.55),
+       2.5px 0 0 rgba(96, 165, 250, 0.50),
+       0 3px 16px rgba(0, 0, 0, 0.55),
+       0 0 48px rgba(255, 223, 128, 0.52);
+  }
+}
+
+/* Auto-target the giant TRUCO words painted by the overlay. They are
+   rendered inside an absolutely-positioned fixed full-screen container
+   with very large font-size and inline-style text-shadow. Safest hook:
+   any element with text-shadow including our gold glow + font-size > 100px. */
+/* We achieve this with a defensive selector that only matches the truco
+   word, never breaking other large headings: it requires `Georgia` font
+   AND a large font-size in inline style. */
+[style*='font-size: 14'][style*='Georgia'],
+[style*='font-size: 16'][style*='Georgia'],
+[style*='font-size: 18'][style*='Georgia'],
+[style*='font-size: 20'][style*='Georgia'] {
+  animation: px-drama-throb 1.4s ease-in-out infinite;
+}
+
+@keyframes px-drama-throb {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 32px rgba(255, 223, 128, 0.42));
+  }
+  50% {
+    transform: scale(1.025);
+    filter: drop-shadow(0 0 56px rgba(255, 223, 128, 0.72));
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   23. CARD-DROP RIPPLE — when a card lands on the felt, send a soft ring
+   outward from where it dropped. We attach via `.px-card-dropped`; consumers
+   add this class for one render tick. Auto-removes via animationend.
+   -------------------------------------------------------------------------- */
+.px-card-dropped {
+  position: relative;
+}
+
+.px-card-dropped::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 244, 214, 0.32) 0%,
+    rgba(201, 168, 76, 0.18) 30%,
+    transparent 70%
+  );
+  transform: translate(-50%, -50%) scale(0.4);
+  pointer-events: none;
+  animation: px-card-drop-ripple 0.9s ease-out forwards;
+  z-index: -1;
+}
+
+@keyframes px-card-drop-ripple {
+  0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(2.4); opacity: 0;   }
+}
+
+/* -----------------------------------------------------------------------------
+   24. PLAYER AVATAR / TURN RING — the avatars on top of the table get a
+   pulsing gold ring when it's their turn. The existing code uses inline
+   gradient borders; we add a conic-gradient overlay that rotates.
+   The header turn indicator looks like a small badge with "TURNO" text;
+   we wrap it with a rotating light ring.
+   -------------------------------------------------------------------------- */
+
+/* Target turn badges by their distinctive "TURNO" text content via
+   :has() — falls back gracefully on browsers without :has(). */
+@supports selector(:has(*)) {
+  [class*='border']:has(> [style*='turno']),
+  [class*='border']:has(> :where([class*='TURNO'], [class*='Turno'])) {
+    position: relative;
+  }
+}
+
+/* Manual class for explicit opt-in. */
+.px-turn-ring {
+  position: relative;
+  isolation: isolate;
+}
+
+.px-turn-ring::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 241, 184, 0) 60deg,
+    rgba(255, 241, 184, 0.72) 90deg,
+    rgba(201, 168, 76, 0.42) 120deg,
+    rgba(255, 241, 184, 0) 150deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+          mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  padding: 2.5px;
+  animation: px-turn-spin 3.5s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes px-turn-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* -----------------------------------------------------------------------------
+   25. PLAYER NAME BADGES — the existing inline-styled "VANDA FE..." bars
+   below the avatars. Add a soft glow that intensifies when the player
+   has the turn marker `TURNO`. We target ancestors that contain that text.
+   -------------------------------------------------------------------------- */
+@supports selector(:has(*)) {
+  *:has(> [class*='turno']),
+  *:has(> [class*='TURNO']) {
+    transition: filter 0.4s ease;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   26. SCORE NUMBERS — the giant "0" / "1" / "12" headline scores in the
+   header (left and right of "VALE") get a breathing scale and gold
+   shimmer when they increment. Detected via class `.px-score-bump` that
+   consumers can briefly apply on change.
+   -------------------------------------------------------------------------- */
+.px-score-bump {
+  animation: px-score-bump 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes px-score-bump {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  40%  { transform: scale(1.32); filter: brightness(1.5) drop-shadow(0 0 24px rgba(255, 241, 184, 0.8)); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+
+/* The standing score numbers (Georgia, ~30px, with text-shadow) — add
+   a slow breathing scale so they feel alive even between events. We
+   anchor on the Georgia + large font-size signature. */
+.gold-frame [style*='Georgia'][style*='font-size: 27'],
+.gold-frame [style*='Georgia'][style*='font-size: 30'] {
+  animation: px-score-breathe 5s ease-in-out infinite;
+  transform-origin: center;
+  display: inline-block;
+}
+
+@keyframes px-score-breathe {
+  0%, 100% { transform: scale(1);    }
+  50%      { transform: scale(1.015); }
+}
+
+/* -----------------------------------------------------------------------------
+   27. LOBBY MESA CARDS — the four "Treino Solo / Mesa Adaptável /
+   Desafiar Jogador / Mesa com Amigo" cards. They live inside the lobby
+   gold-frame and have distinctive nested structure. We give them a 3D
+   tilt on hover via `transform-style: preserve-3d` and ambient drift.
+   -------------------------------------------------------------------------- */
+/* Generic targeting: any direct child of a flex/grid row inside a
+   gold-frame that has a colored chip/diamond marker. Safer: use a
+   dedicated class `.px-lobby-card` that the TSX can adopt; meanwhile,
+   we provide ambient behavior on any rounded-card-shaped element. */
+.px-lobby-card,
+.gold-frame [class*='grid'] > [class*='rounded'] {
+  transition:
+    transform 0.4s cubic-bezier(0.20, 0.90, 0.24, 1),
+    box-shadow 0.4s ease,
+    border-color 0.4s ease;
+  will-change: transform;
+}
+
+.px-lobby-card:hover,
+.gold-frame [class*='grid'] > [class*='rounded']:hover {
+  transform: translateY(-4px) scale(1.015);
+}
+
+/* Cinematic entry — staggered fade-up for the cards row. Uses the
+   px-fade-up keyframe from Part 1. */
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(1) { animation: px-fade-up 0.6s 0.05s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(2) { animation: px-fade-up 0.6s 0.12s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(3) { animation: px-fade-up 0.6s 0.19s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(4) { animation: px-fade-up 0.6s 0.26s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(5) { animation: px-fade-up 0.6s 0.33s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+.gold-frame [class*='grid'] > [class*='rounded']:nth-child(6) { animation: px-fade-up 0.6s 0.40s cubic-bezier(0.20, 0.90, 0.24, 1) backwards; }
+
+/* -----------------------------------------------------------------------------
+   28. "NOVA MÃO" / "TRUCO!" GIANT TEXT — the centerpiece transition text
+   on the match table. We can identify it by its huge font-size + Georgia.
+   Add a typewriter-like reveal via clip-path plus subtle chromatic.
+   -------------------------------------------------------------------------- */
+
+/* Add a wide letter-spacing animation + clip reveal on giant words. */
+[style*='font-size: clamp(80px'],
+[style*='font-size: clamp(96px'],
+[style*='font-size: clamp(112px'],
+[style*='font-size: clamp(128px'],
+[style*='font-size: clamp(144px'],
+[style*='font-size: 160px'],
+[style*='font-size: 180px'] {
+  animation: px-giant-reveal 0.7s cubic-bezier(0.20, 0.90, 0.24, 1);
+  background-image: linear-gradient(
+    180deg,
+    #fff1b8 0%,
+    #f2d488 30%,
+    #c9a84c 65%,
+    #8a6a28 100%
+  );
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 4px 24px rgba(201, 168, 76, 0.42));
+}
+
+@keyframes px-giant-reveal {
+  0% {
+    opacity: 0;
+    letter-spacing: 0.2em;
+    transform: scale(0.92);
+    filter: blur(8px) drop-shadow(0 4px 24px rgba(201, 168, 76, 0));
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0) drop-shadow(0 4px 24px rgba(201, 168, 76, 0.42));
+  }
+  100% {
+    opacity: 1;
+    letter-spacing: 0;
+    transform: scale(1);
+    filter: blur(0) drop-shadow(0 4px 24px rgba(201, 168, 76, 0.42));
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   29. LOADING SKELETON — premium gold shimmer. Add `.px-skeleton` to any
+   placeholder block. Auto-renders a smooth animated shimmer.
+   -------------------------------------------------------------------------- */
+.px-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  border-radius: 8px;
+}
+
+.px-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 241, 184, 0.18) 30%,
+    rgba(255, 241, 184, 0.32) 50%,
+    rgba(255, 241, 184, 0.18) 70%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: px-skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes px-skeleton-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%);  }
+}
+
+/* -----------------------------------------------------------------------------
+   30. GLASS MORPHISM REFINEMENT — soft panels (action surfaces, sub-panels)
+   already use backdrop-filter. We layer a faint inner sheen at the top
+   to fake a true frosted-glass top edge.
+   -------------------------------------------------------------------------- */
+.event-action-surface,
+.event-action-dock,
+[class*='backdrop-blur'] {
+  position: relative;
+}
+
+.event-action-surface::after,
+.event-action-dock > div:first-child::after {
+  /* purposely empty — adding via :after creates double pseudos. We
+     instead enhance the existing ::before-only chrome via a hairline
+     gradient that already exists in globals. */
+}
+
+/* -----------------------------------------------------------------------------
+   31. AVATAR CIRCLES — the small circles for "VOCÊ" / "T1A" / "ADVERSÁRIO".
+   They are absolutely round elements with letter content. Add ambient
+   inner gradient + outer ring on hover.
+   -------------------------------------------------------------------------- */
+[class*='rounded-full'][style*='width: 4'][style*='height: 4'],
+[class*='rounded-full'][style*='width: 5'][style*='height: 5'] {
+  position: relative;
+  transition: transform 0.3s cubic-bezier(0.20, 0.90, 0.24, 1);
+}
+
+.px-seat-avatar {
+  position: relative;
+  isolation: isolate;
+}
+
+.px-seat-avatar::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 180deg,
+    transparent 0deg,
+    rgba(255, 241, 184, 0.6) 90deg,
+    transparent 180deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+          mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  padding: 1px;
+  animation: px-turn-spin 4s linear infinite;
+  pointer-events: none;
+}
+
+/* -----------------------------------------------------------------------------
+   32. "MESA ATUAL" PANEL ON LOBBY — the elliptical sala-pronta visualization
+   on the lobby right side. Add a slow rotation to the dashed/painted oval
+   and a center glow that pulses softly.
+   -------------------------------------------------------------------------- */
+/* Targeting: any rounded ellipse-shaped div with a "VS" or "FLEX" text
+   inside (the lobby preview oval). We use a class instead. */
+.px-mesa-preview {
+  position: relative;
+}
+
+.px-mesa-preview::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28%;
+  height: 36%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(46, 92, 53, 0.4) 0%,
+    rgba(46, 92, 53, 0.18) 30%,
+    transparent 60%
+  );
+  filter: blur(20px);
+  pointer-events: none;
+  animation: px-mesa-glow 5s ease-in-out infinite;
+  z-index: 0;
+}
+
+@keyframes px-mesa-glow {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 1;   transform: translate(-50%, -50%) scale(1.1); }
+}
+
+/* -----------------------------------------------------------------------------
+   33. INVITE / CODE BLOCKS — the gold code "502A7251" inside the invite
+   panel. Make it look more like an engraved metal plate.
+   -------------------------------------------------------------------------- */
+[class*='tracking'][style*='Georgia']:not(h1):not(h2):not(h3) {
+  text-rendering: optimizeLegibility;
+}
+
+/* Add subtle metal sheen to elements containing code-like text. */
+.px-code-plate {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 241, 184, 0.08) 0%,
+    rgba(201, 168, 76, 0.04) 50%,
+    rgba(0, 0, 0, 0.18) 100%
+  );
+  border: 1px solid rgba(232, 199, 106, 0.32);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  color: #f2d488;
+  letter-spacing: 0.2em;
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.7),
+    0 0 14px rgba(201, 168, 76, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 241, 184, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* -----------------------------------------------------------------------------
+   34. CUSTOM CURSOR HINTS — on interactive game elements (cards in hand,
+   action buttons), upgrade the cursor to a stylized pointer. Subtle.
+   -------------------------------------------------------------------------- */
+.playing-card-selectable {
+  cursor: pointer;
+}
+
+/* Show a "no" cursor on disabled controls. */
+button:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* -----------------------------------------------------------------------------
+   35. CHIP / PILL "px-pill" UTILITY — a refined pill style consumers can
+   adopt for chips that need to feel like minted tokens (e.g., "1V1 · 2V2",
+   "Sem app", "Socket"). Pure utility.
+   -------------------------------------------------------------------------- */
+.px-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 199, 106, 0.32);
+  background:
+    linear-gradient(180deg, rgba(255, 241, 184, 0.06), rgba(0, 0, 0, 0.18)),
+    radial-gradient(circle at 30% 0%, rgba(255, 241, 184, 0.14), transparent 60%);
+  color: rgba(255, 241, 184, 0.88);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-family: Inter, system-ui, sans-serif;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 241, 184, 0.18),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.32);
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.px-pill:hover {
+  filter: brightness(1.18);
+  transform: translateY(-1px);
+}
+
+/* -----------------------------------------------------------------------------
+   36. RESPONSIVE TYPOGRAPHY POLISH — make the hero word "paulista" italic
+   gold version pop more on smaller screens via tighter tracking.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  h1[style*='Georgia'] {
+    letter-spacing: -0.04em;
+  }
+  body::before { opacity: 0.5; }
+  body::after  { opacity: 0.4; }
+}
+
+/* -----------------------------------------------------------------------------
+   37. MESA-DESTACADA "VS" — the "VS" label between teams. Make it pulse.
+   Distinctive via being a small monospace-ish caps label inside the oval.
+   -------------------------------------------------------------------------- */
+.px-vs {
+  position: relative;
+  display: inline-block;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-style: italic;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #fff1b8, #c9a84c);
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: px-vs-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes px-vs-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 12px rgba(201, 168, 76, 0.32));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 24px rgba(255, 241, 184, 0.62));
+    transform: scale(1.04);
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   38. SECTION HEADERS POLISH — small uppercase labels like "ESCOLHA SUA
+   MESA", "SALA PRONTA", "MOMENTO". They use uppercase + tracking-wide.
+   We give them a leading accent bar.
+   -------------------------------------------------------------------------- */
+[class*='uppercase'][class*='tracking-'][style*='letter-spacing']:not(h1):not(h2):not(h3) {
+  position: relative;
+}
+
+.px-label-accent {
+  position: relative;
+  padding-left: 14px;
+}
+
+.px-label-accent::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(232, 199, 106, 0.78), transparent);
+}
+
+/* -----------------------------------------------------------------------------
+   39. AURA BEHIND SCORE PANELS — the header score (NÓS / ELES) deserves
+   a subtle radial behind it that intensifies on point change.
+   -------------------------------------------------------------------------- */
+.px-score-aura {
+  position: relative;
+  isolation: isolate;
+}
+
+.px-score-aura::before {
+  content: '';
+  position: absolute;
+  inset: -20px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(201, 168, 76, 0.12) 0%,
+    transparent 60%
+  );
+  filter: blur(20px);
+  z-index: -1;
+  pointer-events: none;
+  animation: px-score-aura 6s ease-in-out infinite;
+}
+
+@keyframes px-score-aura {
+  0%, 100% { opacity: 0.6; transform: scale(0.92); }
+  50%      { opacity: 1;   transform: scale(1.06); }
+}
+
+/* -----------------------------------------------------------------------------
+   40. BACK BUTTON / "← VOLTAR AO LOBBY" — make the arrow nudge on hover.
+   -------------------------------------------------------------------------- */
+a[href*='lobby']:has(> span),
+button:has(> span:where(:first-child)) > span:first-child {
+  transition: transform 0.3s cubic-bezier(0.20, 0.90, 0.24, 1);
+  display: inline-block;
+}
+
+a[href*='lobby']:hover > span:first-child {
+  transform: translateX(-3px);
+}
+
+/* -----------------------------------------------------------------------------
+   41. COPY BUTTON FEEDBACK — when a "Copiar" or "Copiar Convite" button
+   is clicked, briefly flash green. Triggered by adding `.px-copied` class
+   for ~1.2s in TSX.
+   -------------------------------------------------------------------------- */
+.px-copied {
+  animation: px-copied-flash 1.2s ease-out;
+}
+
+@keyframes px-copied-flash {
+  0% {
+    background: linear-gradient(135deg, #34d399, #059669) !important;
+    color: #fff !important;
+    box-shadow: 0 0 28px rgba(52, 211, 153, 0.6);
+  }
+  60% {
+    background: linear-gradient(135deg, #34d399, #059669) !important;
+    color: #fff !important;
+    box-shadow: 0 0 18px rgba(52, 211, 153, 0.3);
+  }
+  100% {
+    background: inherit;
+    color: inherit;
+    box-shadow: inherit;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   42. WIN/LOSS RECENT ROW — the "Derrota recente" / "Derrota" pill on
+   the lobby. Use color-coded shimmer (red for loss, green for win).
+   The text is identified by its inline color `#fca5a5` / `#86efac`.
+   -------------------------------------------------------------------------- */
+[style*='color: #fca5a5'],
+[style*='color:#fca5a5'] {
+  text-shadow: 0 0 18px rgba(248, 113, 113, 0.34);
+}
+
+[style*='color: #86efac'],
+[style*='color:#86efac'] {
+  text-shadow: 0 0 18px rgba(52, 211, 153, 0.34);
+}
+
+/* -----------------------------------------------------------------------------
+   43. CONFETTI HOOK STYLING — the existing useConfetti hook spawns DOM
+   children with class names that look like `confetti-*`. We make sure
+   any orphan confetti is non-blocking + filtered.
+   -------------------------------------------------------------------------- */
+[class*='confetti'],
+[id*='confetti'] {
+  pointer-events: none !important;
+}
+
+/* -----------------------------------------------------------------------------
+   44. AUDIO INDICATOR — when sound plays, a tiny waveform indicator can be
+   shown via `.px-audio-pulse` class. Pure visual, ties into useGameSound.
+   -------------------------------------------------------------------------- */
+.px-audio-pulse {
+  position: relative;
+}
+
+.px-audio-pulse::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 241, 184, 0.6);
+  transform: translate(-50%, -50%);
+  animation: px-audio-pulse 0.6s ease-out;
+  pointer-events: none;
+}
+
+@keyframes px-audio-pulse {
+  0%   { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0;   transform: translate(-50%, -50%) scale(8); }
+}
+
+/* -----------------------------------------------------------------------------
+   45. VINHETA / VIGNETTE OVERLAY ON MATCH PAGE — when the game is in a
+   "high pressure" state (truco pendente, mão de onze), darken the corners
+   subtly to focus attention center. Triggered by adding `.px-vignette-on`
+   to body or to the match canvas wrapper.
+   -------------------------------------------------------------------------- */
+.px-vignette-on {
+  position: relative;
+}
+
+.px-vignette-on::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 30%,
+    rgba(0, 0, 0, 0.42) 100%
+  );
+  pointer-events: none;
+  z-index: 50;
+  animation: px-vignette-in 0.6s ease-out;
+}
+
+@keyframes px-vignette-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* -----------------------------------------------------------------------------
+   46. CRT-LIKE SUBTLE SCANLINE on the match table — a one-pixel scanline
+   that drifts down very slowly. Pure atmosphere. Off by default; enabled
+   by adding `.px-scanlines` to the table shell.
+   -------------------------------------------------------------------------- */
+.px-scanlines {
+  position: relative;
+  overflow: hidden;
+}
+
+.px-scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    rgba(255, 255, 255, 0.012) 3px 4px
+  );
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+/* -----------------------------------------------------------------------------
+   47. CARD DEALING — when a new hand starts, cards slide in from the deck.
+   Existing system uses Framer Motion; we add CSS-only fallback for
+   environments where Motion isn't mounted yet (rare, but defensive).
+   Class `.px-deal-in` triggers the animation; useful in skeleton states.
+   -------------------------------------------------------------------------- */
+.px-deal-in {
+  animation: px-deal-in 0.55s cubic-bezier(0.20, 0.90, 0.24, 1) backwards;
+}
+
+@keyframes px-deal-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-80px) rotate(-12deg) scale(0.85);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   48. REDUCED-MOTION OVERRIDES — extend Part 1's block with all the new
+   keyframes added here.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .px-drama-shock::before,
+  .px-drama-shock::after,
+  .px-chromatic,
+  .px-turn-ring::before,
+  .px-seat-avatar::after,
+  .px-mesa-preview::before,
+  .px-vs,
+  .px-score-aura::before,
+  .px-audio-pulse::after,
+  .px-vignette-on::before,
+  [style*='font-size: clamp(80px'],
+  [style*='font-size: clamp(96px'],
+  [style*='font-size: clamp(112px'],
+  [style*='font-size: clamp(128px'],
+  [style*='font-size: clamp(144px'],
+  [style*='font-size: 160px'],
+  [style*='font-size: 180px'],
+  [style*='font-size: 14'][style*='Georgia'],
+  [style*='font-size: 16'][style*='Georgia'],
+  [style*='font-size: 18'][style*='Georgia'],
+  [style*='font-size: 20'][style*='Georgia'] {
+    animation: none !important;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   49. PRINT — extend Part 1's block.
+   -------------------------------------------------------------------------- */
+@media print {
+  .px-drama-shock::before,
+  .px-drama-shock::after,
+  .px-turn-ring::before,
+  .px-seat-avatar::after,
+  .px-mesa-preview::before,
+  .px-score-aura::before,
+  .px-audio-pulse::after,
+  .px-vignette-on::before,
+  .px-scanlines::after {
+    display: none !important;
+  }
+}
+
+/* =============================================================================
+   END OF PART 2
+   ============================================================================= */
+
+/* =============================================================================
+   PATCH APPEND — trucoDramaOverlay + matchActionSurface enhancements
+   ============================================================================= */
+
+/* 50. DRAMA OVERLAY — chromatic aberration no big word.
+   O big word já tem textShadow com glow. Adicionamos um split RGB sutil
+   via filter que opera no elemento como um todo — compatível com o Framer
+   Motion animation que já existe no elemento. */
+[role='status'][aria-live='assertive'] span[style*='Georgia'][style*='font-size: clamp'] {
+  filter: drop-shadow(-1px 0 rgba(248,113,113,0.28)) drop-shadow(1px 0 rgba(96,165,250,0.22));
+  animation: px-drama-throb 1.4s ease-in-out infinite;
+}
+
+/* 51. DRAMA OVERLAY — quando o overlay entra, o container ganha um flash
+   de borda que expande e some (shock-ring). Aplicado via CSS no container
+   do overlay (.rounded-\[28px\] com overflow-hidden e z-[65]). */
+[class*='z-\[65\]']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 241, 184, 0.42);
+  transform: translate(-50%, -50%) scale(1);
+  pointer-events: none;
+  animation: px-shock-ring 1.6s cubic-bezier(0.20, 0.90, 0.24, 1) forwards;
+  z-index: 0;
+}
+
+/* 52. ACTION SURFACE — dock de ações ganha breathing glow quando tem
+   decisão pendente (detectado pela borda dourada mais forte). */
+[style*='rgba(201,168,76,0.26)'][style*='borderRadius: 20'] {
+  animation: px-frame-breathe 3s ease-in-out infinite;
+}
+
+/* 53. LOBBY — ranking rows com slide + highlight dourado no hover. */
+.px-rank-row:hover,
+[class*='rounded-xl'][class*='gap'] > [class*='flex'][class*='items-center']:hover {
+  background: linear-gradient(
+    90deg,
+    rgba(201, 168, 76, 0.04) 0%,
+    rgba(201, 168, 76, 0.10) 50%,
+    rgba(201, 168, 76, 0.04) 100%
+  );
+  transform: translateX(3px);
+  transition: all 0.25s cubic-bezier(0.20, 0.90, 0.24, 1);
+}

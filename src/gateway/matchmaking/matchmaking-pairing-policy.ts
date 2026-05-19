@@ -60,7 +60,8 @@ export class MatchmakingPairingPolicy {
   }
 
   private getRequiredPlayers(mode: MatchmakingMode): number {
-    return mode === '1v1' ? 2 : 4;
+    // Public 2v2 pairs two humans and lets the gateway fill the partner seats with bots.
+    return mode === '1v1' ? 2 : 2;
   }
 
   private calculateSpread(players: MatchmakingQueueCandidate[]): number {

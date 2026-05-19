@@ -7,6 +7,7 @@ import {
 export type MatchMode = '1v1' | '2v2';
 export type TeamId = 'T1' | 'T2';
 export type SeatId = 'T1A' | 'T2A' | 'T1B' | 'T2B';
+export type PrivateFriendPlacement = 'same-team' | 'opposite-team';
 
 type TeamUserIds = {
   T1: string[];
@@ -17,6 +18,9 @@ type BasePlayerSession = {
   socketId: string;
   playerToken: string;
   userId: string;
+  displayName: string | null;
+  publicName: string | null;
+  publicSlug: string | null;
   matchId: string;
   seatId: SeatId;
   teamId: TeamId;
@@ -33,6 +37,9 @@ type RoomStatePlayer = {
   teamId: TeamId;
   playerToken: string | null;
   userId: string | null;
+  displayName: string | null;
+  publicName: string | null;
+  publicSlug: string | null;
   ready: boolean;
   socketId: string | null;
   domainPlayerId: 'P1' | 'P2';
@@ -46,10 +53,14 @@ type InternalRoomState = {
   mode: MatchMode;
   players: RoomStatePlayer[];
   currentTurnSeatId: SeatId | null;
-  // NOTE: Tracks whether the first hand has ever started for this room.
-  // Once true, the ready gate for start-hand is replaced by canStartNextHand(),
-  // which only requires all human players to be connected (socketId present).
+  // After the first hand, new starts require connected humans instead of the lobby ready gate.
   handEverStarted: boolean;
+  reservedHumanSeatId: SeatId | null;
+  fillBotsOnStart: boolean;
+};
+
+type RoomOptions = {
+  fillBotsOnStart?: boolean;
 };
 
 export type RoomState = {
@@ -58,11 +69,24 @@ export type RoomState = {
   players: RoomStatePlayer[];
   currentTurnSeatId: SeatId | null;
   canStart: boolean;
+  fillBotsOnStart: boolean;
 };
 
 type JoinIdentity = {
   playerToken: string;
   userId: string;
+  displayName: string | null;
+  publicName: string | null;
+  publicSlug: string | null;
+};
+
+// Describes how the gateway selects the opener for a new hand.
+// Explicit seats support tests and replays, loser hints follow Truco Paulista flow,
+// and random selection is reserved for fresh or tied hands.
+export type BeginHandHint = {
+  startingSeatId?: SeatId;
+  lastLoserPlayerId?: 'P1' | 'P2' | null;
+  random?: boolean;
 };
 
 const TURN_ORDER_2V2: SeatId[] = ['T1A', 'T2A', 'T1B', 'T2B'];
@@ -85,16 +109,30 @@ const DOMAIN_PLAYER_BY_TEAM: Record<TeamId, 'P1' | 'P2'> = {
   T2: 'P2',
 };
 
+// Domain player ids map back to teams before selecting an occupied opener seat.
+const TEAM_BY_DOMAIN_PLAYER: Record<'P1' | 'P2', TeamId> = {
+  P1: 'T1',
+  P2: 'T2',
+};
+
 export class RoomManager {
   private readonly rooms = new Map<string, InternalRoomState>();
   private readonly sessionsBySocketId = new Map<string, PlayerSession>();
   private readonly sessionByTokenAndMatch = new Map<string, PlayerSession>();
   private readonly ratingAppliedMatches = new Set<string>();
 
-  ensureRoom(matchId: string, mode: MatchMode = '2v2'): InternalRoomState {
+  ensureRoom(
+    matchId: string,
+    mode: MatchMode = '2v2',
+    options: RoomOptions = {},
+  ): InternalRoomState {
     const existingRoom = this.rooms.get(matchId);
 
     if (existingRoom) {
+      if (options.fillBotsOnStart === true) {
+        existingRoom.fillBotsOnStart = true;
+      }
+
       return existingRoom;
     }
 
@@ -104,10 +142,24 @@ export class RoomManager {
       players: [],
       currentTurnSeatId: null,
       handEverStarted: false,
+      reservedHumanSeatId: null,
+      fillBotsOnStart: options.fillBotsOnStart ?? false,
     };
 
     this.rooms.set(matchId, room);
     return room;
+  }
+
+  findOpenFlexibleRoom(mode: MatchMode): string | null {
+    for (const room of this.rooms.values()) {
+      if (!this.isOpenFlexibleRoom(room, mode)) {
+        continue;
+      }
+
+      return room.matchId;
+    }
+
+    return null;
   }
 
   getState(matchId: string): RoomState {
@@ -118,9 +170,12 @@ export class RoomManager {
     }
 
     return {
-      ...room,
+      matchId: room.matchId,
+      mode: room.mode,
       players: room.players.map((player) => ({ ...player })),
+      currentTurnSeatId: room.currentTurnSeatId,
       canStart: this.canStart(matchId),
+      fillBotsOnStart: room.fillBotsOnStart,
     };
   }
 
@@ -129,14 +184,16 @@ export class RoomManager {
     const existingSession = this.findExistingSession(matchId, identity.playerToken);
 
     if (existingSession) {
-      // NOTE: On reconnect after the first hand has started, we restore the
-      // player's ready flag to true so canStartNextHand() does not block the
-      // next hand start due to a transient disconnect mid-match.
+      // Reconnected players stay ready after the first hand so transient drops do not
+      // block the next hand.
       const restoredReady = room.handEverStarted ? true : existingSession.ready;
 
       const reconnectedSession: PlayerSession = {
         ...existingSession,
         socketId,
+        displayName: identity.displayName,
+        publicName: identity.publicName,
+        publicSlug: identity.publicSlug,
         ready: restoredReady,
       };
 
@@ -166,6 +223,9 @@ export class RoomManager {
           ready: restoredReady,
           playerToken: reconnectedSession.playerToken,
           userId: reconnectedSession.userId,
+          displayName: reconnectedSession.displayName,
+          publicName: reconnectedSession.publicName,
+          publicSlug: reconnectedSession.publicSlug,
           isBot: false,
           botProfile: null,
           botIdentity: null,
@@ -188,6 +248,9 @@ export class RoomManager {
       socketId,
       playerToken: identity.playerToken,
       userId: identity.userId,
+      displayName: identity.displayName,
+      publicName: identity.publicName,
+      publicSlug: identity.publicSlug,
       matchId,
       seatId,
       teamId,
@@ -208,6 +271,9 @@ export class RoomManager {
       teamId,
       playerToken: identity.playerToken,
       userId: identity.userId,
+      displayName: identity.displayName,
+      publicName: identity.publicName,
+      publicSlug: identity.publicSlug,
       ready: false,
       socketId,
       domainPlayerId,
@@ -218,6 +284,121 @@ export class RoomManager {
 
     this.sortPlayers(room);
     return session;
+  }
+
+  reserveNextHumanSeat(matchId: string, seatId: SeatId): RoomState {
+    const room = this.rooms.get(matchId);
+
+    if (!room) {
+      throw new Error(`Room not found for match ${matchId}`);
+    }
+
+    if (room.mode !== '2v2') {
+      throw new Error(`Reserved friend seats are only supported for 2v2 rooms`);
+    }
+
+    const allowedSeats = SEATS_BY_MODE[room.mode];
+
+    if (!allowedSeats.includes(seatId)) {
+      throw new Error(`Seat ${seatId} is not valid for match ${matchId} in mode ${room.mode}`);
+    }
+
+    const existingPlayer = room.players.find((player) => player.seatId === seatId);
+
+    if (existingPlayer && !existingPlayer.isBot) {
+      throw new Error(`Seat ${seatId} is already occupied in match ${matchId}`);
+    }
+
+    // Private rooms reserve whether the invited human joins as partner or opponent.
+    room.reservedHumanSeatId = seatId;
+
+    return this.getState(matchId);
+  }
+
+  selectSeat(
+    socketId: string,
+    targetSeatId: SeatId,
+  ): { session: PlayerSession; roomState: RoomState } {
+    const session = this.sessionsBySocketId.get(socketId);
+
+    if (!session) {
+      throw new Error(`Session not found for socket ${socketId}`);
+    }
+
+    const room = this.rooms.get(session.matchId);
+
+    if (!room) {
+      throw new Error(`Room not found for match ${session.matchId}`);
+    }
+
+    if (room.handEverStarted || room.currentTurnSeatId !== null) {
+      throw new Error(`Cannot change seats after the match has started`);
+    }
+
+    const allowedSeats = SEATS_BY_MODE[room.mode];
+
+    if (!allowedSeats.includes(targetSeatId)) {
+      throw new Error(
+        `Seat ${targetSeatId} is not valid for match ${session.matchId} in mode ${room.mode}`,
+      );
+    }
+
+    if (session.seatId === targetSeatId) {
+      return { session: { ...session }, roomState: this.getState(session.matchId) };
+    }
+
+    const targetPlayer = room.players.find((player) => player.seatId === targetSeatId);
+
+    if (targetPlayer && !targetPlayer.isBot && targetPlayer.socketId !== socketId) {
+      throw new Error(`Seat ${targetSeatId} is already occupied in match ${session.matchId}`);
+    }
+
+    const teamId = TEAM_BY_SEAT[targetSeatId];
+    const domainPlayerId = DOMAIN_PLAYER_BY_TEAM[teamId];
+    const updatedSession: PlayerSession = {
+      ...session,
+      seatId: targetSeatId,
+      teamId,
+      domainPlayerId,
+      ready: false,
+    };
+
+    room.players = room.players.filter(
+      (player) => player.socketId !== socketId && player.seatId !== targetSeatId,
+    );
+
+    room.players.push({
+      seatId: targetSeatId,
+      teamId,
+      playerToken: session.playerToken,
+      userId: session.userId,
+      displayName: session.displayName,
+      publicName: session.publicName,
+      publicSlug: session.publicSlug,
+      ready: false,
+      socketId,
+      domainPlayerId,
+      isBot: false,
+      botProfile: null,
+      botIdentity: null,
+    });
+
+    this.sessionsBySocketId.set(socketId, updatedSession);
+    this.sessionByTokenAndMatch.set(
+      this.buildTokenMatchKey(session.matchId, session.playerToken),
+      updatedSession,
+    );
+
+    if (room.reservedHumanSeatId === targetSeatId) {
+      room.reservedHumanSeatId = null;
+    }
+
+    this.sortPlayers(room);
+
+    return {
+      session: { ...updatedSession },
+      roomState: this.getState(session.matchId),
+    };
   }
 
   leave(socketId: string): { matchId: string } | null {
@@ -255,6 +436,8 @@ export class RoomManager {
 
         if (existingPlayer.isBot) {
           room.players.splice(playerIndex, 1);
+        } else if (room.handEverStarted) {
+          this.replaceHumanSeatWithBot(room, session.seatId);
         } else {
           room.players[playerIndex] = {
             ...existingPlayer,
@@ -264,12 +447,57 @@ export class RoomManager {
         }
       }
 
-      // NOTE: If the disconnected player held the current turn, we intentionally
-      // keep the seat pointer stable. The transport layer can then decide whether
-      // to reconnect, replace with a bot, or advance explicitly.
+      this.sortPlayers(room);
+      // Keep the turn pointer stable; if the disconnected player became a bot,
+      // the gateway can resume the automatic flow without changing the seat order.
     }
 
     return { matchId: session.matchId };
+  }
+
+  leaveMatch(socketId: string): { matchId: string; roomState: RoomState | null } | null {
+    const session = this.sessionsBySocketId.get(socketId);
+
+    if (!session) {
+      return null;
+    }
+
+    const room = this.rooms.get(session.matchId);
+
+    this.sessionsBySocketId.delete(socketId);
+    this.sessionByTokenAndMatch.delete(
+      this.buildTokenMatchKey(session.matchId, session.playerToken),
+    );
+
+    if (!room) {
+      return { matchId: session.matchId, roomState: null };
+    }
+
+    if (room.handEverStarted) {
+      this.replaceHumanSeatWithBot(room, session.seatId);
+    } else {
+      room.players = room.players.filter((player) => player.seatId !== session.seatId);
+
+      if (room.currentTurnSeatId === session.seatId) {
+        room.currentTurnSeatId = null;
+      }
+    }
+
+    if (room.reservedHumanSeatId === session.seatId) {
+      room.reservedHumanSeatId = null;
+    }
+
+    const hasHumanPlayer = room.players.some((player) => !player.isBot);
+
+    if (!hasHumanPlayer) {
+      this.rooms.delete(session.matchId);
+      this.ratingAppliedMatches.delete(session.matchId);
+      return { matchId: session.matchId, roomState: null };
+    }
+
+    this.sortPlayers(room);
+
+    return { matchId: session.matchId, roomState: this.getState(session.matchId) };
   }
 
   getSessionBySocketId(socketId: string): PlayerSession | undefined {
@@ -322,8 +550,9 @@ export class RoomManager {
     return this.getState(session.matchId);
   }
 
-  // NOTE: Checks that every seat (human or bot) has ready = true.
-  // Used as the gate for the FIRST hand start (lobby → match transition).
+  // The lobby-to-match transition normally requires every seat to be filled and ready.
+  // Flexible rooms deliberately loosen that gate; empty seats are converted to bots
+  // only when the first hand starts.
   canStart(matchId: string): boolean {
     const room = this.rooms.get(matchId);
 
@@ -333,6 +562,13 @@ export class RoomManager {
 
     const seats = SEATS_BY_MODE[room.mode];
 
+    if (room.fillBotsOnStart && !room.handEverStarted) {
+      const seatedPlayers = room.players.filter((player) => seats.includes(player.seatId));
+      const hasHumanPlayer = seatedPlayers.some((player) => !player.isBot);
+
+      return hasHumanPlayer && seatedPlayers.every((player) => player.ready);
+    }
+
     return seats.every((seatId) => {
       const player = room.players.find((entry) => entry.seatId === seatId);
 
@@ -340,11 +576,13 @@ export class RoomManager {
     });
   }
 
-  // NOTE: Checks that every human seat has an active socket connection.
-  // Used as the gate for the SUBSEQUENT hand starts (between hands).
-  // We do not re-check ready because the player already expressed intent
-  // to play when they first set ready before the first hand. A transient
-  // disconnect must not permanently block the match from continuing.
+  shouldFillBotsOnStart(matchId: string): boolean {
+    const room = this.rooms.get(matchId);
+
+    return Boolean(room?.fillBotsOnStart && !room.handEverStarted);
+  }
+
+  // Between hands, reconnect safety matters more than re-checking the original ready intent.
   canStartNextHand(matchId: string): boolean {
     const room = this.rooms.get(matchId);
 
@@ -361,28 +599,30 @@ export class RoomManager {
         return false;
       }
 
-      // Bots are always considered available.
       if (player.isBot) {
         return true;
       }
 
-      // Human players must have an active socket connection.
       return player.socketId !== null;
     });
   }
 
-  beginHand(matchId: string, startingSeatId?: SeatId): RoomState {
+  // Raw SeatId input remains supported for older tests and callers.
+  beginHand(matchId: string, hintOrSeat?: BeginHandHint | SeatId): RoomState {
     const room = this.rooms.get(matchId);
 
     if (!room) {
       throw new Error(`Room not found for match ${matchId}`);
     }
 
-    // NOTE: Mark that at least one hand has started for this room.
-    // From this point forward, canStartNextHand() is used instead of canStart().
+    // Future hands use the reconnect-safe gate instead of the initial ready gate.
     room.handEverStarted = true;
 
-    const resolvedStartingSeatId = startingSeatId ?? this.getTurnOrder(room.mode)[0] ?? null;
+    const hint: BeginHandHint =
+      typeof hintOrSeat === 'string' ? { startingSeatId: hintOrSeat } : (hintOrSeat ?? {});
+
+    const resolvedStartingSeatId = this.resolveOpenerFromHint(room, hint);
+
     room.currentTurnSeatId = this.resolveValidSeatForRoom(room, resolvedStartingSeatId);
 
     return this.getState(matchId);
@@ -531,16 +771,59 @@ export class RoomManager {
     return true;
   }
 
+  private isOpenFlexibleRoom(room: InternalRoomState, mode: MatchMode): boolean {
+    if (room.mode !== mode || !room.fillBotsOnStart) {
+      return false;
+    }
+
+    if (room.handEverStarted || room.currentTurnSeatId !== null) {
+      return false;
+    }
+
+    if (!this.hasConnectedHumanPlayer(room)) {
+      return false;
+    }
+
+    return this.hasHumanSeatVacancy(room);
+  }
+
+  private hasConnectedHumanPlayer(room: InternalRoomState): boolean {
+    return room.players.some((player) => !player.isBot && player.socketId !== null);
+  }
+
+  private hasHumanSeatVacancy(room: InternalRoomState): boolean {
+    const seats = SEATS_BY_MODE[room.mode];
+
+    return seats.some((seatId) => {
+      const player = room.players.find((entry) => entry.seatId === seatId);
+
+      return !player || player.isBot;
+    });
+  }
+
+  private replaceHumanSeatWithBot(room: InternalRoomState, seatId: SeatId): void {
+    const playerIndex = room.players.findIndex((player) => player.seatId === seatId);
+
+    if (playerIndex < 0) {
+      return;
+    }
+
+    const existingPlayer = room.players[playerIndex];
+
+    if (!existingPlayer || existingPlayer.isBot) {
+      return;
+    }
+
+    // NOTE: Once a hand is live, seat order is part of the match contract.
+    // A leaving human becomes a bot in the same seat so turns, teams, and
+    // current-hand ownership keep moving without invalidating the table.
+    room.players[playerIndex] = this.createBotSession(room.matchId, seatId);
+  }
+
   private createBotSession(matchId: string, seatId: SeatId): RoomStatePlayer {
     const teamId = TEAM_BY_SEAT[seatId];
     const domainPlayerId = DOMAIN_PLAYER_BY_TEAM[teamId];
-    // NOTE: Identity is sampled once here — at the moment the bot is first
-    // placed into the seat — and lives with the room player for the rest of
-    // the match. No re-sampling between hands. The bot's profile is derived
-    // from the sampled identity, NOT from the seatId: otherwise a 1v1 match
-    // (where the bot always takes the same seat) would always end up with
-    // the same profile. Identity is cosmetic; the profile is what feeds the
-    // decision port, so the two must agree by construction.
+    // Bot identity is sampled once per seat so persona, profile, and decision style stay aligned.
     const botIdentity = pickRandomBotIdentityAny();
     const botProfile: BotProfile = botIdentity.profile;
 
@@ -549,6 +832,9 @@ export class RoomManager {
       teamId,
       playerToken: `bot:${matchId}:${seatId}`,
       userId: null,
+      displayName: botIdentity.displayName,
+      publicName: botIdentity.displayName,
+      publicSlug: null,
       ready: true,
       socketId: null,
       domainPlayerId,
@@ -571,6 +857,23 @@ export class RoomManager {
   }
 
   private findAvailableSeat(room: InternalRoomState): SeatId | null {
+    if (room.reservedHumanSeatId) {
+      const reservedSeatId = room.reservedHumanSeatId;
+      const reservedPlayer = room.players.find((player) => player.seatId === reservedSeatId);
+
+      if (!reservedPlayer || reservedPlayer.isBot) {
+        if (reservedPlayer?.isBot) {
+          room.players = room.players.filter((player) => player.seatId !== reservedSeatId);
+        }
+
+        room.reservedHumanSeatId = null;
+        return reservedSeatId;
+      }
+
+      // Stale reservations fall back to normal seat order to keep reconnects safe.
+      room.reservedHumanSeatId = null;
+    }
+
     const seats = SEATS_BY_MODE[room.mode];
 
     for (const seatId of seats) {
@@ -591,6 +894,63 @@ export class RoomManager {
 
   private getTurnOrder(mode: MatchMode): SeatId[] {
     return mode === '1v1' ? TURN_ORDER_1V1 : TURN_ORDER_2V2;
+  }
+
+  // Centralizes opener precedence so beginHand remains small and transport-agnostic.
+  private resolveOpenerFromHint(room: InternalRoomState, hint: BeginHandHint): SeatId | null {
+    if (hint.startingSeatId) {
+      return hint.startingSeatId;
+    }
+
+    if (hint.lastLoserPlayerId === 'P1' || hint.lastLoserPlayerId === 'P2') {
+      const targetTeam = TEAM_BY_DOMAIN_PLAYER[hint.lastLoserPlayerId];
+      const seatInTeam = this.findFirstOccupiedSeatInTeam(room, targetTeam);
+
+      if (seatInTeam) {
+        return seatInTeam;
+      }
+      // If the target team has no occupied seat, use the safe fallback instead of crashing.
+    }
+
+    if (hint.random) {
+      return this.pickRandomOccupiedSeat(room);
+    }
+
+    // Hint-less callers keep the legacy first-seat fallback.
+    return this.getTurnOrder(room.mode)[0] ?? null;
+  }
+
+  private findFirstOccupiedSeatInTeam(room: InternalRoomState, teamId: TeamId): SeatId | null {
+    const turnOrder = this.getTurnOrder(room.mode);
+
+    for (const seatId of turnOrder) {
+      if (TEAM_BY_SEAT[seatId] !== teamId) {
+        continue;
+      }
+
+      const isOccupied = room.players.some((player) => player.seatId === seatId);
+
+      if (isOccupied) {
+        return seatId;
+      }
+    }
+
+    return null;
+  }
+
+  private pickRandomOccupiedSeat(room: InternalRoomState): SeatId | null {
+    const turnOrder = this.getTurnOrder(room.mode);
+    const occupiedSeats = turnOrder.filter((seatId) =>
+      room.players.some((player) => player.seatId === seatId),
+    );
+
+    if (occupiedSeats.length === 0) {
+      return null;
+    }
+
+    // This is a UX-grade opener coin flip, not a security or match-outcome RNG.
+    const index = Math.floor(Math.random() * occupiedSeats.length);
+    return occupiedSeats[index] ?? null;
   }
 
   private resolveValidSeatForRoom(

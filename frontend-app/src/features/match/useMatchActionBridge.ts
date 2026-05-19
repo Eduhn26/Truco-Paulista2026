@@ -1,7 +1,16 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import type { MatchAction } from './matchActionTypes';
 import type { CardPayload, MatchStatePayload } from '../../services/socket/socketTypes';
+
+type TablePhase = 'missing_context' | 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
+
+type PendingPlayCardEmission = {
+  matchId: string;
+  cardKey: string;
+  serverCard: string;
+  emittedAt: number;
+};
 
 type UseMatchActionBridgeParams = {
   resolvedMatchId: string;
@@ -23,6 +32,13 @@ type UseMatchActionBridgeParams = {
   emitDeclineMaoDeOnze: (matchId: string) => void;
   beginHandTransition: () => void;
   beginOwnCardLaunch: (params: { cardKey: string; serverCard: string }) => void;
+  // Final authority guard used before card actions leave the UI layer.
+  currentTurnSeatId: string | null;
+  viewerCanActNow: boolean;
+  nextDecisionType: string | null;
+  tablePhase: TablePhase;
+  isResolvingRound: boolean;
+  isTableInteractionLocked: boolean;
 };
 
 type UseMatchActionBridgeResult = {
@@ -31,6 +47,8 @@ type UseMatchActionBridgeResult = {
   handlePlayCard: (card: CardPayload) => void;
   handleMatchAction: (action: MatchAction) => void;
 };
+
+const DIFFERENT_CARD_EMISSION_LOCK_MS = 900;
 
 export function useMatchActionBridge(
   params: UseMatchActionBridgeParams,
@@ -55,7 +73,24 @@ export function useMatchActionBridge(
     emitDeclineMaoDeOnze,
     beginHandTransition,
     beginOwnCardLaunch,
+    currentTurnSeatId,
+    viewerCanActNow,
+    nextDecisionType,
+    tablePhase,
+    isResolvingRound,
+    isTableInteractionLocked,
   } = params;
+
+  const pendingPlayCardEmissionRef = useRef<PendingPlayCardEmission | null>(null);
+
+  useEffect(() => {
+    const shouldResetPendingPlayCard =
+      !resolvedMatchId || tablePhase !== 'playing' || nextDecisionType !== 'play-card';
+
+    if (shouldResetPendingPlayCard) {
+      pendingPlayCardEmissionRef.current = null;
+    }
+  }, [resolvedMatchId, tablePhase, nextDecisionType]);
 
   return useMemo(
     () => ({
@@ -80,21 +115,82 @@ export function useMatchActionBridge(
           return;
         }
 
-        // NOTE: Starting a new hand is the one place where a full table reset
-        // is expected before the next authoritative frames arrive.
+        pendingPlayCardEmissionRef.current = null;
+
+        // Starting a hand intentionally resets the local table before the next snapshot lands.
         beginHandTransition();
         emitStartHand(resolvedMatchId);
         appendLog(`Emitted start-hand (${resolvedMatchId}).`);
       },
 
       handlePlayCard(card: CardPayload): void {
-        if (!resolvedMatchId || !mySeat || !canPlayCard) {
-          appendLog('Cannot play card in the current state.');
+        // The bridge is the final guard before a play-card socket emission. It
+        // rejects clicks that slip through while the visual table is still
+        // catching up to the backend-authoritative state.
+        if (!resolvedMatchId || !mySeat) {
+          appendLog('Cannot play card: missing match context.');
           return;
         }
 
+        if (!canPlayCard) {
+          appendLog('Ignored play-card: backend reports canAttemptPlayCard=false.');
+          return;
+        }
+
+        if (!viewerCanActNow && currentTurnSeatId !== mySeat) {
+          appendLog(
+            `Ignored play-card: turn belongs to ${currentTurnSeatId ?? 'no one'}, not ${mySeat}.`,
+          );
+          return;
+        }
+
+        if (nextDecisionType !== 'play-card') {
+          appendLog(`Ignored play-card: nextDecisionType=${nextDecisionType ?? 'idle'}.`);
+          return;
+        }
+
+        if (tablePhase !== 'playing') {
+          appendLog(`Ignored play-card: tablePhase=${tablePhase}.`);
+          return;
+        }
+
+        if (isResolvingRound) {
+          appendLog('Ignored play-card: a round is currently resolving.');
+          return;
+        }
+
+        if (isTableInteractionLocked) {
+          appendLog('Ignored play-card: table interaction is locked by a visual transition.');
+          return;
+        }
+
+        const now = Date.now();
         const cardKey = `${card.rank}|${card.suit}`;
         const serverCard = `${card.rank}${card.suit}`;
+        const pendingPlayCardEmission = pendingPlayCardEmissionRef.current;
+
+        if (pendingPlayCardEmission?.matchId === resolvedMatchId) {
+          if (pendingPlayCardEmission.cardKey === cardKey) {
+            appendLog(
+              `Ignored play-card: ${pendingPlayCardEmission.serverCard} was already emitted for this turn.`,
+            );
+            return;
+          }
+
+          if (now - pendingPlayCardEmission.emittedAt < DIFFERENT_CARD_EMISSION_LOCK_MS) {
+            appendLog(
+              'Ignored play-card: another card emission is already waiting for server acknowledgement.',
+            );
+            return;
+          }
+        }
+
+        pendingPlayCardEmissionRef.current = {
+          matchId: resolvedMatchId,
+          cardKey,
+          serverCard,
+          emittedAt: now,
+        };
 
         beginOwnCardLaunch({ cardKey, serverCard });
         emitPlayCard(resolvedMatchId, card);
@@ -109,77 +205,127 @@ export function useMatchActionBridge(
 
         switch (action) {
           case 'request-truco': {
+            if (!mySeat) {
+              appendLog('Cannot request truco: missing seat context.');
+              return;
+            }
+
             if (!availableActions.canRequestTruco) {
               appendLog('Cannot request truco in the current state.');
               return;
             }
+
+            if (!viewerCanActNow && currentTurnSeatId !== mySeat) {
+              appendLog(
+                `Ignored request-truco: turn belongs to ${currentTurnSeatId ?? 'no one'}, not ${mySeat}.`,
+              );
+              return;
+            }
+
+            if (nextDecisionType !== 'play-card') {
+              appendLog(`Ignored request-truco: nextDecisionType=${nextDecisionType ?? 'idle'}.`);
+              return;
+            }
+
+            if (tablePhase !== 'playing') {
+              appendLog(`Ignored request-truco: tablePhase=${tablePhase}.`);
+              return;
+            }
+
+            if (isResolvingRound) {
+              appendLog('Ignored request-truco: a round is currently resolving.');
+              return;
+            }
+
+            if (isTableInteractionLocked) {
+              appendLog(
+                'Ignored request-truco: table interaction is locked by a visual transition.',
+              );
+              return;
+            }
+
             emitRequestTruco(resolvedMatchId);
             appendLog(`Emitted request-truco (${resolvedMatchId}).`);
             return;
           }
+
           case 'accept-bet': {
             if (!availableActions.canAcceptBet) {
               appendLog('Cannot accept bet in the current state.');
               return;
             }
+
             emitAcceptBet(resolvedMatchId);
             appendLog(`Emitted accept-bet (${resolvedMatchId}).`);
             return;
           }
+
           case 'decline-bet': {
             if (!availableActions.canDeclineBet) {
               appendLog('Cannot decline bet in the current state.');
               return;
             }
+
             emitDeclineBet(resolvedMatchId);
             appendLog(`Emitted decline-bet (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-six': {
             if (!availableActions.canRaiseToSix) {
               appendLog('Cannot raise to six in the current state.');
               return;
             }
+
             emitRaiseToSix(resolvedMatchId);
             appendLog(`Emitted raise-to-six (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-nine': {
             if (!availableActions.canRaiseToNine) {
               appendLog('Cannot raise to nine in the current state.');
               return;
             }
+
             emitRaiseToNine(resolvedMatchId);
             appendLog(`Emitted raise-to-nine (${resolvedMatchId}).`);
             return;
           }
+
           case 'raise-to-twelve': {
             if (!availableActions.canRaiseToTwelve) {
               appendLog('Cannot raise to twelve in the current state.');
               return;
             }
+
             emitRaiseToTwelve(resolvedMatchId);
             appendLog(`Emitted raise-to-twelve (${resolvedMatchId}).`);
             return;
           }
+
           case 'accept-mao-de-onze': {
             if (!availableActions.canAcceptMaoDeOnze) {
               appendLog('Cannot accept mao de onze in the current state.');
               return;
             }
+
             emitAcceptMaoDeOnze(resolvedMatchId);
             appendLog(`Emitted accept-mao-de-onze (${resolvedMatchId}).`);
             return;
           }
+
           case 'decline-mao-de-onze': {
             if (!availableActions.canDeclineMaoDeOnze) {
               appendLog('Cannot decline mao de onze in the current state.');
               return;
             }
+
             emitDeclineMaoDeOnze(resolvedMatchId);
             appendLog(`Emitted decline-mao-de-onze (${resolvedMatchId}).`);
             return;
           }
+
           default: {
             appendLog(`Unsupported action: ${action}.`);
           }
@@ -192,7 +338,7 @@ export function useMatchActionBridge(
       canStartHand,
       canPlayCard,
       availableActions,
-        appendLog,
+      appendLog,
       emitGetState,
       emitStartHand,
       emitPlayCard,
@@ -206,6 +352,12 @@ export function useMatchActionBridge(
       emitDeclineMaoDeOnze,
       beginHandTransition,
       beginOwnCardLaunch,
+      currentTurnSeatId,
+      viewerCanActNow,
+      nextDecisionType,
+      tablePhase,
+      isResolvingRound,
+      isTableInteractionLocked,
     ],
   );
 }

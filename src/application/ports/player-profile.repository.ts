@@ -2,6 +2,8 @@ export type PlayerProfileSnapshot = {
   id: string;
   userId: string;
   displayName: string | null;
+  publicName?: string | null;
+  publicSlug?: string | null;
   rating: number;
   wins: number;
   losses: number;

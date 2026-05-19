@@ -4,6 +4,8 @@ type RankingEntryDto = {
   profileId: string;
   userId: string;
   displayName: string | null;
+  publicName: string | null;
+  publicSlug: string | null;
   rating: number;
   wins: number;
   losses: number;
@@ -30,6 +32,8 @@ export class GetRankingUseCase {
         profileId: profile.id,
         userId: profile.userId,
         displayName: profile.displayName,
+        publicName: profile.publicName ?? null,
+        publicSlug: profile.publicSlug ?? null,
         rating: profile.rating,
         wins: profile.wins,
         losses: profile.losses,

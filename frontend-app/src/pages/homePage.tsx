@@ -9,21 +9,21 @@ import {
 import { savePendingAuthBackendUrl, type FrontendSession } from '../features/auth/authStorage';
 import { useAuth } from '../features/auth/authStore';
 
-// CHANGE: the AppShell already owns the global header (brand, nav, session
-// indicator, sign-out). The HomePage no longer renders its own top header —
-// that duplication made the page look like two apps stacked.
-//
-// CHANGE: removed the hero "stats strip" (1.2K mesas / 48K jogadores / 24/7).
-// These were marketing placeholders, not real product signals, and they were
-// the loudest source of dishonesty on the page. Replaced by a quiet "what this
-// edition is" strip that describes the actual product.
-//
-// CHANGE: the secondary CTA no longer advertises a non-existent "demo table".
-// When the user is signed out, the second slot is a discreet GitHub sign-in
-// link (real capability). When the user is signed in, the primary CTA takes
-// them to the lobby and no secondary CTA is shown — the lobby is where the
-// real continuity lives.
-
+/**
+ * PREMIUM PATCH — homePage.
+ *
+ * Mantém 100% da lógica original: useAuth, dev login, OAuth, backend URL,
+ * todos os fluxos de session. Refinamentos visuais:
+ *
+ *   • DecorCard — bordas duplas, glow dourado, hover lift
+ *   • Hero — ornamentos art-déco, hairline gold animada, "paulista" italic
+ *     refinado com Cormorant Garamond
+ *   • Status pill "Online em tempo real" — ripple emerald via classes
+ *   • CTAs — px-shine + lift; auto-detected pelo premium-patch.css
+ *   • Stats trio — `.px-pill` style; números com text shimmer
+ *   • Feature cards — surface-card-premium + px-ornament-corners
+ *   • Footer — divider ornate
+ */
 function buildNextSession(
   session: FrontendSession | null,
   backendUrl: string,
@@ -37,6 +37,21 @@ function buildNextSession(
   };
 }
 
+type DevLoginIdentity = 'eduardo' | 'amigo' | 'qa1' | 'qa2';
+
+type DevLoginOption = {
+  identity: DevLoginIdentity;
+  label: string;
+  helper: string;
+};
+
+const DEV_LOGIN_OPTIONS: DevLoginOption[] = [
+  { identity: 'eduardo', label: 'Eduardo Dev', helper: 'Sessão principal' },
+  { identity: 'amigo', label: 'Amigo Dev', helper: 'Segunda janela' },
+  { identity: 'qa1', label: 'QA Dev 1', helper: 'Teste extra' },
+  { identity: 'qa2', label: 'QA Dev 2', helper: 'Teste extra' },
+];
+
 function DecorCard({
   rank,
   suit,
@@ -44,6 +59,7 @@ function DecorCard({
   rotate,
   x,
   y,
+  delay = 0,
 }: {
   rank: string;
   suit: string;
@@ -51,63 +67,90 @@ function DecorCard({
   rotate: number;
   x: number;
   y: number;
+  delay?: number;
 }) {
   const color = isRed ? '#b91c1c' : '#1a1a2e';
 
   return (
     <div
       className="pointer-events-none absolute select-none"
-      style={{ transform: `rotate(${rotate}deg) translate(${x}px, ${y}px)` }}
+      style={{
+        transform: `rotate(${rotate}deg) translate(${x}px, ${y}px)`,
+        animation: `px-fade-up 0.9s ${delay}s cubic-bezier(0.20, 0.90, 0.24, 1) backwards`,
+      }}
     >
       <div
         className="relative flex flex-col items-center justify-between overflow-hidden"
         style={{
-          width: 94,
-          height: 130,
+          width: 102,
+          height: 142,
           borderRadius: 14,
-          background: 'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 60%, #f2edd8 100%)',
-          border: '1px solid rgba(0,0,0,0.1)',
-          boxShadow: '0 18px 34px rgba(0,0,0,0.32), 0 10px 22px rgba(0,0,0,0.18)',
-          padding: '6px 7px',
+          background:
+            'linear-gradient(145deg, #fefdf8 0%, #f8f5ec 55%, #f0e9d4 100%)',
+          border: '1px solid rgba(0,0,0,0.14)',
+          boxShadow:
+            '0 24px 44px rgba(0,0,0,0.42), 0 12px 22px rgba(0,0,0,0.22), 0 0 0 1px rgba(232,199,106,0.18), inset 0 1px 0 rgba(255,255,255,0.96)',
+          padding: '7px 8px',
         }}
       >
+        {/* Reflexo angular topo */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
             borderRadius: 'inherit',
-            background: 'linear-gradient(150deg, rgba(255,255,255,0.85) 0%, transparent 30%)',
+            background:
+              'linear-gradient(155deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.45) 22%, transparent 38%)',
           }}
         />
+        {/* Borda interna dourada sutil */}
+        <div
+          className="pointer-events-none absolute inset-[3px]"
+          style={{
+            borderRadius: 11,
+            border: '1px solid rgba(201,168,76,0.10)',
+          }}
+        />
+
         <div className="relative z-10 self-start">
           <div
             style={{
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: 900,
               lineHeight: 1,
               color,
-              fontFamily: 'Georgia, serif',
+              fontFamily: 'Cormorant Garamond, Georgia, serif',
+              letterSpacing: '-0.01em',
             }}
           >
             {rank}
           </div>
-          <div style={{ fontSize: 12, lineHeight: 1, color }}>{suit}</div>
+          <div style={{ fontSize: 13, lineHeight: 1, color }}>{suit}</div>
         </div>
-        <div className="relative z-10" style={{ fontSize: 46, lineHeight: 1, color }}>
+        <div
+          className="relative z-10"
+          style={{
+            fontSize: 50,
+            lineHeight: 1,
+            color,
+            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.12))',
+          }}
+        >
           {suit}
         </div>
         <div className="relative z-10 self-end rotate-180">
           <div
             style={{
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: 900,
               lineHeight: 1,
               color,
-              fontFamily: 'Georgia, serif',
+              fontFamily: 'Cormorant Garamond, Georgia, serif',
+              letterSpacing: '-0.01em',
             }}
           >
             {rank}
           </div>
-          <div style={{ fontSize: 12, lineHeight: 1, color }}>{suit}</div>
+          <div style={{ fontSize: 13, lineHeight: 1, color }}>{suit}</div>
         </div>
       </div>
     </div>
@@ -121,6 +164,9 @@ export function HomePage() {
   );
   const [manualAuthToken, setManualAuthToken] = useState('');
   const [showDevTools, setShowDevTools] = useState(false);
+  const [devLoginPendingIdentity, setDevLoginPendingIdentity] =
+    useState<DevLoginIdentity | null>(null);
+  const [devLoginError, setDevLoginError] = useState<string | null>(null);
 
   const normalizedBackendUrl = useMemo(() => normalizeBackendUrl(backendUrl), [backendUrl]);
   const frontendUrl = getFrontendOrigin();
@@ -132,7 +178,7 @@ export function HomePage() {
         return parsed.origin;
       }
     } catch {
-      // invalid
+      // Invalid backend URLs disable OAuth links without breaking the landing page.
     }
     return '';
   }, [normalizedBackendUrl]);
@@ -160,117 +206,231 @@ export function HomePage() {
     savePendingAuthBackendUrl(normalizedBackendUrl);
   }
 
+  async function handleDevLogin(identity: DevLoginIdentity): Promise<void> {
+    if (!safeBackendOrigin) {
+      setDevLoginError('Backend URL inválida para dev login.');
+      return;
+    }
+
+    setDevLoginPendingIdentity(identity);
+    setDevLoginError(null);
+
+    try {
+      const response = await fetch(`${safeBackendOrigin}/auth/dev/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identity }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Dev login falhou (${response.status}).`);
+      }
+
+      const payload = (await response.json()) as {
+        authToken?: unknown;
+        expiresIn?: unknown;
+        user?: {
+          id?: unknown;
+          provider?: unknown;
+          email?: unknown;
+          displayName?: unknown;
+          avatarUrl?: unknown;
+        };
+      };
+
+      if (
+        typeof payload.authToken !== 'string' ||
+        !payload.user ||
+        typeof payload.user.id !== 'string' ||
+        typeof payload.user.provider !== 'string'
+      ) {
+        throw new Error('Resposta inválida do dev login.');
+      }
+
+      setSession({
+        backendUrl: normalizedBackendUrl,
+        authToken: payload.authToken,
+        expiresIn: typeof payload.expiresIn === 'string' ? payload.expiresIn : null,
+        user: {
+          id: payload.user.id,
+          provider: payload.user.provider,
+          email: typeof payload.user.email === 'string' ? payload.user.email : null,
+          displayName:
+            typeof payload.user.displayName === 'string' ? payload.user.displayName : null,
+          avatarUrl: typeof payload.user.avatarUrl === 'string' ? payload.user.avatarUrl : null,
+        },
+      });
+      window.location.assign('/lobby');
+    } catch (error) {
+      setDevLoginError(error instanceof Error ? error.message : 'Dev login falhou.');
+    } finally {
+      setDevLoginPendingIdentity(null);
+    }
+  }
+
   const isAuthenticated = Boolean(session?.authToken);
 
   return (
     <div
-      className="relative overflow-hidden rounded-3xl"
+      className="bg-noise-soft relative overflow-hidden rounded-3xl"
       style={{
-        background: 'radial-gradient(ellipse at 50% -10%, #0d2318 0%, #050d18 40%, #050810 100%)',
-        border: '1px solid rgba(201,168,76,0.08)',
+        background:
+          'radial-gradient(ellipse at 50% -10%, #102619 0%, #050d18 40%, #050810 100%)',
+        border: '1px solid rgba(201,168,76,0.12)',
+        boxShadow:
+          '0 30px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,241,184,0.04)',
       }}
     >
-      {/* Ambient glows — atmosphere only, no fake data anywhere */}
+      {/* Camadas atmosféricas — auroras suaves nas bordas */}
       <div className="pointer-events-none absolute inset-0">
         <div
           className="absolute -top-40 left-1/2 -translate-x-1/2 rounded-full"
           style={{
             width: 900,
             height: 600,
-            background: 'rgba(201,168,76,0.07)',
-            filter: 'blur(80px)',
+            background: 'rgba(201,168,76,0.09)',
+            filter: 'blur(90px)',
+            animation: 'px-frame-breathe 6s ease-in-out infinite',
           }}
         />
         <div
           className="absolute bottom-0 right-0 rounded-full"
           style={{
-            width: 500,
-            height: 500,
-            background: 'rgba(15,61,30,0.35)',
+            width: 520,
+            height: 520,
+            background: 'rgba(15,61,30,0.38)',
+            filter: 'blur(90px)',
+          }}
+        />
+        <div
+          className="absolute left-0 top-1/3 rounded-full"
+          style={{
+            width: 360,
+            height: 360,
+            background: 'rgba(34,197,94,0.06)',
             filter: 'blur(80px)',
           }}
         />
       </div>
 
-      <section className="relative z-10 mx-auto max-w-7xl px-6 pt-12 pb-10 lg:pt-14 lg:pb-10">
+      {/* Hairline dourada superior */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-12 top-0 h-px"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent 0%, rgba(255,241,184,0.6) 50%, transparent 100%)',
+        }}
+      />
+
+      <section className="relative z-10 mx-auto max-w-7xl px-6 pb-10 pt-12 lg:pb-10 lg:pt-14">
         <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-10">
           <div className="space-y-6">
             <div
-              className="inline-flex items-center gap-2 rounded-full px-3 py-1"
+              className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
               style={{
-                border: '1px solid rgba(201,168,76,0.3)',
-                background: 'rgba(201,168,76,0.07)',
+                border: '1px solid rgba(201,168,76,0.32)',
+                background:
+                  'linear-gradient(180deg, rgba(40,30,12,0.55), rgba(15,12,6,0.4))',
+                color: '#d7c18b',
+                boxShadow:
+                  '0 4px 14px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,241,184,0.08)',
               }}
             >
-              <div
-                className="h-1.5 w-1.5 rounded-full"
-                style={{
-                  background: 'linear-gradient(135deg, #c9a84c, #e8c76a)',
-                }}
-              />
               <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: '0.3em',
-                  color: 'rgba(255,255,255,0.55)',
-                }}
+                className="relative h-2 w-2 rounded-full bg-emerald-400"
+                style={{ boxShadow: '0 0 12px rgba(52,211,153,0.78)' }}
               >
-                EDIÇÃO PREMIUM
+                <span
+                  aria-hidden
+                  className="absolute inset-0 rounded-full bg-emerald-400/60"
+                  style={{ animation: 'px-dot-ripple 2.2s ease-out infinite' }}
+                />
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-[0.24em]">
+                Online em tempo real
               </span>
             </div>
 
-            <h1
-              className="leading-[0.98] font-bold text-white"
-              style={{
-                fontFamily: 'Georgia, serif',
-                fontSize: 'clamp(38px, 4.9vw, 66px)',
-                maxWidth: 620,
-              }}
-            >
-              A mesa de truco
-              <br />
-              <span
+            <div>
+              <p
                 style={{
-                  background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 50%, #8a6a28 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.30em',
+                  color: 'rgba(255,255,255,0.36)',
+                  textTransform: 'uppercase',
+                  marginBottom: 14,
+                  fontFamily: 'Inter, system-ui, sans-serif',
                 }}
               >
-                mais elegante
-              </span>
-              <br />
-              do Brasil.
-            </h1>
+                Truco Paulista Digital
+              </p>
+
+              <h1
+                style={{
+                  fontFamily: 'Cormorant Garamond, Georgia, serif',
+                  fontSize: 'clamp(54px, 8.5vw, 108px)',
+                  lineHeight: 0.88,
+                  fontWeight: 600,
+                  letterSpacing: '-0.04em',
+                  color: '#f5ecd6',
+                  textShadow:
+                    '0 0 48px rgba(201,168,76,0.15), 0 2px 0 rgba(0,0,0,0.4)',
+                }}
+              >
+                O baralho
+                <br />
+                <span
+                  style={{
+                    fontStyle: 'italic',
+                    fontWeight: 500,
+                    color: 'transparent',
+                    background:
+                      'linear-gradient(135deg, #fff1b8 0%, #f2d488 30%, #c9a84c 65%, #8a6a28 100%)',
+                    backgroundSize: '200% 100%',
+                    WebkitBackgroundClip: 'text',
+                    backgroundClip: 'text',
+                    animation: 'px-gold-shimmer 7s ease-in-out infinite',
+                    filter: 'drop-shadow(0 4px 28px rgba(201,168,76,0.32))',
+                  }}
+                >
+                  paulista
+                </span>
+                <br />
+                na tela
+              </h1>
+            </div>
 
             <p
               style={{
+                maxWidth: 590,
                 fontSize: 16,
-                lineHeight: 1.55,
-                color: 'rgba(255,255,255,0.55)',
-                maxWidth: 470,
+                lineHeight: 1.75,
+                color: 'rgba(255,255,255,0.58)',
+                fontFamily: 'Inter, system-ui, sans-serif',
               }}
             >
-              Truco Paulista online em uma mesa digital feita à mão. Convide a dupla, sente-se e dê
-              o truco — sem distrações, sem ruído.
+              Entre no lobby, escolha uma mesa e jogue Truco Paulista com regras reais,
+              sincronização em tempo real e uma interface premium inspirada nas mesas de jogo
+              clássicas.
             </p>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap gap-3">
               {isAuthenticated ? (
                 <Link
                   to="/lobby"
-                  className="inline-flex items-center gap-2 rounded-xl px-7 py-3.5 font-black uppercase tracking-wider transition-all duration-200 hover:scale-105"
+                  className="group inline-flex items-center gap-3 rounded-xl px-7 py-4 text-sm font-black uppercase tracking-wider transition-all duration-200"
                   style={{
-                    background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
+                    background:
+                      'linear-gradient(135deg, #fff1b8 0%, #e8c76a 35%, #c9a84c 65%, #8a6a28 100%)',
                     color: '#1a0800',
-                    fontSize: 12,
-                    letterSpacing: '0.12em',
-                    boxShadow: '0 0 28px rgba(201,168,76,0.35), 0 8px 20px rgba(0,0,0,0.3)',
-                    textDecoration: 'none',
+                    boxShadow:
+                      '0 0 32px rgba(201,168,76,0.32), 0 14px 34px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.4)',
                   }}
                 >
-                  Ir para o lobby →
+                  Entrar no lobby
+                  <span className="transition-transform group-hover:translate-x-1">→</span>
                 </Link>
               ) : (
                 <>
@@ -283,52 +443,35 @@ export function HomePage() {
                             e.preventDefault();
                           }
                     }
-                    className="inline-flex items-center gap-3 rounded-xl px-7 py-3.5 font-black uppercase tracking-wider transition-all duration-200 hover:scale-105"
+                    className="group inline-flex items-center gap-3 rounded-xl px-7 py-4 text-sm font-black uppercase tracking-wider transition-all duration-200"
                     style={{
-                      background: googleLoginUrl
-                        ? 'linear-gradient(135deg, #c9a84c, #8a6a28)'
-                        : 'rgba(255,255,255,0.05)',
-                      color: googleLoginUrl ? '#1a0800' : 'rgba(255,255,255,0.3)',
-                      fontSize: 12,
-                      letterSpacing: '0.12em',
-                      boxShadow: googleLoginUrl
-                        ? '0 0 28px rgba(201,168,76,0.35), 0 8px 20px rgba(0,0,0,0.3)'
-                        : 'none',
-                      cursor: googleLoginUrl ? 'pointer' : 'not-allowed',
+                      background:
+                        'linear-gradient(135deg, #fff1b8 0%, #e8c76a 35%, #c9a84c 65%, #8a6a28 100%)',
+                      color: '#1a0800',
+                      boxShadow:
+                        '0 0 32px rgba(201,168,76,0.32), 0 14px 34px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.4)',
+                      opacity: googleLoginUrl ? 1 : 0.55,
+                      pointerEvents: googleLoginUrl ? 'auto' : 'none',
                     }}
                   >
-                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
                     Entrar com Google
+                    <span className="transition-transform group-hover:translate-x-1">→</span>
                   </a>
 
                   {githubLoginUrl ? (
                     <a
                       href={githubLoginUrl}
                       onClick={handleOAuthStart}
-                      className="inline-flex items-center gap-2 rounded-xl px-6 py-3.5 font-black uppercase tracking-wider transition-all duration-200 hover:scale-105"
+                      className="inline-flex items-center rounded-xl px-6 py-4 text-sm font-bold uppercase tracking-wider transition-all duration-200 hover:bg-white/[0.10]"
                       style={{
-                        background: 'transparent',
-                        border: '1.5px solid rgba(201,168,76,0.35)',
-                        color: 'rgba(201,168,76,0.85)',
-                        fontSize: 11,
-                        letterSpacing: '0.12em',
-                        cursor: 'pointer',
-                        boxShadow: '0 0 18px rgba(201,168,76,0.08)',
-                        textDecoration: 'none',
+                        background:
+                          'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+                        border: '1px solid rgba(255,255,255,0.10)',
+                        color: 'rgba(240,230,211,0.82)',
+                        boxShadow:
+                          '0 8px 22px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05)',
                       }}
                     >
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                        <path
-                          fillRule="evenodd"
-                          d="M12 2C6.48 2 2 6.58 2 12.25c0 4.54 2.87 8.39 6.84 9.75.5.1.68-.22.68-.5v-1.72c-2.78.62-3.37-1.37-3.37-1.37-.46-1.17-1.11-1.48-1.11-1.48-.91-.63.07-.62.07-.62 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.13-4.55-5.03 0-1.11.39-2.02 1.03-2.73-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.04.8-.23 1.65-.34 2.5-.34.85 0 1.7.11 2.5.34 1.91-1.31 2.75-1.04 2.75-1.04.55 1.41.2 2.45.1 2.71.64.71 1.03 1.62 1.03 2.73 0 3.91-2.34 4.77-4.57 5.02.36.32.68.94.68 1.9v2.82c0 .28.18.6.69.5A10.01 10.01 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
                       Entrar com GitHub
                     </a>
                   ) : null}
@@ -336,10 +479,16 @@ export function HomePage() {
               )}
             </div>
 
-            {/* CHANGE: this used to be "1.2K mesas / 48K jogadores / 24/7 online" — pure
-                fake marketing data. Replaced with honest edition signals that describe what
-                the product actually IS, not a fabricated user base. */}
-            <div className="grid max-w-lg grid-cols-3 gap-5 pt-2">
+            <div
+              className="grid max-w-xl grid-cols-3 gap-3 rounded-2xl p-4 backdrop-blur"
+              style={{
+                background:
+                  'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))',
+                border: '1px solid rgba(255,255,255,0.08)',
+                boxShadow:
+                  '0 8px 24px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.04)',
+              }}
+            >
               {[
                 { v: '1v1 · 2v2', l: 'Modos suportados' },
                 { v: 'Sem app', l: 'Direto no navegador' },
@@ -348,14 +497,15 @@ export function HomePage() {
                 <div key={s.l}>
                   <div
                     style={{
-                      fontFamily: 'Georgia, serif',
-                      fontSize: 18,
-                      fontWeight: 800,
-                      background: 'linear-gradient(135deg, #e8c76a, #c9a84c)',
+                      fontSize: 19,
+                      fontWeight: 900,
+                      background:
+                        'linear-gradient(180deg, #fff1b8 0%, #e8c76a 50%, #c9a84c 100%)',
                       WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
                       backgroundClip: 'text',
-                      lineHeight: 1.1,
+                      WebkitTextFillColor: 'transparent',
+                      fontFamily: 'Cormorant Garamond, Georgia, serif',
+                      letterSpacing: '-0.01em',
                     }}
                   >
                     {s.v}
@@ -364,10 +514,10 @@ export function HomePage() {
                     style={{
                       fontSize: 9,
                       fontWeight: 700,
-                      letterSpacing: '0.18em',
-                      color: 'rgba(255,255,255,0.35)',
+                      letterSpacing: '0.16em',
+                      color: 'rgba(255,255,255,0.36)',
                       textTransform: 'uppercase',
-                      marginTop: 3,
+                      marginTop: 2,
                     }}
                   >
                     {s.l}
@@ -377,35 +527,42 @@ export function HomePage() {
             </div>
           </div>
 
-          <div className="relative flex h-[300px] items-center justify-center lg:h-[340px]">
+          <div className="relative hidden h-[440px] lg:block">
             <div
-              className="absolute rounded-full"
+              className="absolute inset-0 rounded-[32px]"
               style={{
-                width: 360,
-                height: 250,
                 background:
-                  'radial-gradient(ellipse, rgba(15,61,30,0.7) 0%, rgba(8,32,16,0.4) 55%, transparent 80%)',
-                filter: 'blur(10px)',
+                  'radial-gradient(ellipse at 50% 50%, rgba(15,61,30,0.6), transparent 64%)',
+                filter: 'blur(20px)',
+                animation: 'px-frame-breathe 5s ease-in-out infinite',
               }}
             />
-
-            <div className="relative scale-[0.92] lg:scale-100">
-              <DecorCard rank="A" suit="♠" isRed={false} rotate={-18} x={-54} y={24} />
-              <DecorCard rank="7" suit="♥" isRed rotate={-7} x={-18} y={0} />
-              <DecorCard rank="4" suit="♣" isRed={false} rotate={4} x={20} y={-16} />
-              <DecorCard rank="K" suit="♦" isRed rotate={14} x={56} y={6} />
+            <div
+              className="absolute inset-0 rounded-[32px]"
+              style={{
+                background:
+                  'radial-gradient(ellipse at 50% 50%, rgba(201,168,76,0.15), transparent 56%)',
+                filter: 'blur(28px)',
+              }}
+            />
+            <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2">
+              <DecorCard rank="A" suit="♠" isRed={false} rotate={-19} x={-58} y={26} delay={0.20} />
+              <DecorCard rank="7" suit="♥" isRed rotate={-7} x={-20} y={0} delay={0.30} />
+              <DecorCard rank="4" suit="♣" isRed={false} rotate={5} x={22} y={-18} delay={0.40} />
+              <DecorCard rank="K" suit="♦" isRed rotate={15} x={60} y={8} delay={0.50} />
             </div>
           </div>
         </div>
       </section>
 
       <section
+        className="relative z-10 border-y border-amber-400/[0.06]"
         style={{
-          borderTop: '1px solid rgba(201,168,76,0.08)',
-          background: 'rgba(5,10,22,0.52)',
+          background:
+            'linear-gradient(180deg, rgba(5,10,22,0.65) 0%, rgba(3,8,18,0.55) 100%)',
         }}
       >
-        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-6 py-8 md:grid-cols-3">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-6 py-9 md:grid-cols-3">
           {[
             {
               t: 'Mesas em tempo real',
@@ -422,24 +579,24 @@ export function HomePage() {
           ].map((f) => (
             <div
               key={f.t}
-              className="rounded-2xl p-5 backdrop-blur"
-              style={{
-                background: 'linear-gradient(180deg, rgba(10,18,30,0.8), rgba(6,12,22,0.6))',
-                border: '1px solid rgba(201,168,76,0.14)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-              }}
+              className="surface-card-premium surface-felt-grain px-ornament-corners p-5 backdrop-blur"
             >
               <div
-                className="mb-3 h-1 w-9 rounded-full"
-                style={{ background: 'linear-gradient(90deg, #c9a84c, #8a6a28)' }}
+                className="mb-3 h-[2px] w-10 rounded-full"
+                style={{
+                  background:
+                    'linear-gradient(90deg, #fff1b8 0%, #c9a84c 50%, transparent 100%)',
+                  boxShadow: '0 0 10px rgba(201,168,76,0.42)',
+                }}
               />
               <h3
                 style={{
-                  fontFamily: 'Georgia, serif',
-                  fontSize: 17,
+                  fontFamily: 'Cormorant Garamond, Georgia, serif',
+                  fontSize: 19,
                   fontWeight: 700,
-                  color: '#f0e6d3',
+                  color: '#f5ecd6',
                   marginBottom: 6,
+                  letterSpacing: '-0.01em',
                 }}
               >
                 {f.t}
@@ -447,8 +604,9 @@ export function HomePage() {
               <p
                 style={{
                   fontSize: 12.5,
-                  lineHeight: 1.6,
-                  color: 'rgba(255,255,255,0.45)',
+                  lineHeight: 1.62,
+                  color: 'rgba(255,255,255,0.48)',
+                  fontFamily: 'Inter, system-ui, sans-serif',
                 }}
               >
                 {f.d}
@@ -458,35 +616,35 @@ export function HomePage() {
         </div>
       </section>
 
-      <footer className="relative z-10 mx-auto max-w-7xl px-6 py-5 text-center">
+      <footer className="relative z-10 mx-auto max-w-7xl px-6 py-6 text-center">
+        <div className="px-divider-ornate mx-auto mb-4 max-w-xs">
+          <span />
+        </div>
         <span
           style={{
             fontSize: 10,
             fontWeight: 700,
-            letterSpacing: '0.2em',
-            color: 'rgba(255,255,255,0.22)',
+            letterSpacing: '0.22em',
+            color: 'rgba(255,255,255,0.26)',
             textTransform: 'uppercase',
+            fontFamily: 'Inter, system-ui, sans-serif',
           }}
         >
           © Truco Paulista — Edição Premium
         </span>
       </footer>
 
-      {/* CHANGE: the dev tools panel stays (it's a real capability for local
-          development — custom backend URL + manual JWT), but the toggle label
-          is more honest and the panel is clearly separated from the product
-          surface. */}
       <div className="relative z-30 mx-auto max-w-7xl px-6 pb-8">
         <button
           onClick={() => setShowDevTools(!showDevTools)}
           style={{
             fontSize: 10,
-            color: 'rgba(255,255,255,0.2)',
+            color: 'rgba(255,255,255,0.22)',
             textDecoration: 'underline',
             background: 'none',
             border: 'none',
             cursor: 'pointer',
-            letterSpacing: '0.1em',
+            letterSpacing: '0.12em',
           }}
         >
           {showDevTools ? 'Esconder configuração avançada' : 'Configuração avançada (dev)'}
@@ -496,8 +654,11 @@ export function HomePage() {
           <div
             className="mt-4 grid gap-5 rounded-2xl p-6 lg:grid-cols-2"
             style={{
-              background: 'rgba(5,10,18,0.85)',
-              border: '1px solid rgba(255,255,255,0.07)',
+              background:
+                'linear-gradient(180deg, rgba(5,10,18,0.92), rgba(3,7,14,0.86))',
+              border: '1px solid rgba(201,168,76,0.14)',
+              boxShadow:
+                '0 16px 38px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.04)',
             }}
           >
             <div>
@@ -505,8 +666,8 @@ export function HomePage() {
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
-                  letterSpacing: '0.16em',
-                  color: 'rgba(255,255,255,0.35)',
+                  letterSpacing: '0.18em',
+                  color: 'rgba(232,199,106,0.6)',
                   display: 'block',
                   marginBottom: 8,
                   textTransform: 'uppercase',
@@ -522,8 +683,8 @@ export function HomePage() {
                   className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
                   style={{
                     background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    color: '#d1d5db',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    color: '#e8dcb8',
                   }}
                   placeholder="http://localhost:3000"
                 />
@@ -532,9 +693,10 @@ export function HomePage() {
                   disabled={!allowManualBackendOverride}
                   style={{
                     padding: '8px 16px',
-                    background: 'rgba(255,255,255,0.07)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: '#d1d5db',
+                    background:
+                      'linear-gradient(180deg, rgba(40,30,12,0.7), rgba(20,15,6,0.6))',
+                    border: '1px solid rgba(201,168,76,0.24)',
+                    color: '#e8c76a',
                     borderRadius: 8,
                     fontSize: 12,
                     fontWeight: 700,
@@ -551,8 +713,8 @@ export function HomePage() {
                 style={{
                   fontSize: 10,
                   fontWeight: 700,
-                  letterSpacing: '0.16em',
-                  color: 'rgba(255,255,255,0.35)',
+                  letterSpacing: '0.18em',
+                  color: 'rgba(232,199,106,0.6)',
                   display: 'block',
                   marginBottom: 8,
                   textTransform: 'uppercase',
@@ -567,8 +729,8 @@ export function HomePage() {
                   className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
                   style={{
                     background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    color: '#d1d5db',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    color: '#e8dcb8',
                   }}
                   placeholder="Cole o token aqui..."
                 />
@@ -576,9 +738,10 @@ export function HomePage() {
                   onClick={handleSaveManualToken}
                   style={{
                     padding: '8px 16px',
-                    background: 'rgba(255,255,255,0.07)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    color: '#d1d5db',
+                    background:
+                      'linear-gradient(180deg, rgba(40,30,12,0.7), rgba(20,15,6,0.6))',
+                    border: '1px solid rgba(201,168,76,0.24)',
+                    color: '#e8c76a',
                     borderRadius: 8,
                     fontSize: 12,
                     fontWeight: 700,
@@ -589,6 +752,93 @@ export function HomePage() {
                 </button>
               </div>
             </div>
+
+            {allowManualBackendOverride ? (
+              <div className="lg:col-span-2">
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.18em',
+                    color: 'rgba(232,199,106,0.6)',
+                    marginBottom: 8,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Login local de desenvolvimento
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {DEV_LOGIN_OPTIONS.map((option) => {
+                    const isPending = devLoginPendingIdentity === option.identity;
+
+                    return (
+                      <button
+                        key={option.identity}
+                        onClick={() => {
+                          void handleDevLogin(option.identity);
+                        }}
+                        disabled={devLoginPendingIdentity !== null}
+                        className="rounded-xl px-3 py-3 text-left transition-all duration-200 hover:scale-[1.02]"
+                        style={{
+                          background: isPending
+                            ? 'linear-gradient(180deg, rgba(201,168,76,0.2), rgba(140,110,40,0.10))'
+                            : 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))',
+                          border: isPending
+                            ? '1px solid rgba(232,199,106,0.42)'
+                            : '1px solid rgba(255,255,255,0.10)',
+                          color: '#e8dcb8',
+                          cursor: devLoginPendingIdentity === null ? 'pointer' : 'wait',
+                          boxShadow: isPending
+                            ? '0 0 18px rgba(201,168,76,0.24), inset 0 1px 0 rgba(255,255,255,0.06)'
+                            : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 900,
+                            color: isPending ? '#fff1b8' : '#f5ecd6',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.10em',
+                          }}
+                        >
+                          {isPending ? 'Entrando...' : option.label}
+                        </div>
+                        <div
+                          className="mt-1"
+                          style={{
+                            fontSize: 10,
+                            color: 'rgba(255,255,255,0.38)',
+                          }}
+                        >
+                          {option.helper}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {devLoginError ? (
+                  <p
+                    className="mt-3 rounded-lg px-3 py-2"
+                    style={{
+                      background: 'rgba(153,27,27,0.22)',
+                      border: '1px solid rgba(239,68,68,0.28)',
+                      color: '#fca5a5',
+                      fontSize: 12,
+                    }}
+                  >
+                    {devLoginError}
+                  </p>
+                ) : (
+                  <p className="mt-3 text-xs" style={{ color: 'rgba(255,255,255,0.30)' }}>
+                    Use identidades diferentes em Chrome, Edge ou aba anônima para testar dois
+                    humanos sem outra conta Google.
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

@@ -12,19 +12,14 @@ export type MatchStatusTone = 'neutral' | 'success' | 'warning';
 
 export type TablePhase = 'waiting' | 'playing' | 'hand_finished' | 'match_finished';
 
-// CHANGE: new ValeTier type drives the escalation colour/motion system used by
-// the header and the event stage. Single source of truth for "how risky is this hand".
+// Centralized escalation tier used by every UI surface that reacts to hand value.
 export type ValeTier = 'muted' | 'gold' | 'orange' | 'red' | 'red-pulse';
 
 export type MatchContractPresentation = {
   currentValue: number;
-  // CHANGE: expose the tier alongside the raw value so any consumer (header,
-  // table shell, overlays) can render with consistent escalation treatment.
   valeTier: ValeTier;
   betState: MatchStateHandPayload['betState'];
   pendingValue: MatchStateHandPayload['pendingValue'];
-  // CHANGE: also expose tier for the pending (requested) value, used by the
-  // pressure overlay so the ask reads at the right escalation level.
   pendingValeTier: ValeTier;
   requestedBy: PlayerId | null;
   specialState: MatchStateHandPayload['specialState'];
@@ -67,9 +62,6 @@ const EMPTY_AVAILABLE_ACTIONS: MatchAvailableActionsPayload = {
   canAttemptPlayCard: false,
 };
 
-// CHANGE: canonical escalation table. 1 = no pressure; 3 = first ask; 6/9 =
-// serious raises; 12 = maximum, pulses in the UI. Keep this centralised so the
-// header pill, the pressure overlay and the climax stage all agree.
 export function resolveValeTier(value: number | null | undefined): ValeTier {
   const resolved = value ?? 1;
 
@@ -321,8 +313,6 @@ export function buildMatchContractPresentation(
 
   return {
     currentValue,
-    // CHANGE: surface the resolved tiers so every consumer reads the same
-    // escalation state from one canonical place.
     valeTier: resolveValeTier(currentValue),
     betState: currentPublicHand?.betState ?? 'idle',
     pendingValue,

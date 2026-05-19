@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 
 import type { GetOrCreateUserRequestDto } from '@game/application/use-cases/get-or-create-user.use-case';
@@ -6,6 +17,7 @@ import {
   AuthService,
   type AuthenticatedSessionResponseDto,
   type AuthenticatedUserDto,
+  type DevIdentityInput,
 } from './auth.service';
 import { DevAuthGuard } from './guards/dev-auth.guard';
 import { GitHubAuthGuard } from './guards/github-auth.guard';
@@ -29,6 +41,39 @@ type BootstrapUserResponseDto = {
     avatarUrl: string | null;
   };
   created: boolean;
+};
+
+type DevSessionBodyDto = {
+  identity?: unknown;
+};
+
+type DevIdentityKey = 'eduardo' | 'amigo' | 'qa1' | 'qa2';
+
+const DEV_IDENTITIES: Record<DevIdentityKey, DevIdentityInput> = {
+  eduardo: {
+    providerUserId: 'eduardo-dev',
+    email: 'eduardo.dev@truco.local',
+    displayName: 'Eduardo Dev',
+    avatarUrl: null,
+  },
+  amigo: {
+    providerUserId: 'amigo-dev',
+    email: 'amigo.dev@truco.local',
+    displayName: 'Amigo Dev',
+    avatarUrl: null,
+  },
+  qa1: {
+    providerUserId: 'qa1-dev',
+    email: 'qa1.dev@truco.local',
+    displayName: 'QA Dev 1',
+    avatarUrl: null,
+  },
+  qa2: {
+    providerUserId: 'qa2-dev',
+    email: 'qa2.dev@truco.local',
+    displayName: 'QA Dev 2',
+    avatarUrl: null,
+  },
 };
 
 type MeResponseDto = {
@@ -81,10 +126,24 @@ export class AuthController {
     };
   }
 
+  @Post('dev/session')
+  async createDevSession(
+    @Body() body: DevSessionBodyDto,
+  ): Promise<AuthenticatedSessionResponseDto> {
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new ForbiddenException('Dev auth is disabled in production');
+    }
+
+    const identity = this.resolveDevIdentity(body.identity);
+    const user = await this.authService.validateOrCreateDevUser(identity);
+
+    return this.authService.createSession(user);
+  }
+
   @UseGuards(GoogleAuthGuard)
   @Get('google')
   async googleLogin(): Promise<void> {
-    // NOTE: Passport handles the redirect to Google.
+    // Passport owns the provider redirect for this route.
   }
 
   @UseGuards(GoogleAuthGuard)
@@ -101,7 +160,7 @@ export class AuthController {
   @UseGuards(GitHubAuthGuard)
   @Get('github')
   async githubLogin(): Promise<void> {
-    // NOTE: Passport handles the redirect to GitHub.
+    // Passport owns the provider redirect for this route.
   }
 
   @UseGuards(GitHubAuthGuard)
@@ -113,6 +172,21 @@ export class AuthController {
   ): Promise<void> {
     const session = this.authService.createSession(request.user);
     this.redirectToFrontendCallback(response, request.user, session, query.frontendUrl);
+  }
+
+  private resolveDevIdentity(value: unknown): DevIdentityInput {
+    const normalizedValue = typeof value === 'string' ? value.trim().toLowerCase() : 'eduardo';
+    const identityKey = normalizedValue || 'eduardo';
+
+    if (!this.isDevIdentityKey(identityKey)) {
+      throw new BadRequestException('Unknown dev identity');
+    }
+
+    return DEV_IDENTITIES[identityKey];
+  }
+
+  private isDevIdentityKey(value: string): value is DevIdentityKey {
+    return value === 'eduardo' || value === 'amigo' || value === 'qa1' || value === 'qa2';
   }
 
   private redirectToFrontendCallback(

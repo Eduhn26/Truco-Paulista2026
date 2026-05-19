@@ -62,7 +62,7 @@ describe('RaiseToSixUseCase (Application)', () => {
 
     const result = await useCase.execute({
       matchId: 'm1',
-      playerId: 'P1',
+      playerId: 'P2',
     });
 
     expect(mocks.save).toHaveBeenCalledWith('m1', match);

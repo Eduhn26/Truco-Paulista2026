@@ -40,6 +40,10 @@ export class UpdateRatingUseCase {
     const winnerUserIds = this.normalizeUserIds(request.winnerUserIds, 'winnerUserIds');
     const loserUserIds = this.normalizeUserIds(request.loserUserIds, 'loserUserIds');
 
+    if (winnerUserIds.length === 0 && loserUserIds.length === 0) {
+      throw new Error('At least one side must contain a human userId');
+    }
+
     const winners = await Promise.all(
       winnerUserIds.map((userId) => this.repo.findByUserId(userId)),
     );
@@ -51,6 +55,8 @@ export class UpdateRatingUseCase {
 
     const profilesToSave: PlayerProfileSnapshot[] = [];
 
+    // Human-vs-bot matches still affect lobby rating, even though bot seats do
+    // not have persisted player profiles.
     for (const profile of winners as PlayerProfileSnapshot[]) {
       profilesToSave.push(applyWin(profile));
     }
@@ -65,8 +71,12 @@ export class UpdateRatingUseCase {
   }
 
   private normalizeUserIds(userIds: string[], fieldName: string): string[] {
-    if (!Array.isArray(userIds) || userIds.length === 0) {
-      throw new Error(`${fieldName} must contain at least one userId`);
+    if (!Array.isArray(userIds)) {
+      throw new Error(`${fieldName} must be an array of userIds`);
+    }
+
+    if (userIds.length === 0) {
+      return [];
     }
 
     const normalizedUserIds = userIds.map((userId) => {

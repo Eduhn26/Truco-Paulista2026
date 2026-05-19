@@ -5,10 +5,10 @@ import type { Suit } from '../value-objects/suit';
 export type CompareResult = 'A' | 'B' | 'TIE';
 
 const MANILHA_SUIT_STRENGTH: Record<Suit, number> = {
-  P: 3, // Paus - mais forte
-  C: 2, // Copas
-  E: 1, // Espadas
-  O: 0, // Ouros - mais fraco
+  P: 3, // Strongest manilha suit in Truco Paulista.
+  C: 2,
+  E: 1,
+  O: 0, // Weakest manilha suit in Truco Paulista.
 };
 
 export function manilhaRankFromVira(vira: Rank): Rank {

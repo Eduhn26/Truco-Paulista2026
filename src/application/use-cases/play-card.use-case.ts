@@ -1,9 +1,10 @@
 import { Card } from '@game/domain/value-objects/card';
 import type { PlayerId } from '@game/domain/value-objects/player-id';
+import type { SeatId } from '@game/domain/entities/round';
 
-import type { PlayCardRequestDto } from '../dtos/requests/play-card.request.dto';
-import type { PlayCardResponseDto } from '../dtos/responses/play-card.response.dto';
-import type { MatchRepository } from '../ports/match.repository';
+import type { PlayCardRequestDto } from '@game/application/dtos/requests/play-card.request.dto';
+import type { PlayCardResponseDto } from '@game/application/dtos/responses/play-card.response.dto';
+import type { MatchRepository } from '@game/application/ports/match.repository';
 
 function ensureRequired(value: string, field: string): string {
   const normalized = value.trim();
@@ -21,6 +22,25 @@ function normalizePlayerId(value: string): PlayerId {
   throw new Error('invalid playerId');
 }
 
+function normalizeSeatId(value?: string): SeatId | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toUpperCase();
+
+  if (
+    normalized === 'T1A' ||
+    normalized === 'T1B' ||
+    normalized === 'T2A' ||
+    normalized === 'T2B'
+  ) {
+    return normalized;
+  }
+
+  throw new Error('invalid seatId');
+}
+
 export class PlayCardUseCase {
   constructor(private readonly matchRepository: MatchRepository) {}
 
@@ -28,11 +48,12 @@ export class PlayCardUseCase {
     const matchId = ensureRequired(request.matchId, 'matchId');
     const playerId = normalizePlayerId(ensureRequired(request.playerId, 'playerId'));
     const cardValue = ensureRequired(request.card, 'card').toUpperCase();
+    const seatId = normalizeSeatId(request.seatId);
 
     const match = await this.matchRepository.getById(matchId);
     if (!match) throw new Error('match not found');
 
-    match.play(playerId, Card.from(cardValue));
+    match.play(playerId, Card.from(cardValue), seatId ? { seatId } : {});
 
     await this.matchRepository.save(matchId, match);
 

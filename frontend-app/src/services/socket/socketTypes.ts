@@ -32,6 +32,9 @@ export type PlayerAssignedPayload = {
   playerId?: PlayerId;
   playerToken?: string;
   profileId?: string;
+  displayName?: string;
+  publicName?: string;
+  publicSlug?: string;
 };
 
 export type BotProfilePayload = 'balanced' | 'aggressive' | 'cautious' | string;
@@ -50,6 +53,13 @@ export type BotDecisionSourcePayload =
   | 'unknown'
   | string;
 
+export type BotDecisionOrderedPlayPayload = {
+  ownerId: string;
+  seatId: SeatId | null;
+  playerId: PlayerId;
+  card: string;
+};
+
 export type BotDecisionTelemetryPayload = {
   seatId: SeatId;
   teamId: 'T1' | 'T2' | string;
@@ -60,7 +70,87 @@ export type BotDecisionTelemetryPayload = {
   strategy?: string;
   handStrength?: number;
   reason?: string;
+  mode?: string;
+  actorSeatId?: SeatId;
+  actorTeamId?: 'T1' | 'T2' | string;
+  partnerSeatId?: SeatId | null;
+  winningSeatIdBeforeDecision?: SeatId | null;
+  winningTeamIdBeforeDecision?: 'T1' | 'T2' | string | null;
+  winningCardBeforeDecision?: string | null;
+  partnerWasWinning?: boolean;
+  actorHandBefore?: string[];
+  selectedCard?: string;
+  executionStatus?: 'pending' | 'succeeded' | 'blocked' | 'rejected' | 'fallback-card' | string;
+  executedAction?: string;
+  executionReason?: string;
+  executionError?: string;
+  betCurrentValue?: number;
+  betPendingValue?: number | null;
+  betState?: string;
+  betRequestedBy?: PlayerId | null;
+  betSpecialState?: string;
+  betSelectedAction?: string;
+  betProgressBoost?: number;
+  betScoreBoost?: number;
+  betEffectiveStrength?: number;
+  betAcceptThreshold?: number;
+  betRaiseThreshold?: number;
+  betInitiativeThreshold?: number;
+  betBluffProbability?: number;
+  betDeclineFloor?: number;
+  betMyPointsToWin?: number;
+  betOpponentPointsToWin?: number;
+  betDeclineLosesMatch?: boolean;
+  betAcceptRisksMatch?: boolean;
+  betRoundsWonByMe?: number;
+  betRoundsWonByOpponent?: number;
+  betRoundsTied?: number;
+  betCurrentRoundIndex?: number;
+  seatPlays?: Partial<Record<SeatId, string | null>>;
+  orderedPlays?: BotDecisionOrderedPlayPayload[];
   occurredAt?: string;
+};
+
+export type RoomLeftPayload = {
+  matchId: string;
+};
+
+export type QueueModePayload = '1v1' | '2v2' | string;
+
+export type QueuePlayerPayload = {
+  userId: string;
+  rating: number;
+  joinedAt: number;
+  socketId: string;
+  playerToken: string;
+};
+
+export type QueueSnapshotPayload = {
+  mode: QueueModePayload;
+  size: number;
+  playersWaiting: QueuePlayerPayload[];
+};
+
+export type MatchFoundPayload = {
+  matchId: string;
+  mode: QueueModePayload;
+  players: Array<{
+    userId: string;
+    playerToken: string;
+    rating: number;
+  }>;
+};
+
+export type QueueLeftPayload = {
+  left: boolean;
+  mode?: QueueModePayload;
+  snapshot?: QueueSnapshotPayload;
+};
+
+export type QueueTimeoutPayload = {
+  mode: QueueModePayload;
+  reason: string;
+  availableActions: string[];
 };
 
 export type RoomStatePayload = {
@@ -70,11 +160,17 @@ export type RoomStatePayload = {
     seatId: SeatId;
     teamId: string;
     ready: boolean;
+    userId?: string | null;
+    playerToken?: string | null;
+    displayName?: string | null;
+    publicName?: string | null;
+    publicSlug?: string | null;
     isBot?: boolean;
     botIdentity?: BotIdentityPayload;
   }>;
   canStart: boolean;
   currentTurnSeatId: SeatId | null;
+  fillBotsOnStart?: boolean;
   lastBotDecision?: BotDecisionTelemetryPayload | null;
 };
 
@@ -90,17 +186,29 @@ export type MatchAvailableActionsPayload = {
   canAttemptPlayCard: boolean;
 };
 
+export type MatchStateRoundPlayPayload = {
+  ownerId: string;
+  seatId: SeatId | null;
+  playerId: PlayerId;
+  card: string;
+};
+
 export type MatchStateRoundPayload = {
   playerOneCard: string | null;
   playerTwoCard: string | null;
   result: RoundResult | null;
   finished: boolean;
+  seatPlays?: Partial<Record<SeatId, string | null>>;
+  orderedPlays?: MatchStateRoundPlayPayload[];
+  winningSeatId?: SeatId | null;
 };
 
 export type MatchStateHandPayload = {
   viraRank: Rank;
+  mode?: QueueModePayload;
   finished: boolean;
   viewerPlayerId: 'P1' | 'P2' | null;
+  viewerSeatId?: SeatId | null;
   currentValue: HandValue;
   betState: HandBetState;
   pendingValue: HandValue | null;
@@ -118,6 +226,7 @@ export type MatchStateHandPayload = {
   availableActions: MatchAvailableActionsPayload;
   playerOneHand: string[];
   playerTwoHand: string[];
+  seatHands?: Partial<Record<SeatId, string[]>>;
   rounds: MatchStateRoundPayload[];
 };
 
@@ -136,6 +245,8 @@ export type RankingPayload = {
     profileId?: string;
     userId?: string;
     displayName?: string;
+    publicName?: string;
+    publicSlug?: string;
     rating?: number;
   }>;
 };
@@ -180,6 +291,12 @@ export type GameSocketEvents = {
   onDisconnect?: (reason: string) => void;
   onError?: (payload: ServerErrorPayload) => void;
   onPlayerAssigned?: (payload: PlayerAssignedPayload) => void;
+  onRoomLeft?: (payload: RoomLeftPayload) => void;
+  onQueueJoined?: (payload: QueueSnapshotPayload) => void;
+  onQueueState?: (payload: QueueSnapshotPayload) => void;
+  onQueueLeft?: (payload: QueueLeftPayload) => void;
+  onQueueTimeout?: (payload: QueueTimeoutPayload) => void;
+  onMatchFound?: (payload: MatchFoundPayload) => void;
   onRoomState?: (payload: RoomStatePayload) => void;
   onMatchState?: (payload: MatchStatePayload) => void;
   onPrivateMatchState?: (payload: MatchStatePayload) => void;
@@ -192,10 +309,10 @@ export type GameSocketEvents = {
 export type SuitDisplay = { symbol: string; colorClass: string };
 
 const SUIT_DISPLAY_MAP: Record<string, SuitDisplay> = {
-  C: { symbol: '♣', colorClass: 'text-slate-900' },
+  P: { symbol: '♣', colorClass: 'text-slate-900' },
+  C: { symbol: '♥', colorClass: 'text-red-700' },
   O: { symbol: '♦', colorClass: 'text-red-700' },
   D: { symbol: '♦', colorClass: 'text-red-700' },
-  P: { symbol: '♥', colorClass: 'text-red-700' },
   H: { symbol: '♥', colorClass: 'text-red-700' },
   E: { symbol: '♠', colorClass: 'text-slate-900' },
   S: { symbol: '♠', colorClass: 'text-slate-900' },
@@ -216,7 +333,7 @@ export function suitColorClass(suit: string): string {
 }
 
 export function isSuitRed(suit: string): boolean {
-  return suit === 'P' || suit === 'H' || suit === 'O' || suit === 'D';
+  return suit === 'C' || suit === 'H' || suit === 'O' || suit === 'D';
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -251,6 +368,66 @@ function asCardStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : [];
 }
 
+function asOptionalCardStringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.map((item) => asString(item)).filter(Boolean) : undefined;
+}
+
+function normalizeNullableStringField(value: unknown): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return asOptionalString(value);
+}
+
+function normalizeBotDecisionSeatPlaysPayload(
+  value: unknown,
+): Partial<Record<SeatId, string | null>> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const entries = Object.entries(asObject(value)).reduce<Partial<Record<SeatId, string | null>>>(
+    (accumulator, [seatId, card]) => {
+      accumulator[seatId] = card === null ? null : (asOptionalString(card) ?? null);
+      return accumulator;
+    },
+    {},
+  );
+
+  return Object.keys(entries).length > 0 ? entries : undefined;
+}
+
+function normalizeBotDecisionOrderedPlaysPayload(
+  value: unknown,
+): BotDecisionOrderedPlayPayload[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const plays = value.flatMap((item) => {
+    const input = asObject(item);
+    const ownerId = asOptionalString(input.ownerId);
+    const playerId = asOptionalString(input.playerId);
+    const card = asOptionalString(input.card);
+
+    if (!ownerId || !playerId || !card) {
+      return [];
+    }
+
+    return [
+      {
+        ownerId,
+        seatId: normalizeNullableStringField(input.seatId) ?? null,
+        playerId,
+        card,
+      },
+    ];
+  });
+
+  return plays.length > 0 ? plays : undefined;
+}
+
 function normalizeMatchAvailableActionsPayload(value: unknown): MatchAvailableActionsPayload {
   const input = asObject(value);
 
@@ -267,14 +444,67 @@ function normalizeMatchAvailableActionsPayload(value: unknown): MatchAvailableAc
   };
 }
 
+function normalizeSeatCardMap(value: unknown): Partial<Record<SeatId, string | null>> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const entries = Object.entries(input).reduce<Partial<Record<SeatId, string | null>>>(
+    (acc, [seatId, card]) => {
+      acc[seatId] = asNullableString(card);
+      return acc;
+    },
+    {},
+  );
+
+  return Object.keys(entries).length > 0 ? entries : undefined;
+}
+
+function normalizeSeatHandsMap(value: unknown): Partial<Record<SeatId, string[]>> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = asObject(value);
+  const entries = Object.entries(input).reduce<Partial<Record<SeatId, string[]>>>(
+    (acc, [seatId, cards]) => {
+      acc[seatId] = asCardStringArray(cards);
+      return acc;
+    },
+    {},
+  );
+
+  return Object.keys(entries).length > 0 ? entries : undefined;
+}
+
+function normalizeMatchStateRoundPlayPayload(value: unknown): MatchStateRoundPlayPayload {
+  const input = asObject(value);
+
+  return {
+    ownerId: asString(input.ownerId),
+    seatId: asNullableString(input.seatId),
+    playerId: asString(input.playerId),
+    card: asString(input.card),
+  };
+}
+
 function normalizeMatchStateRoundPayload(value: unknown): MatchStateRoundPayload {
   const input = asObject(value);
+
+  const seatPlays = normalizeSeatCardMap(input.seatPlays);
+  const orderedPlays = Array.isArray(input.orderedPlays)
+    ? input.orderedPlays.map(normalizeMatchStateRoundPlayPayload)
+    : undefined;
 
   return {
     playerOneCard: asNullableString(input.playerOneCard),
     playerTwoCard: asNullableString(input.playerTwoCard),
     result: typeof input.result === 'string' ? input.result : null,
     finished: asBoolean(input.finished),
+    ...(seatPlays ? { seatPlays } : {}),
+    ...(orderedPlays ? { orderedPlays } : {}),
+    winningSeatId: asNullableString(input.winningSeatId),
   };
 }
 
@@ -284,12 +514,15 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
   }
 
   const input = asObject(value);
+  const seatHands = normalizeSeatHandsMap(input.seatHands);
 
   return {
     viraRank: asString(input.viraRank),
+    mode: asString(input.mode, '1v1'),
     finished: asBoolean(input.finished),
     viewerPlayerId:
       input.viewerPlayerId === 'P1' || input.viewerPlayerId === 'P2' ? input.viewerPlayerId : null,
+    viewerSeatId: asNullableString(input.viewerSeatId),
     currentValue: asNumber(input.currentValue, 1),
     betState: asString(input.betState, 'idle'),
     pendingValue: asNullableHandValue(input.pendingValue),
@@ -322,6 +555,7 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
     availableActions: normalizeMatchAvailableActionsPayload(input.availableActions),
     playerOneHand: asCardStringArray(input.playerOneHand),
     playerTwoHand: asCardStringArray(input.playerTwoHand),
+    ...(seatHands ? { seatHands } : {}),
     rounds: Array.isArray(input.rounds) ? input.rounds.map(normalizeMatchStateRoundPayload) : [],
   };
 }
@@ -334,12 +568,83 @@ export function normalizeServerErrorPayload(payload: unknown): ServerErrorPayloa
   };
 }
 
+export function normalizeQueueSnapshotPayload(payload: unknown): QueueSnapshotPayload {
+  const input = asObject(payload);
+  const mode = asString(input.mode, '1v1');
+  const playersWaiting = Array.isArray(input.playersWaiting)
+    ? input.playersWaiting.map((player) => {
+        const item = asObject(player);
+
+        return {
+          userId: asString(item.userId),
+          rating: asNumber(item.rating),
+          joinedAt: asNumber(item.joinedAt),
+          socketId: asString(item.socketId),
+          playerToken: asString(item.playerToken),
+        };
+      })
+    : [];
+
+  return {
+    mode,
+    size: asNumber(input.size, playersWaiting.length),
+    playersWaiting,
+  };
+}
+
+export function normalizeMatchFoundPayload(payload: unknown): MatchFoundPayload {
+  const input = asObject(payload);
+
+  return {
+    matchId: asString(input.matchId),
+    mode: asString(input.mode, '1v1'),
+    players: Array.isArray(input.players)
+      ? input.players.map((player) => {
+          const item = asObject(player);
+
+          return {
+            userId: asString(item.userId),
+            playerToken: asString(item.playerToken),
+            rating: asNumber(item.rating),
+          };
+        })
+      : [],
+  };
+}
+
+export function normalizeQueueLeftPayload(payload: unknown): QueueLeftPayload {
+  const input = asObject(payload);
+  const snapshot = input.snapshot ? normalizeQueueSnapshotPayload(input.snapshot) : undefined;
+  const mode = asOptionalString(input.mode);
+
+  return {
+    left: asBoolean(input.left),
+    ...(mode !== undefined ? { mode } : {}),
+    ...(snapshot !== undefined ? { snapshot } : {}),
+  };
+}
+
+export function normalizeQueueTimeoutPayload(payload: unknown): QueueTimeoutPayload {
+  const input = asObject(payload);
+
+  return {
+    mode: asString(input.mode, '1v1'),
+    reason: asString(input.reason, 'timeout'),
+    availableActions: Array.isArray(input.availableActions)
+      ? input.availableActions.map((action) => asString(action)).filter(Boolean)
+      : [],
+  };
+}
+
 export function normalizePlayerAssignedPayload(payload: unknown): PlayerAssignedPayload {
   const input = asObject(payload);
   const teamId = asOptionalString(input.teamId);
   const playerId = asOptionalString(input.playerId);
   const playerToken = asOptionalString(input.playerToken);
   const profileId = asOptionalString(input.profileId);
+  const displayName = asOptionalString(input.displayName);
+  const publicName = asOptionalString(input.publicName);
+  const publicSlug = asOptionalString(input.publicSlug);
 
   return {
     matchId: asString(input.matchId),
@@ -348,6 +653,9 @@ export function normalizePlayerAssignedPayload(payload: unknown): PlayerAssigned
     ...(playerId !== undefined ? { playerId } : {}),
     ...(playerToken !== undefined ? { playerToken } : {}),
     ...(profileId !== undefined ? { profileId } : {}),
+    ...(displayName !== undefined ? { displayName } : {}),
+    ...(publicName !== undefined ? { publicName } : {}),
+    ...(publicSlug !== undefined ? { publicSlug } : {}),
   };
 }
 
@@ -365,12 +673,22 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       ? input.players.map((player) => {
           const item = asObject(player);
           const isBot = typeof item.isBot === 'boolean' ? item.isBot : undefined;
+          const userId = asNullableString(item.userId);
+          const playerToken = asNullableString(item.playerToken);
+          const displayName = asNullableString(item.displayName);
+          const publicName = asNullableString(item.publicName);
+          const publicSlug = asNullableString(item.publicSlug);
           const botIdentity = normalizeBotIdentityPayload(item.botIdentity);
 
           return {
             seatId: asString(item.seatId),
             teamId: asString(item.teamId),
             ready: asBoolean(item.ready),
+            ...(userId !== undefined ? { userId } : {}),
+            ...(playerToken !== undefined ? { playerToken } : {}),
+            ...(displayName !== undefined ? { displayName } : {}),
+            ...(publicName !== undefined ? { publicName } : {}),
+            ...(publicSlug !== undefined ? { publicSlug } : {}),
             ...(isBot !== undefined ? { isBot } : {}),
             ...(botIdentity !== undefined ? { botIdentity } : {}),
           };
@@ -378,6 +696,7 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       : [],
     canStart: asBoolean(input.canStart),
     currentTurnSeatId: asNullableString(input.currentTurnSeatId),
+    ...(typeof input.fillBotsOnStart === 'boolean' ? { fillBotsOnStart: input.fillBotsOnStart } : {}),
     ...(lastBotDecision !== undefined ? { lastBotDecision } : {}),
   };
 }
@@ -402,6 +721,49 @@ function normalizeBotDecisionTelemetryPayload(
   const source = asOptionalString(input.source);
   const strategy = asOptionalString(input.strategy);
   const reason = asOptionalString(input.reason);
+  const mode = asOptionalString(input.mode);
+  const actorSeatId = asOptionalString(input.actorSeatId);
+  const actorTeamId = asOptionalString(input.actorTeamId);
+  const partnerSeatId = normalizeNullableStringField(input.partnerSeatId);
+  const winningSeatIdBeforeDecision = normalizeNullableStringField(
+    input.winningSeatIdBeforeDecision,
+  );
+  const winningTeamIdBeforeDecision = normalizeNullableStringField(
+    input.winningTeamIdBeforeDecision,
+  );
+  const winningCardBeforeDecision = normalizeNullableStringField(input.winningCardBeforeDecision);
+  const partnerWasWinning =
+    typeof input.partnerWasWinning === 'boolean' ? input.partnerWasWinning : undefined;
+  const actorHandBefore = asOptionalCardStringArray(input.actorHandBefore);
+  const selectedCard = asOptionalString(input.selectedCard);
+  const executionStatus = asOptionalString(input.executionStatus);
+  const executedAction = asOptionalString(input.executedAction);
+  const executionReason = asOptionalString(input.executionReason);
+  const executionError = asOptionalString(input.executionError);
+  const betCurrentValue = asOptionalNumber(input.betCurrentValue);
+  const betPendingValue = normalizeNullableNumberField(input.betPendingValue);
+  const betState = asOptionalString(input.betState);
+  const betRequestedBy = normalizeNullableStringField(input.betRequestedBy);
+  const betSpecialState = asOptionalString(input.betSpecialState);
+  const betSelectedAction = asOptionalString(input.betSelectedAction);
+  const betProgressBoost = asOptionalNumber(input.betProgressBoost);
+  const betScoreBoost = asOptionalNumber(input.betScoreBoost);
+  const betEffectiveStrength = asOptionalNumber(input.betEffectiveStrength);
+  const betAcceptThreshold = asOptionalNumber(input.betAcceptThreshold);
+  const betRaiseThreshold = asOptionalNumber(input.betRaiseThreshold);
+  const betInitiativeThreshold = asOptionalNumber(input.betInitiativeThreshold);
+  const betBluffProbability = asOptionalNumber(input.betBluffProbability);
+  const betDeclineFloor = asOptionalNumber(input.betDeclineFloor);
+  const betMyPointsToWin = asOptionalNumber(input.betMyPointsToWin);
+  const betOpponentPointsToWin = asOptionalNumber(input.betOpponentPointsToWin);
+  const betDeclineLosesMatch = asOptionalBoolean(input.betDeclineLosesMatch);
+  const betAcceptRisksMatch = asOptionalBoolean(input.betAcceptRisksMatch);
+  const betRoundsWonByMe = asOptionalNumber(input.betRoundsWonByMe);
+  const betRoundsWonByOpponent = asOptionalNumber(input.betRoundsWonByOpponent);
+  const betRoundsTied = asOptionalNumber(input.betRoundsTied);
+  const betCurrentRoundIndex = asOptionalNumber(input.betCurrentRoundIndex);
+  const seatPlays = normalizeBotDecisionSeatPlaysPayload(input.seatPlays);
+  const orderedPlays = normalizeBotDecisionOrderedPlaysPayload(input.orderedPlays);
   const occurredAt = asOptionalString(input.occurredAt);
   const handStrength = typeof input.handStrength === 'number' ? input.handStrength : undefined;
 
@@ -426,6 +788,44 @@ function normalizeBotDecisionTelemetryPayload(
     ...(strategy !== undefined ? { strategy } : {}),
     ...(handStrength !== undefined ? { handStrength } : {}),
     ...(reason !== undefined ? { reason } : {}),
+    ...(mode !== undefined ? { mode } : {}),
+    ...(actorSeatId !== undefined ? { actorSeatId } : {}),
+    ...(actorTeamId !== undefined ? { actorTeamId } : {}),
+    ...(partnerSeatId !== undefined ? { partnerSeatId } : {}),
+    ...(winningSeatIdBeforeDecision !== undefined ? { winningSeatIdBeforeDecision } : {}),
+    ...(winningTeamIdBeforeDecision !== undefined ? { winningTeamIdBeforeDecision } : {}),
+    ...(winningCardBeforeDecision !== undefined ? { winningCardBeforeDecision } : {}),
+    ...(partnerWasWinning !== undefined ? { partnerWasWinning } : {}),
+    ...(actorHandBefore !== undefined ? { actorHandBefore } : {}),
+    ...(selectedCard !== undefined ? { selectedCard } : {}),
+    ...(executionStatus !== undefined ? { executionStatus } : {}),
+    ...(executedAction !== undefined ? { executedAction } : {}),
+    ...(executionReason !== undefined ? { executionReason } : {}),
+    ...(executionError !== undefined ? { executionError } : {}),
+    ...(betCurrentValue !== undefined ? { betCurrentValue } : {}),
+    ...(betPendingValue !== undefined ? { betPendingValue } : {}),
+    ...(betState !== undefined ? { betState } : {}),
+    ...(betRequestedBy !== undefined ? { betRequestedBy } : {}),
+    ...(betSpecialState !== undefined ? { betSpecialState } : {}),
+    ...(betSelectedAction !== undefined ? { betSelectedAction } : {}),
+    ...(betProgressBoost !== undefined ? { betProgressBoost } : {}),
+    ...(betScoreBoost !== undefined ? { betScoreBoost } : {}),
+    ...(betEffectiveStrength !== undefined ? { betEffectiveStrength } : {}),
+    ...(betAcceptThreshold !== undefined ? { betAcceptThreshold } : {}),
+    ...(betRaiseThreshold !== undefined ? { betRaiseThreshold } : {}),
+    ...(betInitiativeThreshold !== undefined ? { betInitiativeThreshold } : {}),
+    ...(betBluffProbability !== undefined ? { betBluffProbability } : {}),
+    ...(betDeclineFloor !== undefined ? { betDeclineFloor } : {}),
+    ...(betMyPointsToWin !== undefined ? { betMyPointsToWin } : {}),
+    ...(betOpponentPointsToWin !== undefined ? { betOpponentPointsToWin } : {}),
+    ...(betDeclineLosesMatch !== undefined ? { betDeclineLosesMatch } : {}),
+    ...(betAcceptRisksMatch !== undefined ? { betAcceptRisksMatch } : {}),
+    ...(betRoundsWonByMe !== undefined ? { betRoundsWonByMe } : {}),
+    ...(betRoundsWonByOpponent !== undefined ? { betRoundsWonByOpponent } : {}),
+    ...(betRoundsTied !== undefined ? { betRoundsTied } : {}),
+    ...(betCurrentRoundIndex !== undefined ? { betCurrentRoundIndex } : {}),
+    ...(seatPlays !== undefined ? { seatPlays } : {}),
+    ...(orderedPlays !== undefined ? { orderedPlays } : {}),
     ...(occurredAt !== undefined ? { occurredAt } : {}),
   };
 }
@@ -441,7 +841,12 @@ function normalizeBotIdentityPayload(value: unknown): BotIdentityPayload | undef
   const avatarKey = asOptionalString(input.avatarKey);
   const profile = asOptionalString(input.profile);
 
-  if (id === undefined || displayName === undefined || avatarKey === undefined || profile === undefined) {
+  if (
+    id === undefined ||
+    displayName === undefined ||
+    avatarKey === undefined ||
+    profile === undefined
+  ) {
     return undefined;
   }
 
@@ -478,12 +883,16 @@ export function normalizeRankingPayload(payload: unknown): RankingPayload {
           const profileId = asOptionalString(item.profileId);
           const userId = asOptionalString(item.userId);
           const displayName = asOptionalString(item.displayName);
+          const publicName = asOptionalString(item.publicName);
+          const publicSlug = asOptionalString(item.publicSlug);
           const rating = typeof item.rating === 'number' ? item.rating : 0;
 
           return {
             ...(profileId !== undefined ? { profileId } : {}),
             ...(userId !== undefined ? { userId } : {}),
             ...(displayName !== undefined ? { displayName } : {}),
+            ...(publicName !== undefined ? { publicName } : {}),
+            ...(publicSlug !== undefined ? { publicSlug } : {}),
             rating,
           };
         })
@@ -544,10 +953,7 @@ export function normalizeRoundTransitionPayload(payload: unknown): RoundTransiti
         isBot: boolean;
       }
     | undefined =
-    seatId !== undefined &&
-    teamId !== undefined &&
-    playerId !== undefined &&
-    isBot !== undefined
+    seatId !== undefined && teamId !== undefined && playerId !== undefined && isBot !== undefined
       ? {
           seatId,
           teamId,
@@ -585,4 +991,20 @@ export function cardStringToPayload(card: string): CardPayload | null {
     rank: normalized.slice(0, -1),
     suit: normalized.slice(-1),
   };
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeNullableNumberField(value: unknown): number | null | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  return asOptionalNumber(value);
 }

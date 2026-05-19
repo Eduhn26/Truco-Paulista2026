@@ -6,16 +6,14 @@ import type {
 import type { CreateMatchResponseDto } from '@game/application/dtos/responses/create-match.response.dto';
 import { Match } from '@game/domain/entities/match';
 
-// Application use case: creates a match and persists it via MatchRepository.
 export class CreateMatchUseCase {
   constructor(private readonly matchRepository: MatchRepository) {}
 
   async execute(request: CreateMatchRequestDto): Promise<CreateMatchResponseDto> {
     const pointsToWin = this.normalizePointsToWin(request.pointsToWin);
 
-    // NOTE:
-    // Match mode is an application/gateway concern for room composition.
-    // It must be validated here, but it must not leak into the Domain aggregate.
+    // Match mode is kept at the application boundary because the Domain aggregate
+    // only owns match rules and scoring, not room composition.
     this.normalizeMode(request.mode);
 
     const match = new Match(pointsToWin);

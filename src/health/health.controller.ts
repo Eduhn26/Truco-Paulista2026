@@ -26,8 +26,8 @@ export class HealthController {
       status: 'ok',
       check: 'liveness',
       service: 'truco-paulista-backend',
-      // NOTE: Liveness must stay dependency-free so orchestrators can distinguish
-      // "the process is alive" from "the infrastructure is ready".
+      // Liveness stays dependency-free so orchestrators can separate process
+      // availability from infrastructure readiness.
       timestamp: new Date().toISOString(),
     };
   }

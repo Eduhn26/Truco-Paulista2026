@@ -1,7 +1,8 @@
 import type { Match } from '../../domain/entities/match';
-import { Round } from '../../domain/entities/round';
+import { Round, type SeatId } from '../../domain/entities/round';
 import type {
   HandBetState,
+  HandMode,
   HandSnapshot,
   HandSpecialState,
   HandValue,
@@ -12,8 +13,18 @@ import type { ViewMatchStateResponseDto } from '../dtos/responses/view-match-sta
 
 type CurrentHandView = NonNullable<ViewMatchStateResponseDto['currentHand']>;
 
+const SEAT_IDS = ['T1A', 'T1B', 'T2A', 'T2B'] as const;
+
 function maskHand(cards: string[]): string[] {
   return cards.map(() => 'HIDDEN');
+}
+
+function isSeatId(value: unknown): value is SeatId {
+  return typeof value === 'string' && SEAT_IDS.includes(value as SeatId);
+}
+
+function getSeatTeam(seatId: SeatId): PlayerId {
+  return seatId.startsWith('T1') ? 'P1' : 'P2';
 }
 
 function canRaiseToTarget(
@@ -25,7 +36,7 @@ function canRaiseToTarget(
     return false;
   }
 
-  if (snapshot.finished || snapshot.specialDecisionPending || snapshot.betState !== 'idle') {
+  if (snapshot.finished || snapshot.specialDecisionPending) {
     return false;
   }
 
@@ -33,14 +44,24 @@ function canRaiseToTarget(
     return false;
   }
 
+  if (snapshot.betState === 'awaiting_response') {
+    if (snapshot.requestedBy === viewerPlayerId) {
+      return false;
+    }
+
+    return snapshot.pendingValue === currentValueRequired;
+  }
+
+  if (snapshot.betState !== 'idle') {
+    return false;
+  }
+
   if (snapshot.currentValue !== currentValueRequired) {
     return false;
   }
 
-  // NOTE: After a raise is accepted, only the accepting side owns the next
-  // escalation window. The projection must follow the authoritative ownership
-  // exported by the hand snapshot instead of exposing escalation controls to
-  // both players.
+  // Escalation ownership comes from the hand snapshot, so the projection does
+  // not expose raise controls to both teams after an accepted bet.
   if (snapshot.currentValue > 1 && snapshot.raiseAuthority !== viewerPlayerId) {
     return false;
   }
@@ -124,6 +145,8 @@ function resolveCurrentRoundIndex(snapshot: HandSnapshot): number {
 }
 
 function resolveLastRoundResult(snapshot: HandSnapshot): RoundResult | null {
+  const expectedPlayCount = snapshot.mode === '2v2' ? 4 : 2;
+
   for (let index = snapshot.rounds.length - 1; index >= 0; index -= 1) {
     const round = snapshot.rounds[index];
 
@@ -131,16 +154,87 @@ function resolveLastRoundResult(snapshot: HandSnapshot): RoundResult | null {
       continue;
     }
 
-    return Round.fromSnapshot(round).getResult();
+    return Round.fromSnapshot(round, expectedPlayCount).getResult();
   }
 
   return null;
+}
+
+function maskSeatHands(
+  seatHands: Partial<Record<SeatId, string[]>>,
+  viewerSeatId?: SeatId,
+): Partial<Record<SeatId, string[]>> {
+  const visibleSeatHands: Partial<Record<SeatId, string[]>> = {};
+
+  for (const seatId of SEAT_IDS) {
+    const cards = seatHands[seatId];
+
+    if (!cards) {
+      continue;
+    }
+
+    visibleSeatHands[seatId] =
+      viewerSeatId === undefined || viewerSeatId === seatId ? cards : maskHand(cards);
+  }
+
+  return visibleSeatHands;
+}
+
+function resolveVisibleTeamHand({
+  viewerPlayerId,
+  viewerSeatId,
+  teamId,
+  fallbackHand,
+  seatHands,
+}: {
+  viewerPlayerId: PlayerId | undefined;
+  viewerSeatId: SeatId | undefined;
+  teamId: PlayerId;
+  fallbackHand: string[];
+  seatHands: Partial<Record<SeatId, string[]>>;
+}): string[] {
+  if (viewerPlayerId === undefined) {
+    return fallbackHand;
+  }
+
+  if (viewerPlayerId !== teamId) {
+    return maskHand(fallbackHand);
+  }
+
+  if (viewerSeatId && getSeatTeam(viewerSeatId) === teamId) {
+    return seatHands[viewerSeatId] ?? fallbackHand;
+  }
+
+  return fallbackHand;
+}
+
+function mapRound(snapshot: HandSnapshot, round: HandSnapshot['rounds'][number]) {
+  const expectedPlayCount = snapshot.mode === '2v2' ? 4 : 2;
+  const restoredRound = Round.fromSnapshot(round, expectedPlayCount);
+  const winningOwnerId = round.finished ? restoredRound.getWinningOwnerId() : null;
+  const winningSeatId = isSeatId(winningOwnerId) ? winningOwnerId : null;
+
+  return {
+    playerOneCard: round.plays.P1 ?? null,
+    playerTwoCard: round.plays.P2 ?? null,
+    result: round.finished ? restoredRound.getResult() : null,
+    finished: round.finished,
+    ...(round.seatPlays ? { seatPlays: round.seatPlays } : {}),
+    orderedPlays: (round.orderedPlays ?? []).map((play) => ({
+      ownerId: play.ownerId,
+      seatId: isSeatId(play.ownerId) ? play.ownerId : null,
+      playerId: play.playerId,
+      card: play.card,
+    })),
+    winningSeatId,
+  };
 }
 
 export function mapMatchToViewMatchState(
   matchId: string,
   match: Match,
   viewerPlayerId?: PlayerId,
+  viewerSeatId?: SeatId,
 ): ViewMatchStateResponseDto {
   const score = match.getScore();
   const currentHand = match.getCurrentHand();
@@ -158,23 +252,28 @@ export function mapMatchToViewMatchState(
   }
 
   const snapshot = currentHand.toSnapshot();
+  const mode: HandMode = snapshot.mode ?? '1v1';
+  const resolvedViewerSeatId = viewerSeatId && isSeatId(viewerSeatId) ? viewerSeatId : undefined;
 
   const playerOneHand = currentHand.getPlayerHand('P1').map((card) => card.toString());
   const playerTwoHand = currentHand.getPlayerHand('P2').map((card) => card.toString());
+  const seatHands = snapshot.seatHands ?? {};
 
-  const visiblePlayerOneHand =
-    viewerPlayerId === undefined
-      ? playerOneHand
-      : viewerPlayerId === 'P1'
-        ? playerOneHand
-        : maskHand(playerOneHand);
+  const visiblePlayerOneHand = resolveVisibleTeamHand({
+    viewerPlayerId,
+    viewerSeatId: resolvedViewerSeatId,
+    teamId: 'P1',
+    fallbackHand: playerOneHand,
+    seatHands,
+  });
 
-  const visiblePlayerTwoHand =
-    viewerPlayerId === undefined
-      ? playerTwoHand
-      : viewerPlayerId === 'P2'
-        ? playerTwoHand
-        : maskHand(playerTwoHand);
+  const visiblePlayerTwoHand = resolveVisibleTeamHand({
+    viewerPlayerId,
+    viewerSeatId: resolvedViewerSeatId,
+    teamId: 'P2',
+    fallbackHand: playerTwoHand,
+    seatHands,
+  });
 
   const availableActions = buildAvailableActions(snapshot, viewerPlayerId);
 
@@ -187,18 +286,16 @@ export function mapMatchToViewMatchState(
     },
     currentHand: {
       viraRank: snapshot.viraRank,
+      mode,
       finished: snapshot.finished,
       viewerPlayerId: viewerPlayerId ?? null,
+      viewerSeatId: resolvedViewerSeatId ?? null,
       currentRoundIndex: resolveCurrentRoundIndex(snapshot),
       lastRoundResult: resolveLastRoundResult(snapshot),
       playerOneHand: visiblePlayerOneHand,
       playerTwoHand: visiblePlayerTwoHand,
-      rounds: snapshot.rounds.map((round) => ({
-        playerOneCard: round.plays.P1 ?? null,
-        playerTwoCard: round.plays.P2 ?? null,
-        result: round.finished ? Round.fromSnapshot(round).getResult() : null,
-        finished: round.finished,
-      })),
+      ...(mode === '2v2' ? { seatHands: maskSeatHands(seatHands, resolvedViewerSeatId) } : {}),
+      rounds: snapshot.rounds.map((round) => mapRound(snapshot, round)),
       currentValue: snapshot.currentValue,
       betState: snapshot.betState as HandBetState,
       pendingValue: snapshot.pendingValue,

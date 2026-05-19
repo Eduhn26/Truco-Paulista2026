@@ -22,6 +22,7 @@ import { RaiseToTwelveUseCase } from '@game/application/use-cases/raise-to-twelv
 import { RequestTrucoUseCase } from '@game/application/use-cases/request-truco.use-case';
 import { SaveMatchRecordUseCase } from '@game/application/use-cases/save-match-record.use-case';
 import { StartHandUseCase } from '@game/application/use-cases/start-hand.use-case';
+import { UpdatePlayerPublicNameUseCase } from '@game/application/use-cases/update-player-public-name.use-case';
 import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.use-case';
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { AuthModule } from '@game/auth/auth.module';
@@ -42,6 +43,7 @@ import { PrismaPlayerProfileRepository } from '@game/infrastructure/persistence/
 import { PrismaUserRepository } from '@game/infrastructure/persistence/prisma-user.repository';
 import { PrismaMatchRepository } from '@game/infrastructure/persistence/prisma/prisma-match.repository';
 import { PrismaModule } from '@game/infrastructure/persistence/prisma/prisma.module';
+import { PlayerProfileController } from '@game/player-profile/player-profile.controller';
 
 import {
   MATCH_RECORD_REPOSITORY,
@@ -53,6 +55,7 @@ const gameModuleLogger = new Logger('GameModule');
 
 @Module({
   imports: [PrismaModule, AuthModule],
+  controllers: [PlayerProfileController],
   providers: [
     GameGateway,
     RoomManager,
@@ -87,8 +90,6 @@ const gameModuleLogger = new Logger('GameModule');
       ): BotDecisionPort => {
         const selectedAdapter = config.enabled ? 'python' : 'heuristic';
 
-        // NOTE: Keep adapter selection observable at module wiring time so runtime
-        // diagnosis can prove which boundary implementation was actually injected.
         gameModuleLogger.log(
           JSON.stringify({
             timestamp: new Date().toISOString(),
@@ -188,6 +189,11 @@ const gameModuleLogger = new Logger('GameModule');
       provide: GetOrCreatePlayerProfileUseCase,
       useFactory: (repo: PlayerProfileRepository) => new GetOrCreatePlayerProfileUseCase(repo),
       inject: [PLAYER_PROFILE_REPOSITORY],
+    },
+    {
+      provide: UpdatePlayerPublicNameUseCase,
+      useFactory: (repo: PrismaPlayerProfileRepository) => new UpdatePlayerPublicNameUseCase(repo),
+      inject: [PrismaPlayerProfileRepository],
     },
     {
       provide: UpdateRatingUseCase,

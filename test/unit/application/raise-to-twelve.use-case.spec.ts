@@ -45,8 +45,8 @@ describe('RaiseToTwelveUseCase (Application)', () => {
     match.start('4');
     match.requestTruco('P1');
     match.acceptBet('P2');
-    match.raiseToSix('P1');
-    match.acceptBet('P2');
+    match.raiseToSix('P2');
+    match.acceptBet('P1');
     match.raiseToNine('P1');
     match.acceptBet('P2');
 
@@ -55,7 +55,7 @@ describe('RaiseToTwelveUseCase (Application)', () => {
 
     const result = await useCase.execute({
       matchId: 'm1',
-      playerId: 'P1',
+      playerId: 'P2',
     });
 
     expect(mocks.save).toHaveBeenCalledWith('m1', match);

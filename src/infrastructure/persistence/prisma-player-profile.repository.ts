@@ -5,6 +5,61 @@ import type {
 } from '@game/application/ports/player-profile.repository';
 import { PrismaService } from './prisma/prisma.service';
 
+type PlayerProfileRowWithUser = {
+  id: string;
+  userId: string;
+  publicName: string | null;
+  publicSlug: string | null;
+  rating: number;
+  wins: number;
+  losses: number;
+  matchesPlayed: number;
+  user: {
+    displayName: string | null;
+  };
+};
+
+const MAX_PUBLIC_NAME_LENGTH = 32;
+
+function normalizePublicName(displayName: string | null | undefined): string | null {
+  const normalized = displayName?.trim().replace(/\s+/g, ' ') ?? '';
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, MAX_PUBLIC_NAME_LENGTH);
+}
+
+function buildPublicSlug(publicName: string, userId: string): string {
+  const base = publicName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  const safeBase = base || 'jogador';
+
+  return `${safeBase}-${userId.slice(0, 8)}`;
+}
+
+function toSnapshot(row: PlayerProfileRowWithUser): PlayerProfileSnapshot {
+  const effectiveDisplayName = row.publicName ?? row.user.displayName;
+
+  return {
+    id: row.id,
+    userId: row.userId,
+    displayName: effectiveDisplayName,
+    publicName: row.publicName,
+    publicSlug: row.publicSlug,
+    rating: row.rating,
+    wins: row.wins,
+    losses: row.losses,
+    matchesPlayed: row.matchesPlayed,
+  };
+}
+
 @Injectable()
 export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -25,20 +80,24 @@ export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
       return null;
     }
 
-    return {
-      id: row.id,
-      userId: row.userId,
-      displayName: row.user.displayName,
-      rating: row.rating,
-      wins: row.wins,
-      losses: row.losses,
-      matchesPlayed: row.matchesPlayed,
-    };
+    return toSnapshot(row);
   }
 
   async createForUser(userId: string): Promise<PlayerProfileSnapshot> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true },
+    });
+
+    const publicName = normalizePublicName(user?.displayName);
+    const publicSlug = publicName ? buildPublicSlug(publicName, userId) : null;
+
     const row = await this.prisma.playerProfile.create({
-      data: { userId },
+      data: {
+        userId,
+        ...(publicName ? { publicName } : {}),
+        ...(publicSlug ? { publicSlug } : {}),
+      },
       include: {
         user: {
           select: {
@@ -48,15 +107,42 @@ export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
       },
     });
 
-    return {
-      id: row.id,
-      userId: row.userId,
-      displayName: row.user.displayName,
-      rating: row.rating,
-      wins: row.wins,
-      losses: row.losses,
-      matchesPlayed: row.matchesPlayed,
-    };
+    return toSnapshot(row);
+  }
+
+  async updatePublicNameForUser(
+    userId: string,
+    publicName: string,
+  ): Promise<PlayerProfileSnapshot> {
+    const normalizedPublicName = normalizePublicName(publicName);
+
+    if (!normalizedPublicName) {
+      throw new Error('publicName is required');
+    }
+
+    const publicSlug = buildPublicSlug(normalizedPublicName, userId);
+
+    const row = await this.prisma.playerProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        publicName: normalizedPublicName,
+        publicSlug,
+      },
+      update: {
+        publicName: normalizedPublicName,
+        publicSlug,
+      },
+      include: {
+        user: {
+          select: {
+            displayName: true,
+          },
+        },
+      },
+    });
+
+    return toSnapshot(row);
   }
 
   async save(profile: PlayerProfileSnapshot): Promise<void> {
@@ -84,14 +170,6 @@ export class PrismaPlayerProfileRepository implements PlayerProfileRepository {
       },
     });
 
-    return rows.map((row) => ({
-      id: row.id,
-      userId: row.userId,
-      displayName: row.user.displayName,
-      rating: row.rating,
-      wins: row.wins,
-      losses: row.losses,
-      matchesPlayed: row.matchesPlayed,
-    }));
+    return rows.map(toSnapshot);
   }
 }

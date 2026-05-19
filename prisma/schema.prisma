@@ -39,6 +39,8 @@ model PlayerProfile {
   id            String   @id @default(cuid())
   userId        String   @unique
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicName    String?
+  publicSlug    String?  @unique
   rating        Int      @default(1000)
   wins          Int      @default(0)
   losses        Int      @default(0)

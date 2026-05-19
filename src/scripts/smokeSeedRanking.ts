@@ -102,8 +102,7 @@ async function main(): Promise<void> {
   console.log('[smoke:ranking] connecting to database...');
   await prisma.$connect();
 
-  // NOTE: These users live behind a dedicated provider namespace so the smoke
-  // seed is easy to recognize in the UI and easy to clean up later if needed.
+  // Smoke users use a dedicated provider namespace so local/test data stays easy to identify and remove.
   for (const entry of smokeEntries) {
     await upsertSmokeEntry(entry);
   }

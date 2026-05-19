@@ -127,6 +127,13 @@ export function buildMatchScreenViewModel({
   eventLog,
   liveTableTransition,
 }: BuildMatchScreenViewModelParams): MatchScreenViewModel {
+  const pendingPlayedCardValue =
+    liveTableTransition.pendingPlayedCard?.owner === 'mine'
+      ? displayedMyPlayedCard
+      : liveTableTransition.pendingPlayedCard?.owner === 'opponent'
+        ? displayedOpponentPlayedCard
+        : null;
+
   return {
     headerProps: {
       connectionStatus,
@@ -156,9 +163,6 @@ export function buildMatchScreenViewModel({
       specialDecisionBy: viewModel.specialDecisionBy,
       winner: viewModel.winner,
       awardedPoints: viewModel.awardedPoints,
-      latestRound: viewModel.latestRound,
-      latestRoundMyPlayedCard: viewModel.myPlayedCard,
-      latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
       displayedResolvedRoundFinished: liveTableTransition.isResolvingRound,
       displayedResolvedRoundResult: liveTableTransition.isResolvingRound
         ? liveTableTransition.resolvedRoundResult
@@ -180,6 +184,14 @@ export function buildMatchScreenViewModel({
           : 0,
       myCardLaunching:
         liveTableTransition.pendingPlayedCard?.owner === 'mine' && !viewModel.myPlayedCard,
+      pendingPlayedCard:
+        liveTableTransition.pendingPlayedCard && pendingPlayedCardValue
+          ? {
+              owner: liveTableTransition.pendingPlayedCard.owner,
+              id: liveTableTransition.pendingPlayedCard.id,
+              card: pendingPlayedCardValue,
+            }
+          : null,
       roundIntroKey: liveTableTransition.roundIntroKey,
       roundResolvedKey: liveTableTransition.roundResolvedKey,
       currentPrivateViraRank: viewModel.currentPrivateHand?.viraRank ?? null,
@@ -195,6 +207,9 @@ export function buildMatchScreenViewModel({
       isMyTurn: viewModel.currentTurnSeatId === viewModel.mySeat,
       isResolvingRound: liveTableTransition.isResolvingRound,
       closingTableCards: liveTableTransition.closingTableCards,
+      latestRound: viewModel.latestRound,
+      latestRoundMyPlayedCard: viewModel.myPlayedCard,
+      latestRoundOpponentPlayedCard: viewModel.opponentPlayedCard,
     },
     secondaryToggleLabel: `${showSecondary ? '▲' : '▼'} Painel técnico`,
     showSecondary,
