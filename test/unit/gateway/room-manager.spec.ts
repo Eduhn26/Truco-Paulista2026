@@ -53,6 +53,66 @@ describe('RoomManager (2v2)', () => {
     expect(p4.seatId).toBe('T2B');
   });
 
+  it('places an invited friend in the host team when the private room reserves T1B', () => {
+    const roomManager = new RoomManager();
+
+    const host = roomManager.join('match-1', 'socket-1', identity('host-user', 'host-token'));
+
+    roomManager.reserveNextHumanSeat('match-1', 'T1B');
+
+    const friend = roomManager.join('match-1', 'socket-2', identity('friend-user', 'friend-token'));
+
+    const roomState = roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(host.seatId).toBe('T1A');
+    expect(friend.seatId).toBe('T1B');
+    expect(friend.teamId).toBe('T1');
+    expect(roomState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        isBot: false,
+        userId: 'host-user',
+      }),
+      expect.objectContaining({ seatId: 'T2A', isBot: true }),
+      expect.objectContaining({
+        seatId: 'T1B',
+        isBot: false,
+        userId: 'friend-user',
+      }),
+      expect.objectContaining({ seatId: 'T2B', isBot: true }),
+    ]);
+  });
+
+  it('places an invited friend as the opponent when the private room reserves T2A', () => {
+    const roomManager = new RoomManager();
+
+    const host = roomManager.join('match-1', 'socket-1', identity('host-user', 'host-token'));
+
+    roomManager.reserveNextHumanSeat('match-1', 'T2A');
+
+    const friend = roomManager.join('match-1', 'socket-2', identity('friend-user', 'friend-token'));
+
+    const roomState = roomManager.fillMissingSeatsWithBots('match-1');
+
+    expect(host.seatId).toBe('T1A');
+    expect(friend.seatId).toBe('T2A');
+    expect(friend.teamId).toBe('T2');
+    expect(roomState.players).toEqual([
+      expect.objectContaining({
+        seatId: 'T1A',
+        isBot: false,
+        userId: 'host-user',
+      }),
+      expect.objectContaining({
+        seatId: 'T2A',
+        isBot: false,
+        userId: 'friend-user',
+      }),
+      expect.objectContaining({ seatId: 'T1B', isBot: true }),
+      expect.objectContaining({ seatId: 'T2B', isBot: true }),
+    ]);
+  });
+
   it('rejects a fifth player because the match is full', () => {
     const roomManager = new RoomManager();
 
@@ -714,7 +774,9 @@ describe('RoomManager beginHand opener', () => {
   it('honors an explicit starting seat hint', () => {
     const roomManager = seedOneVsOneRoom();
 
-    const started = roomManager.beginHand('match-opener', { startingSeatId: 'T2A' });
+    const started = roomManager.beginHand('match-opener', {
+      startingSeatId: 'T2A',
+    });
 
     expect(started.currentTurnSeatId).toBe('T2A');
   });
@@ -722,7 +784,9 @@ describe('RoomManager beginHand opener', () => {
   it('lets P1 open when P1 lost the previous hand', () => {
     const roomManager = seedOneVsOneRoom();
 
-    const started = roomManager.beginHand('match-opener', { lastLoserPlayerId: 'P1' });
+    const started = roomManager.beginHand('match-opener', {
+      lastLoserPlayerId: 'P1',
+    });
 
     expect(started.currentTurnSeatId).toBe('T1A');
   });
@@ -730,7 +794,9 @@ describe('RoomManager beginHand opener', () => {
   it('lets P2 open when P2 lost the previous hand', () => {
     const roomManager = seedOneVsOneRoom();
 
-    const started = roomManager.beginHand('match-opener', { lastLoserPlayerId: 'P2' });
+    const started = roomManager.beginHand('match-opener', {
+      lastLoserPlayerId: 'P2',
+    });
 
     expect(started.currentTurnSeatId).toBe('T2A');
   });

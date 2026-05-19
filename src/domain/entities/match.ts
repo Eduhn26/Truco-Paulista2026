@@ -1,11 +1,12 @@
 import type { Card } from '../value-objects/card';
 import type { MatchState } from '../value-objects/match-state';
 import type { PlayerId } from '../value-objects/player-id';
+import type { SeatId } from './round';
 import type { Rank } from '../value-objects/rank';
 
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
 import { Score } from '../value-objects/score';
-import { Hand, type HandSnapshot } from './hand';
+import { Hand, type HandMode, type HandSnapshot } from './hand';
 
 export type MatchSnapshot = {
   pointsToWin: number;
@@ -46,7 +47,7 @@ export class Match {
     return this.currentHand;
   }
 
-  start(viraRank?: Rank): void {
+  start(viraRank?: Rank, mode: HandMode = '1v1'): void {
     if (this.state === 'finished') {
       throw new InvalidMoveError('Match is already finished.');
     }
@@ -57,15 +58,15 @@ export class Match {
 
     this.currentHand =
       viraRank !== undefined
-        ? Hand.start(viraRank, this.buildInitialHandState())
-        : Hand.startRandom(this.buildInitialHandState());
+        ? Hand.start(viraRank, this.buildInitialHandState(), mode)
+        : Hand.startRandom(this.buildInitialHandState(), mode);
     this.state = 'in_progress';
   }
 
-  play(player: PlayerId, card: Card): void {
+  play(player: PlayerId, card: Card, options: { seatId?: SeatId } = {}): void {
     const currentHand = this.ensureCurrentHandInProgress();
 
-    currentHand.play(player, card);
+    currentHand.play(player, card, options);
     this.resolveFinishedHandIfNeeded();
   }
 
@@ -181,10 +182,7 @@ export class Match {
 
     const matchWinner = this.score.hasWinner(this.pointsToWin);
 
-    // NOTE: Keep the finished hand attached until the next explicit start().
-    // This preserves the authoritative "hand finished" state for transport/UI,
-    // allowing the gateway/frontend to observe start-next-hand instead of
-    // collapsing immediately to waiting + null hand.
+    // Keep the finished hand attached so transport can publish the final state before the next start.
     if (matchWinner) {
       this.state = 'finished';
       return;

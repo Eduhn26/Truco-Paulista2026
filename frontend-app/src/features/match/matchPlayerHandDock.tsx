@@ -22,16 +22,20 @@ type Props = {
   onCardElementChange?: ((cardKey: string, element: HTMLButtonElement | null) => void) | undefined;
 };
 
-// CHANGE (debt #2 — cards clipped at the bottom of the viewport):
-// The dock itself was sized correctly, but the page-level wrappers
-// (h-screen + overflow-hidden + tight pb on <main>) clipped the bottom
-// edge of the player's cards on 1366×768 / 100% zoom. Patch is two-pronged:
-//   • bump the dock's reserved height so the hover lift always has
-//     headroom inside the panel (220 vs. previous 196 — covers the longest
-//     hover lift +28px tail);
-//   • add 28px paddingBottom on the outer wrapper so the cards never
-//     touch the next outer overflow-hidden boundary even when a parent
-//     decides to be aggressive.
+// CHANGE (audit 2v2 D — hand must always fit at 100% zoom):
+//
+// Audit footage at 1920×1040 showed the bottom row of cards getting clipped
+// by the viewport — the dock was right-sized for the panel but the outer
+// page layout (gold-frame inside main inside body, all min-h-0/flex-1)
+// could push the dock into the cropped area when the inner column got
+// tall (top nameplate + partner stack + center area + dock + cue plate
+// reservation).
+//
+// Fix here: tighten the dock's outer wrapper so it never adds avoidable
+// height, and bump the upper safety margin so the new larger
+// `PlayerHandTurnCue` plate (32px tall + label spacing) clears the cards
+// without overlapping. Bottom padding remains intentionally light — the
+// page's <main> already reserves breathing room with `pb-4 md:pb-6`.
 //
 // CHANGE (debt #8 — duplicate "Em turno" pill):
 // The "Em turno" badge in the dock duplicated the larger
@@ -49,6 +53,7 @@ export function MatchPlayerHandDock({
   currentPublicHand,
   onPlayCard,
   isMyTurn,
+  isOneVsOne,
   viraRank,
   isSubdued = false,
   isDecisionFocus = false,
@@ -57,18 +62,28 @@ export function MatchPlayerHandDock({
 }: Props) {
   const isInteractive = tablePhase === 'playing' && myCards.length > 0;
   const handCount = myCards.length;
+  const isCompactTwoVersusTwo = !isOneVsOne;
   const shouldElevateDecision = isDecisionFocus && handCount > 0;
 
   return (
     <motion.div
       layout
-      // CHANGE (debt #2): pb-7 reserves outer headroom so the bottom of the
-      // fan never gets clipped by the page's overflow boundary, regardless
-      // of viewport height.
-      className="relative mx-auto w-full max-w-[1080px] px-2 pb-7"
+      // CHANGE (audit 2v2 D — viewport sizing):
+      //   • px-2 → px-2 (kept)
+      //   • pb-3 → pb-2 (-4px). The page's <main> already reserves room.
+      //   • pt-7 added so the new larger PlayerHandTurnCue plate (32px
+      //     tall + label) sits above the cards without overlap. The plate
+      //     is positioned with `top: 0` of the absolute cue layer, but
+      //     the cue layer extends `top-0 bottom-1` of the dock — pt-7
+      //     reserves vertical space inside the dock for the plate to
+      //     breathe over the cards.
+      // Net change: same total height envelope, +28px headroom for the
+      // cue, less wasted space below — cards always inside the viewport
+      // at 1080p / 100% zoom.
+      className="relative mx-auto w-full max-w-[1080px] px-1 pb-0 pt-2 sm:px-2 sm:pb-2 sm:pt-7"
       initial={false}
       animate={{
-        y: shouldElevateDecision ? -6 : isSubdued ? 4 : isInteractive ? -4 : -2,
+        y: shouldElevateDecision ? (isCompactTwoVersusTwo ? -3 : -6) : isSubdued ? 4 : isInteractive ? (isCompactTwoVersusTwo ? -2 : -4) : -2,
         opacity: shouldElevateDecision ? 1 : isSubdued ? 0.46 : 1,
         scale: shouldElevateDecision ? 1.015 : isSubdued ? 0.97 : 1,
       }}
@@ -79,7 +94,7 @@ export function MatchPlayerHandDock({
           aria-hidden
           className="pointer-events-none absolute inset-x-[4%] bottom-0 z-0"
           style={{
-            height: 132,
+            height: isCompactTwoVersusTwo ? 92 : 132,
             borderTopLeftRadius: '50% 60%',
             borderTopRightRadius: '50% 60%',
             background:
@@ -96,7 +111,7 @@ export function MatchPlayerHandDock({
       ) : null}
 
       <div
-        className="pointer-events-none absolute inset-x-[14%] -top-2 z-0 h-12 rounded-full transition-opacity duration-300"
+        className={`pointer-events-none absolute inset-x-[14%] ${isCompactTwoVersusTwo ? '-top-1 h-9' : '-top-2 h-12'} z-0 rounded-full transition-opacity duration-300`}
         style={{
           opacity: shouldElevateDecision ? 1 : isMyTurn ? 0.9 : 0.3,
           background: shouldElevateDecision
@@ -132,10 +147,16 @@ export function MatchPlayerHandDock({
 
       {actionSurface ? <div className="relative z-10 mb-1 w-full">{actionSurface}</div> : null}
 
-      {/* CHANGE (debt #2): minHeight 220 (was 196) — accommodates the panel's
-          inner 188px container plus the hover lift (~26px) without ever
-          relying on parent overflow. */}
-      <div className="relative z-10" style={{ minHeight: 220 }}>
+      {/* NOTE: Mobile uses a shorter envelope so the hand stays fully
+          clickable inside the fixed match arena. Desktop breakpoints keep
+          the approved spacious hand treatment. */}
+      <div
+        className={
+          isCompactTwoVersusTwo
+            ? 'relative z-10 min-h-[96px] sm:min-h-[104px] md:min-h-[126px]'
+            : 'relative z-10 min-h-[132px] sm:min-h-[156px] md:min-h-[220px]'
+        }
+      >
         <MatchPlayerHandPanel
           myCards={myCards}
           canPlayCard={canPlayCard}
@@ -147,9 +168,12 @@ export function MatchPlayerHandDock({
           isMyTurn={isMyTurn}
           viraRank={viraRank}
           isDecisionFocus={shouldElevateDecision}
+          isCompactTable={isCompactTwoVersusTwo}
           onCardElementChange={onCardElementChange}
         />
       </div>
     </motion.div>
   );
 }
+
+

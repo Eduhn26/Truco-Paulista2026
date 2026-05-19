@@ -3,8 +3,12 @@ import { io, type Socket } from 'socket.io-client';
 import {
   normalizeCardPlayedPayload,
   normalizeHandStartedPayload,
+  normalizeMatchFoundPayload,
   normalizeMatchStatePayload,
   normalizePlayerAssignedPayload,
+  normalizeQueueLeftPayload,
+  normalizeQueueSnapshotPayload,
+  normalizeQueueTimeoutPayload,
   normalizeRankingPayload,
   normalizeRoomStatePayload,
   normalizeRoundTransitionPayload,
@@ -17,6 +21,8 @@ type ConnectOptions = {
   backendUrl: string;
   authToken: string;
 };
+
+export type PrivateFriendPlacement = 'same-team' | 'opposite-team';
 
 export class GameSocketClient {
   private socket: Socket | null = null;
@@ -53,6 +59,34 @@ export class GameSocketClient {
 
     socket.on('player-assigned', (payload: unknown) => {
       events.onPlayerAssigned?.(normalizePlayerAssignedPayload(payload));
+    });
+
+    socket.on('room-left', (payload: unknown) => {
+      const candidate =
+        payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const matchId = typeof candidate.matchId === 'string' ? candidate.matchId : '';
+
+      events.onRoomLeft?.({ matchId });
+    });
+
+    socket.on('queue-joined', (payload: unknown) => {
+      events.onQueueJoined?.(normalizeQueueSnapshotPayload(payload));
+    });
+
+    socket.on('queue-state', (payload: unknown) => {
+      events.onQueueState?.(normalizeQueueSnapshotPayload(payload));
+    });
+
+    socket.on('queue-left', (payload: unknown) => {
+      events.onQueueLeft?.(normalizeQueueLeftPayload(payload));
+    });
+
+    socket.on('queue-timeout', (payload: unknown) => {
+      events.onQueueTimeout?.(normalizeQueueTimeoutPayload(payload));
+    });
+
+    socket.on('match-found', (payload: unknown) => {
+      events.onMatchFound?.(normalizeMatchFoundPayload(payload));
     });
 
     socket.on('room-state', (payload: unknown) => {
@@ -100,8 +134,47 @@ export class GameSocketClient {
     this.socket?.emit('create-match', { mode, pointsToWin });
   }
 
+  emitCreateFlexibleRoom(mode: '1v1' | '2v2' = '2v2', pointsToWin = 12): void {
+    this.socket?.emit('create-flexible-room', { mode, pointsToWin });
+  }
+
+  emitCreatePrivateMatch(
+    friendPlacement: PrivateFriendPlacement = 'opposite-team',
+    pointsToWin = 12,
+  ): void {
+    this.socket?.emit('create-private-match', {
+      mode: '2v2',
+      pointsToWin,
+      friendPlacement,
+    });
+  }
+
+  emitCreateHumanOneVsOneRoom(pointsToWin = 12): void {
+    this.socket?.emit('create-human-1v1-room', { pointsToWin });
+  }
+
   emitJoinMatch(matchId: string): void {
     this.socket?.emit('join-match', { matchId });
+  }
+
+  emitLeaveMatch(): void {
+    this.socket?.emit('leave-match');
+  }
+
+  emitSelectSeat(matchId: string, seatId: string): void {
+    this.socket?.emit('select-seat', { matchId, seatId });
+  }
+
+  emitJoinQueue(mode: '1v1' | '2v2'): void {
+    this.socket?.emit('join-queue', { mode });
+  }
+
+  emitLeaveQueue(): void {
+    this.socket?.emit('leave-queue');
+  }
+
+  emitGetQueueState(mode: '1v1' | '2v2'): void {
+    this.socket?.emit('get-queue-state', { mode });
   }
 
   emitSetReady(ready: boolean): void {

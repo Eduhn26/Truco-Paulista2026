@@ -32,11 +32,9 @@ type UseMatchActionBridgeParams = {
   emitDeclineMaoDeOnze: (matchId: string) => void;
   beginHandTransition: () => void;
   beginOwnCardLaunch: (params: { cardKey: string; serverCard: string }) => void;
-  // P0 turn-gate context. Must be sourced from the authoritative view model
-  // (currentTurnSeatId, nextDecisionType, tablePhase, isResolvingRound) so
-  // the bridge can refuse a play-card emission when the visual UI temporarily
-  // disagrees with the authoritative state.
+  // Final authority guard used before card actions leave the UI layer.
   currentTurnSeatId: string | null;
+  viewerCanActNow: boolean;
   nextDecisionType: string | null;
   tablePhase: TablePhase;
   isResolvingRound: boolean;
@@ -76,6 +74,7 @@ export function useMatchActionBridge(
     beginHandTransition,
     beginOwnCardLaunch,
     currentTurnSeatId,
+    viewerCanActNow,
     nextDecisionType,
     tablePhase,
     isResolvingRound,
@@ -118,21 +117,16 @@ export function useMatchActionBridge(
 
         pendingPlayCardEmissionRef.current = null;
 
-        // NOTE: Starting a new hand is the one place where a full table reset is expected.
+        // Starting a hand intentionally resets the local table before the next snapshot lands.
         beginHandTransition();
         emitStartHand(resolvedMatchId);
         appendLog(`Emitted start-hand (${resolvedMatchId}).`);
       },
 
       handlePlayCard(card: CardPayload): void {
-        // NOTE (P0 — authoritative turn gate): the bridge is the last line of
-        // defense before a play-card socket emission. The panel already gates
-        // by canPlayCard + isMyTurn + tablePhase, but a click can still slip
-        // through during the tiny window where the visual state lags the
-        // authoritative state (e.g., right after a round resolves on the
-        // server but the resolution hold has not yet expired locally).
-        // Refusing here prevents the "It is not this player turn" server
-        // error and keeps the backend authoritative.
+        // The bridge is the final guard before a play-card socket emission. It
+        // rejects clicks that slip through while the visual table is still
+        // catching up to the backend-authoritative state.
         if (!resolvedMatchId || !mySeat) {
           appendLog('Cannot play card: missing match context.');
           return;
@@ -143,7 +137,7 @@ export function useMatchActionBridge(
           return;
         }
 
-        if (currentTurnSeatId !== mySeat) {
+        if (!viewerCanActNow && currentTurnSeatId !== mySeat) {
           appendLog(
             `Ignored play-card: turn belongs to ${currentTurnSeatId ?? 'no one'}, not ${mySeat}.`,
           );
@@ -211,8 +205,42 @@ export function useMatchActionBridge(
 
         switch (action) {
           case 'request-truco': {
+            if (!mySeat) {
+              appendLog('Cannot request truco: missing seat context.');
+              return;
+            }
+
             if (!availableActions.canRequestTruco) {
               appendLog('Cannot request truco in the current state.');
+              return;
+            }
+
+            if (!viewerCanActNow && currentTurnSeatId !== mySeat) {
+              appendLog(
+                `Ignored request-truco: turn belongs to ${currentTurnSeatId ?? 'no one'}, not ${mySeat}.`,
+              );
+              return;
+            }
+
+            if (nextDecisionType !== 'play-card') {
+              appendLog(`Ignored request-truco: nextDecisionType=${nextDecisionType ?? 'idle'}.`);
+              return;
+            }
+
+            if (tablePhase !== 'playing') {
+              appendLog(`Ignored request-truco: tablePhase=${tablePhase}.`);
+              return;
+            }
+
+            if (isResolvingRound) {
+              appendLog('Ignored request-truco: a round is currently resolving.');
+              return;
+            }
+
+            if (isTableInteractionLocked) {
+              appendLog(
+                'Ignored request-truco: table interaction is locked by a visual transition.',
+              );
               return;
             }
 
@@ -325,6 +353,7 @@ export function useMatchActionBridge(
       beginHandTransition,
       beginOwnCardLaunch,
       currentTurnSeatId,
+      viewerCanActNow,
       nextDecisionType,
       tablePhase,
       isResolvingRound,

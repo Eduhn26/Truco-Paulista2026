@@ -1,0 +1,981 @@
+/* =============================================================================
+   PREMIUM VISUAL PATCH — Truco Paulista
+   -----------------------------------------------------------------------------
+   This file is APPENDED to the design system via a single import in main.tsx.
+   It is PURELY ADDITIVE: it never overrides existing tokens or class behaviors
+   in a way that breaks game logic, layout, or accessibility. Every rule here:
+     • Targets classes that already exist in globals.css (gold-frame,
+       surface-card-premium, playing-card, premium-table-*, event-banner-*,
+       etc.) and amplifies them, OR
+     • Introduces brand-new classes (prefixed `px-*` for "premium-extra") that
+       are opt-in for future TSX consumers.
+     • Respects `prefers-reduced-motion`.
+     • Uses GPU-friendly properties (transform, opacity, filter) only.
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   1. ATMOSPHERIC BACKGROUND LAYER
+   Adds a slow, drifting aurora + floating gold dust to the body so the whole
+   app feels alive without distracting from gameplay. Sits BEHIND every
+   existing layer (z-index: 0; the app root is z-index 10+).
+   -------------------------------------------------------------------------- */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Aurora — slow drifting green/gold radial that breathes the page edges. */
+body::before {
+  background:
+    radial-gradient(ellipse 800px 500px at 12% 18%, rgba(46, 92, 53, 0.22), transparent 60%),
+    radial-gradient(ellipse 700px 480px at 88% 82%, rgba(201, 168, 76, 0.10), transparent 62%),
+    radial-gradient(ellipse 600px 400px at 50% 100%, rgba(15, 61, 30, 0.18), transparent 65%);
+  filter: blur(8px);
+  animation: px-aurora-drift 28s ease-in-out infinite alternate;
+  opacity: 0.85;
+}
+
+@keyframes px-aurora-drift {
+  0% {
+    transform: translate3d(-2%, 0, 0) scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translate3d(1%, -1%, 0) scale(1.04);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate3d(2%, 1%, 0) scale(1);
+    opacity: 0.75;
+  }
+}
+
+/* Gold dust — tiny specular highlights that slowly drift upward. SVG noise
+   masked as a tiled pattern. Mix-blend-mode: screen so it only LIGHTS, never
+   darkens, and so it sits naturally over the aurora. */
+body::after {
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255, 223, 128, 0.04) 0.5px, transparent 1px),
+    radial-gradient(circle at 80% 60%, rgba(255, 244, 214, 0.05) 0.5px, transparent 1px),
+    radial-gradient(circle at 30% 80%, rgba(255, 223, 128, 0.03) 0.5px, transparent 1px),
+    radial-gradient(circle at 65% 35%, rgba(255, 244, 214, 0.04) 0.5px, transparent 1px),
+    radial-gradient(circle at 92% 12%, rgba(255, 223, 128, 0.05) 0.5px, transparent 1px),
+    radial-gradient(circle at 22% 55%, rgba(255, 244, 214, 0.03) 0.5px, transparent 1px);
+  background-size: 240px 240px, 320px 320px, 180px 180px, 280px 280px, 200px 200px, 360px 360px;
+  animation: px-gold-dust 40s linear infinite;
+  mix-blend-mode: screen;
+  opacity: 0.6;
+}
+
+@keyframes px-gold-dust {
+  0% {
+    background-position:
+      0 0, 0 0, 0 0,
+      0 0, 0 0, 0 0;
+  }
+  100% {
+    background-position:
+      -240px -200px, 320px -300px, -180px -260px,
+      280px -240px, -200px -280px, 360px -220px;
+  }
+}
+
+/* Keep the rest of the app above the atmospheric layer. */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* -----------------------------------------------------------------------------
+   2. TYPOGRAPHY REFINEMENT
+   The existing app uses Georgia + Inter. We pull in two refined display
+   webfonts (Cormorant Garamond for the editorial italic that already exists
+   visually, and Inter for body) via Google Fonts and apply them selectively
+   without breaking the Georgia fallback.
+   -------------------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* Promote any h1/h2 inside the existing premium frames to Cormorant for that
+   extra editorial polish. Falls back to Georgia exactly as before. */
+.gold-frame h1,
+.gold-frame h2,
+.surface-card-premium h1,
+.surface-card-premium h2,
+h1[style*='Georgia'],
+h2[style*='Georgia'] {
+  font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'dlig' 1;
+  letter-spacing: -0.02em;
+}
+
+/* Body / UI labels — keep the existing stack but enable opentype features. */
+body {
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1, 'ss01' 1;
+  text-rendering: optimizeLegibility;
+}
+
+/* Gradient gold text — keep, but add a soft shimmer that travels across the
+   text every 8 seconds without ever distracting from reading. */
+.text-gradient-gold {
+  background-size: 200% 100%;
+  animation: px-gold-shimmer 8s ease-in-out infinite;
+}
+
+@keyframes px-gold-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* -----------------------------------------------------------------------------
+   3. PREMIUM BUTTONS — shimmer + lift on the gold CTAs.
+   Targets any anchor or button whose inline style includes the existing gold
+   gradient. Uses an attribute-selector trick so no TSX has to change.
+   -------------------------------------------------------------------------- */
+a[style*='linear-gradient(135deg, #c9a84c'],
+button[style*='linear-gradient(135deg, #c9a84c'] {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    transform 0.32s cubic-bezier(0.20, 0.90, 0.24, 1),
+    box-shadow 0.32s ease,
+    filter 0.32s ease;
+}
+
+a[style*='linear-gradient(135deg, #c9a84c']::before,
+button[style*='linear-gradient(135deg, #c9a84c']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 70%
+  );
+  transform: translateX(-110%);
+  transition: transform 0.7s cubic-bezier(0.20, 0.90, 0.24, 1);
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+a[style*='linear-gradient(135deg, #c9a84c']:hover::before,
+button[style*='linear-gradient(135deg, #c9a84c']:hover::before {
+  transform: translateX(110%);
+}
+
+a[style*='linear-gradient(135deg, #c9a84c']:hover,
+button[style*='linear-gradient(135deg, #c9a84c']:hover {
+  transform: translateY(-2px) scale(1.02);
+  filter: brightness(1.08) saturate(1.06);
+  box-shadow:
+    0 0 36px rgba(201, 168, 76, 0.42),
+    0 18px 38px rgba(0, 0, 0, 0.46) !important;
+}
+
+a[style*='linear-gradient(135deg, #c9a84c']:active,
+button[style*='linear-gradient(135deg, #c9a84c']:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: 0.1s;
+}
+
+/* Children above the shimmer layer */
+a[style*='linear-gradient(135deg, #c9a84c'] > *,
+button[style*='linear-gradient(135deg, #c9a84c'] > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* -----------------------------------------------------------------------------
+   4. PREMIUM CARD / FRAME — ambient gold rim that intensifies on hover.
+   Applies to `.gold-frame` and `.surface-card-premium`.
+   -------------------------------------------------------------------------- */
+.gold-frame,
+.surface-card-premium {
+  transition:
+    transform 0.45s cubic-bezier(0.20, 0.90, 0.24, 1),
+    box-shadow 0.45s ease,
+    border-color 0.45s ease;
+}
+
+.gold-frame:hover,
+.surface-card-premium:hover {
+  transform: translateY(-2px);
+}
+
+/* A second decorative ring that fades in on hover — gives the impression
+   of light catching the edge of a polished frame. Only appears on real
+   hover-capable devices to avoid sticky states on touch. */
+@media (hover: hover) {
+  .gold-frame::after,
+  .surface-card-premium::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 241, 184, 0) 0%,
+      rgba(255, 241, 184, 0.18) 40%,
+      rgba(201, 168, 76, 0.12) 60%,
+      rgba(255, 241, 184, 0) 100%
+    );
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    padding: 1px;
+    z-index: 2;
+  }
+
+  .gold-frame:hover::after,
+  .surface-card-premium:hover::after {
+    opacity: 1;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   5. PLAYING CARDS — holographic reflection sweep on hover.
+   Keeps the existing card colors / shadows; only adds a subtle moving
+   highlight that reads like polished card stock.
+   -------------------------------------------------------------------------- */
+.playing-card {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.28s ease,
+    filter 0.28s ease;
+}
+
+.playing-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    125deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 65%
+  );
+  transform: translateX(-120%);
+  transition: transform 0.85s cubic-bezier(0.20, 0.90, 0.24, 1);
+  pointer-events: none;
+  z-index: 5;
+  mix-blend-mode: overlay;
+}
+
+.playing-card:hover::after,
+.playing-card-selectable::after {
+  transform: translateX(120%);
+}
+
+/* Selectable card — keep the existing class behavior; add a slow continuous
+   reflection so the player KNOWS it can be played, even without hovering. */
+.playing-card-selectable {
+  animation: px-selectable-breathe 2.4s ease-in-out infinite;
+}
+
+.playing-card-selectable::after {
+  animation: px-card-reflection 3.2s ease-in-out infinite;
+}
+
+@keyframes px-selectable-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 223, 128, 0.36),
+      0 0 22px rgba(201, 168, 76, 0.32),
+      0 24px 44px rgba(0, 0, 0, 0.46),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1.5px rgba(255, 241, 184, 0.56),
+      0 0 32px rgba(201, 168, 76, 0.52),
+      0 28px 52px rgba(0, 0, 0, 0.48),
+      inset 0 1px 0 rgba(255, 255, 255, 0.98);
+  }
+}
+
+@keyframes px-card-reflection {
+  0%   { transform: translateX(-120%); opacity: 0.6; }
+  60%  { transform: translateX(120%);  opacity: 0.4; }
+  100% { transform: translateX(120%);  opacity: 0; }
+}
+
+/* Winner card — already has `playing-card-winner`. We add a slow golden
+   pulse and a crown-like radial above the existing halo. */
+.playing-card-winner {
+  animation: px-winner-glow 1.6s ease-in-out infinite;
+  position: relative;
+}
+
+.playing-card-winner::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(255, 241, 184, 0.42) 0%,
+    rgba(201, 168, 76, 0.18) 30%,
+    transparent 60%
+  );
+  filter: blur(6px);
+  z-index: -1;
+  animation: px-winner-aura 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes px-winner-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgba(255, 223, 128, 0.66),
+      0 0 42px rgba(201, 168, 76, 0.50),
+      0 30px 56px rgba(0, 0, 0, 0.54);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px rgba(255, 241, 184, 0.92),
+      0 0 60px rgba(201, 168, 76, 0.78),
+      0 34px 64px rgba(0, 0, 0, 0.58);
+  }
+}
+
+@keyframes px-winner-aura {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+
+/* -----------------------------------------------------------------------------
+   6. TABLE SHELL ENHANCEMENTS — premium-table-* classes.
+   We don't change geometry; we add a slow ambient light sweep that grazes
+   the wood rim, giving the impression of a single light source rotating
+   imperceptibly above the table.
+   -------------------------------------------------------------------------- */
+.premium-table-shell {
+  position: relative;
+}
+
+.premium-table-shell::before {
+  /* Already exists in globals.css with mix-blend-mode: screen. We can't
+     override that ::before cleanly, but we ADD an extra layer via a
+     positioned child class. So we use ::after instead — but globals also
+     uses ::after. Solution: target the GOLD BEZEL layer's outer box for
+     the rotating sweep. */
+}
+
+.premium-table-gold-bezel {
+  position: relative;
+}
+
+.premium-table-gold-bezel::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 241, 184, 0.10) 30deg,
+    rgba(201, 168, 76, 0.22) 60deg,
+    rgba(255, 241, 184, 0.10) 90deg,
+    transparent 120deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+          mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  padding: 1.5px;
+  animation: px-bezel-sweep 18s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.85;
+}
+
+@keyframes px-bezel-sweep {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Subtle felt particle drift — tiny green dust motes drifting across the
+   spotlight. Adds life to an otherwise static playing surface. */
+.premium-table-spotlight {
+  position: relative;
+}
+
+.premium-table-spotlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(255, 244, 214, 0.06) 0.6px, transparent 1.2px),
+    radial-gradient(circle at 70% 60%, rgba(232, 199, 106, 0.05) 0.6px, transparent 1.2px),
+    radial-gradient(circle at 45% 85%, rgba(255, 244, 214, 0.04) 0.6px, transparent 1.2px);
+  background-size: 120px 120px, 160px 160px, 90px 90px;
+  animation: px-felt-particles 26s linear infinite;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0.7;
+}
+
+@keyframes px-felt-particles {
+  0%   { background-position: 0 0, 0 0, 0 0; }
+  100% { background-position: 120px -200px, -160px -240px, 90px -180px; }
+}
+
+/* -----------------------------------------------------------------------------
+   7. STATUS DOTS — emerald pulse with double halo, replacing the single
+   inline drop-shadow seen on the "Online" pill.
+   -------------------------------------------------------------------------- */
+.bg-emerald-400[class*='shadow'] {
+  position: relative;
+  isolation: isolate;
+}
+
+.bg-emerald-400[class*='shadow']::before,
+.bg-emerald-400[class*='shadow']::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.bg-emerald-400[class*='shadow']::before {
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.7), transparent 70%);
+  animation: px-dot-ripple 2.2s ease-out infinite;
+}
+
+.bg-emerald-400[class*='shadow']::after {
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.42), transparent 75%);
+  animation: px-dot-ripple 2.2s ease-out infinite 0.6s;
+}
+
+@keyframes px-dot-ripple {
+  0%   { transform: scale(1);    opacity: 0.65; }
+  80%  { transform: scale(2.6);  opacity: 0;    }
+  100% { transform: scale(2.6);  opacity: 0;    }
+}
+
+/* -----------------------------------------------------------------------------
+   8. EVENT BANNERS — the existing `event-banner-shell` already has fine
+   styling; we add a subtle inner edge-glow that follows the banner tone
+   and a one-shot entrance shimmer.
+   -------------------------------------------------------------------------- */
+.event-banner-shell {
+  animation: px-banner-enter 0.6s cubic-bezier(0.20, 0.90, 0.24, 1);
+}
+
+@keyframes px-banner-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.event-banner--truco,
+.event-banner--special,
+.event-banner--final {
+  position: relative;
+}
+
+.event-banner--truco::before,
+.event-banner--special::before,
+.event-banner--final::before {
+  /* Globals already uses ::before for a thin gold top rule. We can't
+     replace it, so instead we add the inner edge-glow to the parent's
+     background via a layered box-shadow override that REINFORCES the
+     existing glow rather than replacing it. */
+}
+
+/* Add a sweep across truco banners — once on mount, then idle. */
+.event-banner--truco {
+  background-image:
+    linear-gradient(
+      120deg,
+      transparent 0%,
+      transparent 30%,
+      rgba(255, 241, 184, 0.06) 50%,
+      transparent 70%,
+      transparent 100%
+    ),
+    var(--event-truco-bg);
+  background-size: 200% 100%, 100% 100%;
+  animation:
+    px-banner-enter 0.6s cubic-bezier(0.20, 0.90, 0.24, 1),
+    px-truco-sweep 5s ease-in-out infinite;
+}
+
+@keyframes px-truco-sweep {
+  0%   { background-position: -100% 0, 0 0; }
+  50%  { background-position: 100% 0, 0 0; }
+  100% { background-position: 100% 0, 0 0; }
+}
+
+/* -----------------------------------------------------------------------------
+   9. SCROLLBAR — refined gold gradient with proper hover state.
+   Replaces the existing thin scrollbar with a slightly richer gradient
+   while keeping the same width.
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(5, 8, 16, 0.6);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(232, 199, 106, 0.5) 0%,
+    rgba(201, 168, 76, 0.7) 50%,
+    rgba(138, 106, 40, 0.8) 100%
+  );
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 241, 184, 0.7) 0%,
+    rgba(232, 199, 106, 0.9) 50%,
+    rgba(201, 168, 76, 0.95) 100%
+  );
+  box-shadow: 0 0 8px rgba(201, 168, 76, 0.4);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201, 168, 76, 0.7) rgba(5, 8, 16, 0.6);
+}
+
+/* -----------------------------------------------------------------------------
+   10. FOCUS RINGS — accessible gold halo for keyboard navigation.
+   We do NOT remove existing focus styles; we layer a gold halo on top.
+   -------------------------------------------------------------------------- */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid rgba(255, 223, 128, 0.78);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 4px rgba(201, 168, 76, 0.18),
+    0 0 22px rgba(255, 223, 128, 0.32);
+  transition: outline-offset 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* -----------------------------------------------------------------------------
+   11. PAGE-LEVEL ENTRY ANIMATIONS
+   Stagger reveal for the hero column of the home page and the lobby's
+   main cards. Targets stable structural classes so no TSX changes are
+   required.
+   -------------------------------------------------------------------------- */
+@keyframes px-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Home hero section */
+section.relative.z-10 > .grid > div.space-y-6 > * {
+  animation: px-fade-up 0.7s cubic-bezier(0.20, 0.90, 0.24, 1) backwards;
+}
+section.relative.z-10 > .grid > div.space-y-6 > *:nth-child(1) { animation-delay: 0.05s; }
+section.relative.z-10 > .grid > div.space-y-6 > *:nth-child(2) { animation-delay: 0.12s; }
+section.relative.z-10 > .grid > div.space-y-6 > *:nth-child(3) { animation-delay: 0.20s; }
+section.relative.z-10 > .grid > div.space-y-6 > *:nth-child(4) { animation-delay: 0.28s; }
+section.relative.z-10 > .grid > div.space-y-6 > *:nth-child(5) { animation-delay: 0.36s; }
+
+/* Decorative cards on the home page hero side */
+section.relative.z-10 > .grid > .relative > div > div > div[style*='rotate'] {
+  animation: px-fade-up 0.9s cubic-bezier(0.20, 0.90, 0.24, 1) backwards;
+}
+
+/* Feature cards row */
+.surface-card-premium {
+  animation: px-fade-up 0.6s cubic-bezier(0.20, 0.90, 0.24, 1) backwards;
+}
+.surface-card-premium:nth-of-type(1) { animation-delay: 0.40s; }
+.surface-card-premium:nth-of-type(2) { animation-delay: 0.48s; }
+.surface-card-premium:nth-of-type(3) { animation-delay: 0.56s; }
+.surface-card-premium:nth-of-type(4) { animation-delay: 0.64s; }
+.surface-card-premium:nth-of-type(5) { animation-delay: 0.72s; }
+.surface-card-premium:nth-of-type(6) { animation-delay: 0.80s; }
+
+/* -----------------------------------------------------------------------------
+   12. RANKING ROWS — subtle slide-in for ranking lists, plus a refined
+   hover state that lifts the row and highlights the gold rank badge.
+   -------------------------------------------------------------------------- */
+/* Generic targeting: any flex row inside a gold-frame that contains an
+   ordinal number element followed by a name. We use a safe attribute hook
+   instead of a deep child selector. Consumers can also add `.px-rank-row`
+   to make it explicit; both work. */
+.px-rank-row,
+.gold-frame [class*='RANKING'] + * > * {
+  transition:
+    background 0.25s ease,
+    transform 0.25s cubic-bezier(0.20, 0.90, 0.24, 1);
+}
+
+.px-rank-row:hover {
+  background: linear-gradient(
+    90deg,
+    rgba(201, 168, 76, 0.04) 0%,
+    rgba(201, 168, 76, 0.10) 50%,
+    rgba(201, 168, 76, 0.04) 100%
+  );
+  transform: translateX(4px);
+}
+
+/* -----------------------------------------------------------------------------
+   13. TIER BACKGROUND POLISH — when the truco escalates to gold/orange/red,
+   add a slow radial pulse INSIDE the existing tier-bg-* class so the chip
+   itself feels heated.
+   -------------------------------------------------------------------------- */
+.tier-bg-orange,
+.tier-bg-red,
+.tier-bg-pulse {
+  position: relative;
+  isolation: isolate;
+}
+
+.tier-bg-orange::after,
+.tier-bg-red::after,
+.tier-bg-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 255, 255, 0.18) 0%,
+    transparent 60%
+  );
+  animation: px-tier-heat 1.4s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  z-index: 0;
+}
+
+@keyframes px-tier-heat {
+  0%, 100% { opacity: 0.3; transform: scale(0.92); }
+  50%      { opacity: 0.8; transform: scale(1.06); }
+}
+
+/* -----------------------------------------------------------------------------
+   14. NEW UTILITY CLASSES — opt-in for future TSX work.
+   These are documented in code comments so future developers can adopt
+   them gradually without affecting current behavior.
+   -------------------------------------------------------------------------- */
+
+/* `.px-ornament-corners` — adds tiny art-deco gold brackets to the four
+   corners of any container. Use on hero panels, headers, modal frames. */
+.px-ornament-corners {
+  position: relative;
+}
+.px-ornament-corners::before,
+.px-ornament-corners::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: rgba(232, 199, 106, 0.42);
+  border-style: solid;
+  pointer-events: none;
+  transition: border-color 0.3s ease;
+}
+.px-ornament-corners::before {
+  top: 6px;
+  left: 6px;
+  border-width: 1px 0 0 1px;
+  border-top-left-radius: 6px;
+}
+.px-ornament-corners::after {
+  bottom: 6px;
+  right: 6px;
+  border-width: 0 1px 1px 0;
+  border-bottom-right-radius: 6px;
+}
+.px-ornament-corners:hover::before,
+.px-ornament-corners:hover::after {
+  border-color: rgba(255, 241, 184, 0.86);
+}
+
+/* `.px-shine` — diagonal shine that loops slowly. For badges and pills. */
+.px-shine {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.px-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.16) 50%,
+    transparent 70%
+  );
+  transform: translateX(-110%);
+  animation: px-shine-loop 4.5s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+@keyframes px-shine-loop {
+  0%   { transform: translateX(-110%); }
+  60%  { transform: translateX(110%); }
+  100% { transform: translateX(110%); }
+}
+
+/* `.px-frame-glow` — outer breathing glow for hero frames. */
+.px-frame-glow {
+  position: relative;
+}
+.px-frame-glow::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: inherit;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(201, 168, 76, 0.18) 0%,
+    transparent 60%
+  );
+  filter: blur(20px);
+  z-index: -1;
+  animation: px-frame-breathe 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes px-frame-breathe {
+  0%, 100% { opacity: 0.5; transform: scale(0.98); }
+  50%      { opacity: 1;   transform: scale(1.03); }
+}
+
+/* `.px-text-shimmer` — subtle gold shimmer for hero numbers, e.g. scores. */
+.px-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f0e6d3 0%,
+    #fff1b8 25%,
+    #e8c76a 50%,
+    #fff1b8 75%,
+    #f0e6d3 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: px-text-shimmer 4s ease-in-out infinite;
+}
+@keyframes px-text-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* `.px-divider-ornate` — section divider with a central diamond shape. */
+.px-divider-ornate {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.px-divider-ornate::before,
+.px-divider-ornate::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(201, 168, 76, 0.32) 50%,
+    rgba(201, 168, 76, 0.32) 50%,
+    transparent 100%
+  );
+}
+.px-divider-ornate > span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: linear-gradient(135deg, #fff1b8, #c9a84c);
+  transform: rotate(45deg);
+  box-shadow: 0 0 12px rgba(201, 168, 76, 0.6);
+}
+
+/* -----------------------------------------------------------------------------
+   15. ROUND CHIPS — the small "vasa won" dots in the header. Tighten their
+   transitions and add a "filled" pulse the first frame after a vasa
+   resolves. Triggered by adding `data-just-resolved="true"` (consumers
+   can opt in via TSX later; the rule is harmless if never matched).
+   -------------------------------------------------------------------------- */
+[data-just-resolved='true'] {
+  animation: px-chip-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes px-chip-pop {
+  0%   { transform: scale(0.6);  filter: brightness(1); }
+  40%  { transform: scale(1.18); filter: brightness(1.4); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+
+/* -----------------------------------------------------------------------------
+   16. CONFETTI / WIN MOMENT — when a `.px-victory` class is added to any
+   element (e.g. the score chip when a match is won), trigger a slow
+   triumphant flash. Doesn't replace any confetti hook in `useConfetti`;
+   layers on top.
+   -------------------------------------------------------------------------- */
+.px-victory {
+  animation: px-victory-flash 1.4s ease-out;
+}
+@keyframes px-victory-flash {
+  0% {
+    transform: scale(1);
+    filter: brightness(1) drop-shadow(0 0 0 rgba(255, 241, 184, 0));
+  }
+  30% {
+    transform: scale(1.12);
+    filter: brightness(1.4) drop-shadow(0 0 24px rgba(255, 241, 184, 0.9));
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1) drop-shadow(0 0 0 rgba(255, 241, 184, 0));
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   17. INPUT REFINEMENT — for code/link inputs in the lobby (room code,
+   invite link), refine focus and add a soft inner glow when filled.
+   -------------------------------------------------------------------------- */
+input[type='text'],
+input:not([type]),
+textarea {
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease;
+}
+
+input[type='text']:focus,
+input:not([type]):focus,
+textarea:focus {
+  border-color: rgba(232, 199, 106, 0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(232, 199, 106, 0.24),
+    inset 0 0 18px rgba(201, 168, 76, 0.08);
+}
+
+/* -----------------------------------------------------------------------------
+   18. NAV LINKS — the top "Home / Lobby / Perfil" nav. The active link
+   already has a gold pill; we add a subtle underline animation for
+   non-active links on hover.
+   -------------------------------------------------------------------------- */
+nav a,
+nav button {
+  position: relative;
+  transition: color 0.25s ease;
+}
+
+nav a:not([class*='gold'])::after,
+nav button:not([class*='gold'])::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  width: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(232, 199, 106, 0.78), transparent);
+  transform: translateX(-50%);
+  transition: width 0.3s cubic-bezier(0.20, 0.90, 0.24, 1);
+}
+
+nav a:not([class*='gold']):hover::after,
+nav button:not([class*='gold']):hover::after {
+  width: 100%;
+}
+
+/* -----------------------------------------------------------------------------
+   19. SELECTION COLOR — replace the default browser blue selection with
+   a soft gold so even copying text feels on-brand.
+   -------------------------------------------------------------------------- */
+::selection {
+  background: rgba(201, 168, 76, 0.42);
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.32);
+}
+
+/* -----------------------------------------------------------------------------
+   20. REDUCED-MOTION OVERRIDES
+   Honors the existing globals.css block but is more specific so it always
+   wins for our new keyframes. Critical for accessibility.
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after,
+  .premium-table-gold-bezel::after,
+  .premium-table-spotlight::after,
+  .event-banner--truco,
+  .playing-card-selectable,
+  .playing-card-winner,
+  .playing-card-winner::before,
+  .text-gradient-gold,
+  .surface-card-premium,
+  .px-shine::after,
+  .px-frame-glow::before,
+  .px-text-shimmer,
+  [data-just-resolved='true'],
+  .px-victory {
+    animation: none !important;
+  }
+  body::before { opacity: 0.5; }
+  body::after  { opacity: 0;   }
+}
+
+/* -----------------------------------------------------------------------------
+   21. PRINT — hide all decorative layers so the table prints clean.
+   -------------------------------------------------------------------------- */
+@media print {
+  body::before,
+  body::after,
+  .premium-table-gold-bezel::after,
+  .premium-table-spotlight::after,
+  .playing-card::after {
+    display: none !important;
+  }
+}

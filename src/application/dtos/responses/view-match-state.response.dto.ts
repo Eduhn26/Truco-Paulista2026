@@ -1,4 +1,10 @@
-import type { HandBetState, HandSpecialState, HandValue } from '@game/domain/entities/hand';
+import type {
+  HandBetState,
+  HandMode,
+  HandSpecialState,
+  HandValue,
+} from '@game/domain/entities/hand';
+import type { SeatId } from '@game/domain/entities/round';
 import type { MatchState } from '@game/domain/value-objects/match-state';
 import type { PlayerId } from '@game/domain/value-objects/player-id';
 import type { Rank } from '@game/domain/value-objects/rank';
@@ -12,6 +18,23 @@ export type NextDecisionType =
   | 'start-next-hand'
   | 'match-finished';
 
+export type ViewMatchStateRoundPlayDto = {
+  ownerId: string;
+  seatId: SeatId | null;
+  playerId: PlayerId;
+  card: string;
+};
+
+export type ViewMatchStateRoundDto = {
+  playerOneCard: string | null;
+  playerTwoCard: string | null;
+  result: RoundResult | null;
+  finished: boolean;
+  seatPlays?: Partial<Record<SeatId, string | null>>;
+  orderedPlays?: ViewMatchStateRoundPlayDto[];
+  winningSeatId?: SeatId | null;
+};
+
 export type ViewMatchStateResponseDto = {
   matchId: string;
   state: MatchState;
@@ -21,8 +44,10 @@ export type ViewMatchStateResponseDto = {
   };
   currentHand: null | {
     viraRank: Rank;
+    mode: HandMode;
     finished: boolean;
     viewerPlayerId: PlayerId | null;
+    viewerSeatId: SeatId | null;
     currentValue: HandValue;
     betState: HandBetState;
     pendingValue: HandValue | null;
@@ -50,11 +75,7 @@ export type ViewMatchStateResponseDto = {
     };
     playerOneHand: string[];
     playerTwoHand: string[];
-    rounds: Array<{
-      playerOneCard: string | null;
-      playerTwoCard: string | null;
-      result: RoundResult | null;
-      finished: boolean;
-    }>;
+    seatHands?: Partial<Record<SeatId, string[]>>;
+    rounds: ViewMatchStateRoundDto[];
   };
 };

@@ -47,10 +47,7 @@ type PythonBotDecisionRequest = {
   };
 };
 
-// Optional rationale payload coming from the python service. Shape mirrors BotDecisionRationale but
-// is validated defensively at the adapter boundary: unknown strategy labels trigger invalid_payload
-// (which in turn triggers the heuristic-fallback path). This keeps the TS-side union closed while
-// letting the python service opt-in to emitting rationale whenever it is ready.
+// Rationale is validated at the adapter boundary so the TypeScript decision contract stays closed.
 type PythonBotRationalePayload = {
   handStrength?: number;
   strategy?: string;
@@ -107,9 +104,7 @@ type PythonBotDebugContext = {
   url?: string;
 };
 
-// Closed whitelist of strategy labels accepted from the python service. Must stay in sync with
-// BotDecisionStrategy in the port. Kept local (not exported from the port) to make the adapter
-// solely responsible for normalizing inbound payloads.
+// The adapter owns remote strategy normalization before mapping into BotDecisionStrategy.
 const ACCEPTED_REMOTE_STRATEGIES: ReadonlySet<BotDecisionStrategy> = new Set<BotDecisionStrategy>([
   'opening-weakest',
   'opening-middle',
@@ -139,9 +134,7 @@ export class PythonBotAdapter implements BotDecisionPort {
   ) {}
 
   decide(context: BotDecisionContext): BotDecision {
-    // Sync entry-point: delegates to the heuristic but rebrands provenance as 'heuristic-fallback'
-    // so telemetry distinguishes "heuristic was wired directly" from "python was wired but served
-    // via heuristic". The underlying rationale (strategy/handStrength) is preserved as-is.
+    // Synchronous callers receive the heuristic result with fallback provenance for telemetry.
     const heuristicDecision = this.heuristicBotAdapter.decide(context);
 
     return this.rebrandAsFallback(heuristicDecision);
@@ -327,8 +320,7 @@ export class PythonBotAdapter implements BotDecisionPort {
     }
 
     if (typeof payload.strategy === 'string') {
-      // Narrow via the whitelist — isValidRemoteResponse has already rejected unknown labels,
-      // but we guard again here to keep the type-narrowing local and explicit.
+      // Keep the type narrowing local even though invalid strategies are rejected earlier.
       if (ACCEPTED_REMOTE_STRATEGIES.has(payload.strategy as BotDecisionStrategy)) {
         rationale.strategy = payload.strategy as BotDecisionStrategy;
       }
@@ -404,8 +396,7 @@ export class PythonBotAdapter implements BotDecisionPort {
         return false;
       }
 
-      // Reject unknown strategy labels instead of silently dropping them — this ensures drift
-      // between the python service and the TS contract surfaces as invalid_payload (fallback).
+      // Unknown strategy labels must surface as invalid payloads instead of being ignored.
       if (!ACCEPTED_REMOTE_STRATEGIES.has(candidate.strategy as BotDecisionStrategy)) {
         return false;
       }

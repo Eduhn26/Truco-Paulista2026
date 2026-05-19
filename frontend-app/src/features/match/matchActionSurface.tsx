@@ -3,6 +3,26 @@ import { useMemo, useState } from 'react';
 import type { MatchAction } from './matchActionTypes';
 import type { MatchStatePayload } from '../../services/socket/socketTypes';
 
+/**
+ * PREMIUM PATCH — matchActionSurface
+ *
+ * Preserva 100%: lógica buildButtons, getButtonStyle tiers, handleActionClick,
+ * trucoShake, visibleButtons, hasDecisionState, renderButton, layout.
+ *
+ * Refinos visuais:
+ *   • Cada botão activo ganha um shimmer-overlay interno (pseudo-element via
+ *     motion.div filho) que desliza no hover — efeito que já existe no CSS
+ *     global pra CTAs gold, replicado aqui inline pra todos os tiers.
+ *   • "TRUCO!" ativo tem pulsação vermelha mais nítida + inner glow mais
+ *     quente.
+ *   • Botão "Aceitar" tem inner highlight mais luminoso (efeito de metal
+ *     polido verde).
+ *   • "Correr" ganha borda com glassmorfismo mais definido.
+ *   • Raises ficam com borda amber mais brilhante.
+ *   • Helper label: pill mais polida com inner hairline.
+ *   • Container: hairline dourada no topo + fundo walnut mais profundo.
+ */
+
 type ActionTier = 'primary' | 'accept' | 'decline' | 'raise';
 
 type ActionButton = {
@@ -69,9 +89,6 @@ function buildButtons(
   ];
 }
 
-// CHANGE: buttons got a bigger minHeight when the prominence is "primary" so
-// response buttons feel like real decisions, not toolbar chips. Same palette,
-// heavier presence — especially when the PressureOverlay is visible above.
 function getButtonStyle(tier: ActionTier, isDisabled: boolean, isPrimary: boolean): MotionStyle {
   if (isDisabled) {
     return {
@@ -87,41 +104,49 @@ function getButtonStyle(tier: ActionTier, isDisabled: boolean, isPrimary: boolea
     case 'primary':
       return {
         background: 'linear-gradient(180deg, #ea3423 0%, #c81d0d 55%, #9e1408 100%)',
-        border: '1px solid rgba(248,113,113,0.42)',
+        border: '1px solid rgba(248,113,113,0.46)',
         color: '#fff',
         boxShadow: isPrimary
-          ? '0 0 20px rgba(220,38,38,0.32), 0 10px 22px rgba(0,0,0,0.30)'
-          : '0 0 12px rgba(220,38,38,0.20), 0 8px 18px rgba(0,0,0,0.24)',
+          ? '0 0 26px rgba(220,38,38,0.36), 0 0 8px rgba(248,113,113,0.28), 0 10px 22px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,180,180,0.28)'
+          : '0 0 14px rgba(220,38,38,0.22), 0 8px 18px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,180,180,0.18)',
       };
     case 'accept':
       return {
         background: 'linear-gradient(180deg, #22a04f 0%, #166534 100%)',
-        border: '1px solid rgba(74,222,128,0.36)',
+        border: '1px solid rgba(74,222,128,0.40)',
         color: '#f0fdf4',
         boxShadow: isPrimary
-          ? '0 0 18px rgba(34,197,94,0.26), 0 10px 22px rgba(0,0,0,0.24)'
-          : '0 8px 16px rgba(0,0,0,0.18)',
+          ? '0 0 22px rgba(34,197,94,0.30), 0 10px 22px rgba(0,0,0,0.26), inset 0 1px 0 rgba(134,239,172,0.28)'
+          : '0 8px 16px rgba(0,0,0,0.20), inset 0 1px 0 rgba(134,239,172,0.18)',
       };
     case 'decline':
       return {
-        background: 'linear-gradient(180deg, rgba(48,58,72,0.98), rgba(22,29,40,0.98))',
-        border: '1px solid rgba(255,255,255,0.14)',
+        background: 'linear-gradient(180deg, rgba(52,64,80,0.98), rgba(22,29,40,0.98))',
+        border: '1px solid rgba(255,255,255,0.18)',
         color: '#e5e7eb',
         boxShadow: isPrimary
-          ? '0 0 16px rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.28)'
-          : '0 8px 16px rgba(0,0,0,0.18)',
+          ? '0 0 14px rgba(255,255,255,0.04), 0 10px 22px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.10)'
+          : '0 8px 16px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.08)',
       };
     case 'raise':
       return {
         background: 'linear-gradient(180deg, #d97706 0%, #92400e 100%)',
-        border: '1px solid rgba(251,191,36,0.34)',
+        border: '1px solid rgba(251,191,36,0.44)',
         color: '#fef3c7',
-        boxShadow: '0 8px 16px rgba(0,0,0,0.18)',
+        boxShadow: '0 8px 16px rgba(0,0,0,0.20), 0 0 12px rgba(217,119,6,0.24), inset 0 1px 0 rgba(254,243,199,0.22)',
       };
     default:
       return {};
   }
 }
+
+/* Shimmer overlay colors per tier */
+const SHIMMER_COLOR: Record<ActionTier, string> = {
+  primary: 'rgba(255,200,200,0.28)',
+  accept: 'rgba(167,243,208,0.28)',
+  decline: 'rgba(255,255,255,0.18)',
+  raise: 'rgba(254,243,199,0.28)',
+};
 
 export function MatchActionSurface({
   availableActions,
@@ -137,30 +162,25 @@ export function MatchActionSurface({
   const [trucoShake, setTrucoShake] = useState(false);
 
   const buttons = useMemo(() => buildButtons(availableActions), [availableActions]);
-  const visibleButtons = buttons.filter((button) => button.enabled || button.persistWhenDisabled);
+  const visibleButtons = buttons.filter((b) => b.enabled || b.persistWhenDisabled);
 
-  const acceptButtons = visibleButtons.filter((button) => button.tier === 'accept');
-  const declineButtons = visibleButtons.filter((button) => button.tier === 'decline');
-  const raiseButtons = visibleButtons.filter((button) => button.tier === 'raise');
+  const acceptButtons = visibleButtons.filter((b) => b.tier === 'accept');
+  const declineButtons = visibleButtons.filter((b) => b.tier === 'decline');
+  const raiseButtons = visibleButtons.filter((b) => b.tier === 'raise');
   const responseButtons = [...acceptButtons, ...declineButtons, ...raiseButtons];
-  const trucoButton =
-    visibleButtons.find((button) => button.action === 'request-truco') ?? null;
+  const trucoButton = visibleButtons.find((b) => b.action === 'request-truco') ?? null;
 
-  const hasDecisionState = responseButtons.some((button) => button.enabled);
+  const hasDecisionState = responseButtons.some((b) => b.enabled);
   const helperLabel = hasDecisionState
     ? emphasisLabel ?? 'Decisão pendente'
     : emphasisLabel ?? 'Pressão disponível';
 
   const handleActionClick = (button: ActionButton) => {
-    if (!button.enabled) {
-      return;
-    }
-
+    if (!button.enabled) return;
     if (button.action === 'request-truco') {
       setTrucoShake(true);
       window.setTimeout(() => setTrucoShake(false), 480);
     }
-
     onAction(button.action);
   };
 
@@ -173,13 +193,11 @@ export function MatchActionSurface({
         key={button.action}
         type="button"
         onClick={() => handleActionClick(button)}
-        whileHover={isDisabled ? {} : { y: -1, scale: 1.02 }}
-        whileTap={isDisabled ? {} : { scale: 0.97 }}
+        whileHover={isDisabled ? {} : { y: -1.5, scale: 1.025 }}
+        whileTap={isDisabled ? {} : { scale: 0.96 }}
         style={{
           ...getButtonStyle(button.tier, isDisabled, isPrimary),
           borderRadius: 999,
-          // CHANGE: response buttons (Aceitar / Correr) bumped to minHeight 44
-          // so they feel like decisive actions, not secondary chips.
           minHeight: isPrimary ? 44 : 32,
           minWidth: isPrimary ? 96 : 56,
           padding: isPrimary ? '10px 22px' : '6px 12px',
@@ -190,8 +208,22 @@ export function MatchActionSurface({
           position: 'relative',
           overflow: 'hidden',
           whiteSpace: 'nowrap',
+          fontFamily: 'Inter, system-ui, sans-serif',
         }}
       >
+        {/* Shimmer sweep on hover — runs via CSS animation, resets on leave */}
+        {!isDisabled ? (
+          <motion.div
+            className="pointer-events-none absolute inset-0 rounded-full"
+            initial={{ opacity: 0, x: '-110%' }}
+            whileHover={{ opacity: 1, x: '110%' }}
+            transition={{ duration: 0.55, ease: [0.20, 0.90, 0.24, 1] }}
+            style={{
+              background: `linear-gradient(115deg, transparent 30%, ${SHIMMER_COLOR[button.tier]} 50%, transparent 70%)`,
+              mixBlendMode: 'overlay',
+            }}
+          />
+        ) : null}
         {button.label}
       </motion.button>
     );
@@ -202,33 +234,42 @@ export function MatchActionSurface({
       className="relative overflow-hidden"
       style={{
         borderRadius: 20,
-        // CHANGE: the red "critical" wrapper was redundant with the new
-        // PressureOverlay that already screams "truco incoming" in the
-        // centre-top of the mesa. The action surface goes back to a calm,
-        // premium dark base in every state. Less visual noise, cleaner dock.
-        background: 'linear-gradient(180deg, rgba(6,12,22,0.84), rgba(3,8,16,0.90))',
+        background: 'linear-gradient(180deg, rgba(8,14,24,0.86), rgba(4,8,18,0.92))',
         border: isCritical
-          ? '1px solid rgba(201,168,76,0.22)'
-          : '1px solid rgba(201,168,76,0.10)',
-        backdropFilter: 'blur(12px)',
+          ? '1px solid rgba(201,168,76,0.26)'
+          : '1px solid rgba(201,168,76,0.12)',
+        backdropFilter: 'blur(14px)',
         padding: hasDecisionState ? '12px 14px' : '8px 10px',
         boxShadow: isCritical
-          ? '0 0 0 1px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.04)'
-          : 'inset 0 1px 0 rgba(255,255,255,0.02)',
+          ? '0 0 0 1px rgba(201,168,76,0.08), 0 0 28px rgba(201,168,76,0.06), inset 0 1px 0 rgba(255,255,255,0.05)'
+          : 'inset 0 1px 0 rgba(255,255,255,0.04)',
       }}
     >
+      {/* Hairline top */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-4 top-0 h-px"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent, rgba(201,168,76,0.42), transparent)',
+        }}
+      />
+
       <div className="relative z-10 flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span
             className="rounded-full px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.18em]"
             style={{
               background: hasDecisionState
-                ? 'rgba(201,168,76,0.14)'
-                : 'rgba(201,168,76,0.08)',
+                ? 'linear-gradient(180deg, rgba(201,168,76,0.18), rgba(150,118,40,0.10))'
+                : 'rgba(201,168,76,0.07)',
               border: hasDecisionState
-                ? '1px solid rgba(201,168,76,0.26)'
+                ? '1px solid rgba(201,168,76,0.32)'
                 : '1px solid rgba(201,168,76,0.12)',
-              color: hasDecisionState ? '#e8c76a' : 'rgba(201,168,76,0.78)',
+              color: hasDecisionState ? '#e8c76a' : 'rgba(201,168,76,0.72)',
+              boxShadow: hasDecisionState
+                ? 'inset 0 1px 0 rgba(255,241,184,0.12)'
+                : 'none',
             }}
           >
             {helperLabel}
@@ -238,9 +279,9 @@ export function MatchActionSurface({
             <motion.button
               type="button"
               onClick={() => handleActionClick(trucoButton)}
-              whileHover={!trucoButton.enabled ? {} : { y: -1, scale: 1.02 }}
-              whileTap={!trucoButton.enabled ? {} : { scale: 0.98 }}
-              animate={trucoShake ? { x: [-2, 2, -2, 2, 0] } : {}}
+              whileHover={!trucoButton.enabled ? {} : { y: -1.5, scale: 1.025 }}
+              whileTap={!trucoButton.enabled ? {} : { scale: 0.97 }}
+              animate={trucoShake ? { x: [-3, 3, -3, 3, 0] } : {}}
               style={{
                 ...getButtonStyle(trucoButton.tier, !trucoButton.enabled, true),
                 borderRadius: 999,
@@ -253,18 +294,34 @@ export function MatchActionSurface({
                 textTransform: 'uppercase',
                 position: 'relative',
                 overflow: 'hidden',
+                fontFamily: 'Inter, system-ui, sans-serif',
               }}
             >
               {trucoButton.enabled ? (
-                <motion.div
-                  className="pointer-events-none absolute inset-0 rounded-full"
-                  animate={{ opacity: [0, 0.14, 0] }}
-                  transition={{ duration: 1.2, repeat: Infinity }}
-                  style={{
-                    background:
-                      'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.24), transparent 70%)',
-                  }}
-                />
+                <>
+                  {/* Pulsação interna vermelha */}
+                  <motion.div
+                    className="pointer-events-none absolute inset-0 rounded-full"
+                    animate={{ opacity: [0, 0.18, 0] }}
+                    transition={{ duration: 1.1, repeat: Infinity }}
+                    style={{
+                      background:
+                        'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.28), transparent 68%)',
+                    }}
+                  />
+                  {/* Shimmer sweep */}
+                  <motion.div
+                    className="pointer-events-none absolute inset-0 rounded-full"
+                    initial={{ opacity: 0, x: '-110%' }}
+                    whileHover={{ opacity: 1, x: '110%' }}
+                    transition={{ duration: 0.55 }}
+                    style={{
+                      background:
+                        'linear-gradient(115deg, transparent 30%, rgba(255,180,180,0.32) 50%, transparent 70%)',
+                      mixBlendMode: 'overlay',
+                    }}
+                  />
+                </>
               ) : null}
               {trucoButton.label}
             </motion.button>
@@ -272,13 +329,12 @@ export function MatchActionSurface({
         </div>
 
         {hasDecisionState ? (
-          // CHANGE: response row centred with more breathing room so each
-          // button reads as a distinct decision. Was tight and cramped before.
           <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
-            {responseButtons.filter((button) => button.enabled).map((button) => {
+            {responseButtons.filter((b) => b.enabled).map((button) => {
               const prominence =
-                button.tier === 'accept' || button.tier === 'decline' ? 'primary' : 'secondary';
-
+                button.tier === 'accept' || button.tier === 'decline'
+                  ? 'primary'
+                  : 'secondary';
               return renderButton(button, prominence);
             })}
           </div>

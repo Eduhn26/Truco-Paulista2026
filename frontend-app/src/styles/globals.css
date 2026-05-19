@@ -2,20 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================================
+   THEME TOKENS — premium dark casino, gold + emerald felt + walnut wood.
+   This file is the source of truth for the 2.5D table look. Every visible
+   surface (shell, rail, bezel, felt, oval) is composed from layers defined
+   here so component code stays free of long inline strings.
+   ============================================================================= */
+
 :root {
   color-scheme: dark;
+
+  /* --- Brand & action -------------------------------------------------- */
   --gold-primary: #c9a84c;
   --gold-light: #e8c76a;
+  --gold-soft: #f2d488;
+  --gold-bright: #fff1b8;
   --gold-dark: #8a6a28;
+  --gold-deep: #5a4313;
   --gold-glow: rgba(201, 168, 76, 0.35);
   --gold-border: rgba(201, 168, 76, 0.3);
+
+  /* --- Background ------------------------------------------------------- */
   --bg-deep: #050810;
   --bg-card: #0a121a;
 
-  /* Navy felt tokens */
+  /* --- Felt (legacy navy still used in a few non-table widgets) -------- */
   --bg-felt: #0c1828;
   --bg-felt-mid: #132036;
 
+  /* --- Surfaces & text -------------------------------------------------- */
   --bg-surface: rgba(10, 18, 26, 0.85);
   --accent-green: #1a4731;
   --accent-red: #8b1a1a;
@@ -27,7 +42,7 @@
   --border-gold-glow: 0 0 20px rgba(201, 168, 76, 0.3);
   --shadow-premium: 0 8px 32px rgba(0, 0, 0, 0.5);
 
-  /* Escalation tokens */
+  /* --- Escalation tiers ------------------------------------------------- */
   --tier-muted-bg: linear-gradient(135deg, #3a3424, #221f14);
   --tier-muted-border: rgba(201, 168, 76, 0.18);
   --tier-muted-text: rgba(232, 199, 106, 0.72);
@@ -52,6 +67,35 @@
   --tier-pulse-border: rgba(254, 226, 226, 0.82);
   --tier-pulse-text: #fff;
   --tier-pulse-glow: 0 0 48px rgba(248, 113, 113, 0.64);
+
+  /* ---------------------------------------------------------------------
+     PREMIUM 2.5D TABLE TOKENS — re-tuned for the casino-walnut reference
+     -------------------------------------------------------------------
+     The previous palette read close to "muddy bronze" against the dark
+     page; the wood barely registered as wood. This palette pushes the
+     rail toward saturated walnut so the felt sits inside a frame the
+     eye can actually read as a physical object. */
+
+  /* Walnut rail (outer wood ring) */
+  --table-wood-deep: #1a0d05;
+  --table-wood-mid: #4d2913;
+  --table-wood-warm: #774726;
+  --table-wood-highlight: #a06a3d;
+  --table-wood-shadow: #0a0604;
+
+  /* Inner leather lip between wood and felt */
+  --table-leather-deep: #07050a;
+  --table-leather-mid: #1a120c;
+
+  /* Felt — emerald to match the reference photo, not navy */
+  --table-felt-deep: #04140d;
+  --table-felt-mid: #0d2419;
+  --table-felt-light: #1a3d28;
+  --table-felt-spotlight: #2a5c3a;
+
+  /* Painted oval line on the felt (hand-painted, not metallic) */
+  --table-oval-line: rgba(232, 199, 106, 0.22);
+  --table-oval-line-soft: rgba(232, 199, 106, 0.10);
 }
 
 body {
@@ -59,12 +103,29 @@ body {
   background-color: var(--bg-deep);
   background-image: radial-gradient(circle at 50% 0%, #0f1923 0%, #050810 70%);
   color: var(--text-primary);
-  font-family: "Georgia", "Times New Roman", serif;
+  font-family: 'Georgia', 'Times New Roman', serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+.match-arena-page {
+  overscroll-behavior: none;
+}
+
+.match-arena-frame.gold-frame {
+  overflow: visible;
+}
+
+/* =============================================================================
+   FELT (legacy class kept for any consumer outside the premium shell)
+   ============================================================================= */
 .felt-table {
   position: relative;
   background-color: #0c1828;
@@ -81,28 +142,273 @@ body {
   content: none;
 }
 
+/* =============================================================================
+   GOLD FRAME — generic premium card frame (used by panels around the table)
+   ============================================================================= */
 .gold-frame {
-  border: var(--border-gold);
-  border-radius: 28px;
-  box-shadow: var(--shadow-premium), inset 0 0 20px rgba(201, 168, 76, 0.05);
-  background: var(--bg-surface);
-  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(232, 199, 106, 0.28);
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at 50% -18%, rgba(255, 223, 128, 0.11), transparent 38%),
+    linear-gradient(180deg, rgba(15, 20, 16, 0.94), rgba(6, 10, 10, 0.92));
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 38px rgba(201, 168, 76, 0.05);
+  backdrop-filter: blur(14px);
+}
+
+.gold-frame::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 223, 128, 0.06), transparent),
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.05), transparent 26%),
+    radial-gradient(circle at 88% 100%, rgba(201, 168, 76, 0.08), transparent 32%);
+  opacity: 0.82;
+}
+
+.gold-frame > * {
+  position: relative;
+  z-index: 1;
 }
 
 .gold-frame:hover {
-  border-color: var(--gold-light);
-  box-shadow: var(--shadow-premium), 0 0 30px rgba(201, 168, 76, 0.15);
-  transition: all 0.3s ease;
+  border-color: rgba(232, 199, 106, 0.42);
+  box-shadow:
+    0 26px 72px rgba(0, 0, 0, 0.60),
+    0 0 34px rgba(201, 168, 76, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 40px rgba(201, 168, 76, 0.06);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
+/* =============================================================================
+   PREMIUM TABLE — the 2.5D casino-walnut shell.
+
+   Layer stack (outside → inside):
+     1.  .premium-table-shell      — walnut rail (outer wood ring, repeating
+                                     grain, vignette).
+     2.  .premium-table-rail       — inner wood highlight; sits on top of the
+                                     shell to fake a turned edge.
+     3.  .premium-table-gold-bezel — thin double-line gold bezel between the
+                                     wood and the leather lip.
+     4.  .premium-table-leather    — NEW. Tiny dark leather lip that frames
+                                     the felt. Sells the "real table" feel.
+     5.  .premium-table-felt-layer — the felt itself with all its grain and
+                                     vignette.
+     6.  .premium-table-play-oval  — painted oval line on the felt.
+     7.  .premium-table-spotlight  — radial pool of light over the centre.
+                                     This is the layer that gives the felt
+                                     its "lit cards" reading at the centre.
+   ============================================================================= */
+
+.premium-table-shell {
+  isolation: isolate;
+  background:
+    /* top warm rim light */
+    radial-gradient(ellipse at 50% -10%, rgba(255, 223, 160, 0.18), transparent 32%),
+    /* fine wood grain — diagonal */
+    repeating-linear-gradient(
+      102deg,
+      rgba(255, 244, 214, 0.030) 0 1px,
+      transparent 1px 6px
+    ),
+    /* coarse wood grain — counter-diagonal, darker */
+    repeating-linear-gradient(
+      14deg,
+      rgba(0, 0, 0, 0.28) 0 1px,
+      transparent 1px 11px
+    ),
+    /* base walnut gradient: warm centre, dark edges */
+    radial-gradient(
+      ellipse at 50% 50%,
+      var(--table-wood-warm) 0%,
+      var(--table-wood-mid) 38%,
+      var(--table-wood-deep) 78%,
+      var(--table-wood-shadow) 100%
+    );
+}
+
+.premium-table-shell::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  /* Specular highlights on the wood — top-left and bottom-right */
+  background:
+    radial-gradient(circle at 22% 14%, rgba(255, 244, 214, 0.16), transparent 22%),
+    radial-gradient(circle at 80% 88%, rgba(255, 223, 160, 0.10), transparent 28%),
+    /* Subtle grain noise over wood */
+    repeating-linear-gradient(
+      8deg,
+      rgba(0, 0, 0, 0.16) 0 1px,
+      transparent 1px 9px
+    );
+  mix-blend-mode: screen;
+  opacity: 0.62;
+}
+
+.premium-table-shell::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  /* Outer rim shadow + tiny top highlight to fake bevelled edges */
+  box-shadow:
+    inset 0 2px 0 rgba(255, 244, 214, 0.12),
+    inset 0 -18px 36px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(255, 223, 128, 0.14),
+    inset 0 0 80px rgba(0, 0, 0, 0.40);
+}
+
+/* The rail sits one notch inside the shell, brighter, to read as the
+   raised wood lip players would rest their hands on. */
+.premium-table-rail {
+  z-index: 0;
+  border-radius: 34px;
+  background:
+    /* Top rim light */
+    radial-gradient(ellipse at 50% 0%, rgba(255, 244, 214, 0.16), transparent 38%),
+    /* Subtle vertical pinstripes for cabinet finish */
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 244, 214, 0.05) 0 1px,
+      transparent 1px 22px
+    ),
+    /* Base walnut */
+    linear-gradient(
+      180deg,
+      var(--table-wood-highlight) 0%,
+      var(--table-wood-warm) 38%,
+      var(--table-wood-mid) 70%,
+      var(--table-wood-shadow) 100%
+    );
+  border: 1px solid rgba(255, 223, 128, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 214, 0.16),
+    inset 0 -14px 26px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.50),
+    0 14px 34px rgba(0, 0, 0, 0.42);
+}
+
+/* Double gold bezel — the thin metallic line between wood and leather. */
+.premium-table-gold-bezel {
+  z-index: 0;
+  border-radius: 30px;
+  border: 1px solid rgba(232, 199, 106, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.56),
+    0 0 0 2px rgba(232, 199, 106, 0.10),
+    0 0 26px rgba(201, 168, 76, 0.16),
+    inset 0 0 24px rgba(201, 168, 76, 0.10),
+    inset 0 0 0 1px rgba(255, 244, 214, 0.06);
+}
+
+/* NEW — thin dark leather lip between bezel and felt. Mounted as another
+   absolute layer between premium-table-gold-bezel and premium-table-felt-layer
+   (or as an inset on the felt layer when the consumer doesn't add a separate
+   div). Kept in this stylesheet so consumers can opt in without TSX changes. */
+.premium-table-leather {
+  z-index: 0;
+  border-radius: 28px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(0, 0, 0, 0.45), transparent 60%),
+    linear-gradient(180deg, var(--table-leather-mid), var(--table-leather-deep));
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.62),
+    inset 0 0 18px rgba(0, 0, 0, 0.78);
+}
+
+.premium-table-felt-layer {
+  z-index: 0;
+  border: 1px solid rgba(232, 199, 106, 0.22);
+  box-shadow:
+    /* Inner leather lip shadow framing the felt */
+    inset 0 0 0 1px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 4px rgba(20, 12, 6, 0.78),
+    /* Felt vignette */
+    inset 0 24px 38px rgba(255, 244, 214, 0.030),
+    inset 0 -48px 78px rgba(0, 0, 0, 0.62),
+    inset 0 0 180px rgba(0, 0, 0, 0.54),
+    /* Drop into rail */
+    0 8px 24px rgba(0, 0, 0, 0.46);
+}
+
+/* Painted oval — the line on the felt that defines the "playing area".
+   Two stacked hairlines (the inner one is the brighter "paint", the outer
+   one the worn shadow next to it) for the hand-painted look. */
+.premium-table-play-oval {
+  border-radius: 44% / 50%;
+  border: 1px solid var(--table-oval-line);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.36),
+    inset 0 0 0 3px var(--table-oval-line-soft),
+    inset 0 0 36px rgba(201, 168, 76, 0.05),
+    0 0 42px rgba(0, 0, 0, 0.18);
+}
+
+/* NEW — central pool of light. The reference photo's most distinctive feature
+   is the bright ellipse of light on the felt right where the cards meet. This
+   class pins that pool of light at the centre of the table and is animated
+   subtly via the felt-spotlight-anim keyframes below. */
+.premium-table-spotlight {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 60%;
+  height: 56%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border-radius: 50% / 60%;
+  background:
+    /* Bright core */
+    radial-gradient(
+      ellipse at 50% 50%,
+      rgba(255, 244, 214, 0.16) 0%,
+      rgba(201, 168, 76, 0.06) 22%,
+      transparent 64%
+    ),
+    /* Wider warm wash */
+    radial-gradient(
+      ellipse at 50% 50%,
+      rgba(46, 92, 53, 0.18) 0%,
+      transparent 72%
+    );
+  filter: blur(2px);
+  mix-blend-mode: screen;
+}
+
+.premium-table-spotlight-anim {
+  animation: felt-spotlight 6.4s ease-in-out infinite;
+}
+
+@keyframes felt-spotlight {
+  0%, 100% { opacity: 0.86; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 1.00; transform: translate(-50%, -50%) scale(1.025); }
+}
+
+/* =============================================================================
+   PLAYING CARDS
+   ============================================================================= */
 .playing-card {
   background: linear-gradient(145deg, #fefdf8 0%, #f8f5ec 50%, #f5f0e4 100%);
   box-shadow:
-    0 2px 4px rgba(0,0,0,0.15),
-    0 8px 24px rgba(0,0,0,0.35),
-    0 20px 48px rgba(0,0,0,0.25),
-    inset 0 1px 0 rgba(255,255,255,0.9);
-  border: 1px solid rgba(0,0,0,0.12);
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 20px 48px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .playing-card-back {
@@ -111,16 +417,39 @@ body {
       45deg,
       transparent,
       transparent 3px,
-      rgba(255,255,255,0.02) 3px,
-      rgba(255,255,255,0.02) 6px
+      rgba(255, 255, 255, 0.02) 3px,
+      rgba(255, 255, 255, 0.02) 6px
     ),
     linear-gradient(135deg, #132643 0%, #0b1a32 55%, #091528 100%);
   box-shadow:
-    0 8px 24px rgba(0,0,0,0.48),
-    0 20px 48px rgba(0,0,0,0.32);
-  border: 1px solid rgba(230,195,100,0.20);
+    0 8px 24px rgba(0, 0, 0, 0.48),
+    0 20px 48px rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(230, 195, 100, 0.20);
 }
 
+/* NEW — selectable hand card glow. Used by the bottom-of-table "your hand"
+   row when canPlayCard is true. Mounted as a class so consumers can swap
+   it on/off without rewriting inline styles. */
+.playing-card-selectable {
+  box-shadow:
+    0 0 0 1px rgba(255, 223, 128, 0.36),
+    0 0 22px rgba(201, 168, 76, 0.32),
+    0 24px 44px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+/* NEW — winner card halo on the felt. Replaces the inline string the shell
+   builds for the winning RadialPlayedCard so the styling is centralised. */
+.playing-card-winner {
+  box-shadow:
+    0 0 0 2px rgba(255, 223, 128, 0.66),
+    0 0 42px rgba(201, 168, 76, 0.50),
+    0 30px 56px rgba(0, 0, 0, 0.54);
+}
+
+/* =============================================================================
+   TYPOGRAPHY UTILS
+   ============================================================================= */
 .text-gradient-gold {
   background: linear-gradient(135deg, var(--gold-light) 0%, var(--gold-primary) 50%, var(--gold-dark) 100%);
   -webkit-background-clip: text;
@@ -128,9 +457,17 @@ body {
   background-clip: text;
 }
 
+.font-display {
+  font-family: 'Georgia', 'Times New Roman', serif;
+}
+
+/* =============================================================================
+   ANIMATIONS — kept identical in name and timing so existing consumers in the
+   match shell continue to work.
+   ============================================================================= */
 @keyframes chip-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
+  50%      { box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
 }
 .chip-active { animation: chip-pulse 2s infinite; }
 
@@ -141,7 +478,7 @@ body {
 
 @keyframes turn-pulse {
   0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
+  50%      { opacity: 1; }
 }
 .my-turn-glow { animation: turn-pulse 2s ease-in-out infinite; }
 
@@ -161,10 +498,6 @@ main.relative.z-10 {
   width: 100%;
 }
 
-.font-display {
-  font-family: 'Georgia', 'Times New Roman', serif;
-}
-
 .bg-gradient-gold {
   background: linear-gradient(135deg, #c9a84c, #8a6a28);
 }
@@ -173,53 +506,33 @@ main.relative.z-10 {
   background: radial-gradient(circle at 50% 38%, #132036 0%, #0c1828 60%, #030810 100%);
 }
 
-.border-gold {
-  border-color: oklch(0.78 0.14 82);
-}
-
-.text-gold {
-  color: oklch(0.78 0.14 82);
-}
-
-.ring-gold {
-  --tw-ring-color: oklch(0.78 0.14 82);
-}
+.border-gold { border-color: oklch(0.78 0.14 82); }
+.text-gold { color: oklch(0.78 0.14 82); }
+.ring-gold { --tw-ring-color: oklch(0.78 0.14 82); }
 
 @keyframes pulse-gold {
   0%, 100% { opacity: 0.6; box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
-  50% { opacity: 1; box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
+  50%      { opacity: 1;   box-shadow: 0 0 0 6px rgba(201, 168, 76, 0); }
 }
-.animate-pulse-gold {
-  animation: pulse-gold 2s ease-in-out infinite;
-}
+.animate-pulse-gold { animation: pulse-gold 2s ease-in-out infinite; }
 
-.btn-glow:hover {
-  box-shadow: 0 0 20px rgba(201, 168, 76, 0.3);
-}
+.btn-glow:hover { box-shadow: 0 0 20px rgba(201, 168, 76, 0.3); }
 
-.transition-smooth {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
+.transition-smooth { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-.scrollbar-premium::-webkit-scrollbar {
-  width: 6px;
-}
-
+.scrollbar-premium::-webkit-scrollbar { width: 6px; }
 .scrollbar-premium::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 3px;
 }
-
 .scrollbar-premium::-webkit-scrollbar-thumb {
   background: linear-gradient(135deg, #c9a84c, #8a6a28);
   border-radius: 3px;
 }
 
-/* ============================================
-   ESCALATION + CLIMAX SYSTEM
-   ============================================ */
-
-/* CHANGE: tier-pulse still used by the VALE 12 pill in the header. */
+/* =============================================================================
+   ESCALATION + CLIMAX SYSTEM (legacy — kept for current consumers)
+   ============================================================================= */
 @keyframes tier-pulse {
   0%, 100% {
     transform: scale(1);
@@ -232,37 +545,31 @@ main.relative.z-10 {
 }
 .tier-pulse-anim { animation: tier-pulse 0.9s ease-in-out infinite; }
 
-/* Felt breath — subtle ambient motion in the felt */
 @keyframes felt-breathe {
   0%, 100% { opacity: 0.55; transform: scale(1); }
   50%      { opacity: 0.78; transform: scale(1.012); }
 }
 .felt-breathe-anim { animation: felt-breathe 4.6s ease-in-out infinite; }
 
-/* CHANGE: legacy .climax-fade-anim / .climax-slam-anim removed because the
-   new HandClimaxStage uses motion.div with proper enter/exit. These were
-   part of the "modal travado" bug (one-shot forwards animations without
-   reversibility). Keeping stubs here in case any other code still references
-   them, but they're now no-ops. */
-.climax-fade-anim { opacity: 1; }
-.climax-slam-anim { transform: translate(-50%, -50%); }
+/* Legacy stubs kept for safety — current shells use Framer Motion enter/exit. */
+.climax-fade-anim  { opacity: 1; }
+.climax-slam-anim  { transform: translate(-50%, -50%); }
 .climax-flash-anim { opacity: 0; }
 
-/* Keep these keyframes available in case of legacy references. */
 @keyframes pressure-shake {
   0%   { transform: translate(0, 0) rotate(0); }
-  20%  { transform: translate(-2px, 1px) rotate(-0.1deg); }
-  40%  { transform: translate(3px, -1px) rotate(0.1deg); }
+  20%  { transform: translate(-2px, 1px)  rotate(-0.10deg); }
+  40%  { transform: translate(3px, -1px)  rotate(0.10deg); }
   60%  { transform: translate(-2px, -1px) rotate(-0.05deg); }
-  80%  { transform: translate(2px, 1px) rotate(0.05deg); }
+  80%  { transform: translate(2px, 1px)   rotate(0.05deg); }
   100% { transform: translate(0, 0) rotate(0); }
 }
 .pressure-shake-anim { animation: pressure-shake 0.42s ease-in-out; }
 
 @keyframes round-beat {
-  0%   { box-shadow: 0 0 0 0    rgba(201, 168, 76, 0.70), 0 24px 42px rgba(0,0,0,0.34); }
-  60%  { box-shadow: 0 0 42px 14px rgba(201, 168, 76, 0.30), 0 24px 42px rgba(0,0,0,0.34); }
-  100% { box-shadow: 0 0 24px 4px rgba(201, 168, 76, 0.18), 0 24px 42px rgba(0,0,0,0.34); }
+  0%   { box-shadow: 0 0 0 0    rgba(201, 168, 76, 0.70), 0 24px 42px rgba(0, 0, 0, 0.34); }
+  60%  { box-shadow: 0 0 42px 14px rgba(201, 168, 76, 0.30), 0 24px 42px rgba(0, 0, 0, 0.34); }
+  100% { box-shadow: 0 0 24px 4px  rgba(201, 168, 76, 0.18), 0 24px 42px rgba(0, 0, 0, 0.34); }
 }
 .round-beat-anim { animation: round-beat 0.95s ease-out; }
 
@@ -273,35 +580,659 @@ main.relative.z-10 {
 .counter-roll-anim { animation: counter-roll 0.42s ease-out forwards; }
 
 @keyframes initiative-sweep-to-bottom {
-  0%   { opacity: 0; transform: translateY(-40%); }
+  0%   { opacity: 0;   transform: translateY(-40%); }
   40%  { opacity: 0.6; }
-  100% { opacity: 0; transform: translateY(40%); }
+  100% { opacity: 0;   transform: translateY(40%); }
 }
 .initiative-sweep-bottom-anim { animation: initiative-sweep-to-bottom 0.82s ease-out; }
 
 @keyframes initiative-sweep-to-top {
-  0%   { opacity: 0; transform: translateY(40%); }
+  0%   { opacity: 0;   transform: translateY(40%); }
   40%  { opacity: 0.6; }
-  100% { opacity: 0; transform: translateY(-40%); }
+  100% { opacity: 0;   transform: translateY(-40%); }
 }
 .initiative-sweep-top-anim { animation: initiative-sweep-to-top 0.82s ease-out; }
 
-/* CHANGE: NEW — panel-pulse used for the left context column when an
-   important state transitions in (truco pedido, escalada, mão sua). */
 @keyframes panel-pulse {
-  0%, 100% { text-shadow: 0 2px 4px rgba(0,0,0,0.40); }
-  50%      { text-shadow: 0 2px 4px rgba(0,0,0,0.40), 0 0 18px currentColor; }
+  0%, 100% { text-shadow: 0 2px 4px rgba(0, 0, 0, 0.40); }
+  50%      { text-shadow: 0 2px 4px rgba(0, 0, 0, 0.40), 0 0 18px currentColor; }
 }
 .panel-pulse-anim { animation: panel-pulse 1.8s ease-in-out infinite; }
 
-.tier-bg-muted     { background: var(--tier-muted-bg); }
-.tier-bg-gold      { background: var(--tier-gold-bg); }
-.tier-bg-orange    { background: var(--tier-orange-bg); }
-.tier-bg-red       { background: var(--tier-red-bg); }
-.tier-bg-pulse     { background: var(--tier-pulse-bg); }
+.tier-bg-muted   { background: var(--tier-muted-bg); }
+.tier-bg-gold    { background: var(--tier-gold-bg); }
+.tier-bg-orange  { background: var(--tier-orange-bg); }
+.tier-bg-red     { background: var(--tier-red-bg); }
+.tier-bg-pulse   { background: var(--tier-pulse-bg); }
 
-.tier-text-muted   { color: var(--tier-muted-text); }
-.tier-text-gold    { color: var(--tier-gold-text); }
-.tier-text-orange  { color: var(--tier-orange-text); }
-.tier-text-red     { color: var(--tier-red-text); }
-.tier-text-pulse   { color: var(--tier-pulse-text); }
+.tier-text-muted  { color: var(--tier-muted-text); }
+.tier-text-gold   { color: var(--tier-gold-text); }
+.tier-text-orange { color: var(--tier-orange-text); }
+.tier-text-red    { color: var(--tier-red-text); }
+.tier-text-pulse  { color: var(--tier-pulse-text); }
+
+/* =============================================================================
+   NEW — DRAMA ZONE PRIMITIVES
+
+   The truco / 6 / 9 / 12 escalations and the mão-de-onze decision share a
+   visual vocabulary: a tier-coloured chip on a tinted aura. Defining the
+   geometry/keyframes here lets the React overlays stay short and gives us a
+   single place to tune the animation curves.
+   ============================================================================= */
+
+@keyframes drama-aura-breathe {
+  0%, 100% {
+    opacity: 0.42;
+    transform: scale(1);
+    filter: blur(34px);
+  }
+  50% {
+    opacity: 0.86;
+    transform: scale(1.04);
+    filter: blur(28px);
+  }
+}
+.drama-aura-anim { animation: drama-aura-breathe 1.6s ease-in-out infinite; }
+
+@keyframes drama-rim-sweep {
+  0%   { opacity: 0;    transform: translateX(-100%) skewX(-12deg); }
+  35%  { opacity: 0.36; }
+  100% { opacity: 0;    transform: translateX(100%)  skewX(-12deg); }
+}
+.drama-rim-sweep-anim { animation: drama-rim-sweep 1.4s ease-out infinite; }
+
+/* "Drum hit" – used by the felt impact on a full vasa, slowed and softened
+   to read as pressure rather than arcade bling. */
+@keyframes felt-impact {
+  0%   { opacity: 0;    transform: translate(-50%, -50%) scale(0.36); }
+  35%  { opacity: 0.66; }
+  100% { opacity: 0;    transform: translate(-50%, -50%) scale(1.20); }
+}
+.felt-impact-anim { animation: felt-impact 1.05s cubic-bezier(0.20, 0.90, 0.24, 1); }
+
+/* =============================================================================
+   ROUND CLASH PREMIUM EFFECTS — extra keyframes the React overlay can opt
+   into. The existing motion.div animations stay; these classes give us a
+   couple of cheap CSS-only embellishments (scanline, vignette pulse) so the
+   clash feels engineered instead of templated. */
+@keyframes clash-vignette-pulse {
+  0%   { opacity: 0; }
+  35%  { opacity: 0.42; }
+  100% { opacity: 0; }
+}
+.clash-vignette-anim { animation: clash-vignette-pulse 0.96s ease-out; }
+
+@keyframes clash-scanline {
+  0%   { opacity: 0;    transform: translateY(-110%); }
+  40%  { opacity: 0.28; }
+  100% { opacity: 0;    transform: translateY(110%); }
+}
+.clash-scanline-anim { animation: clash-scanline 0.74s cubic-bezier(0.20, 0.90, 0.24, 1); }
+
+/* =============================================================================
+   MATCH PAGE CANVAS
+   ============================================================================= */
+.match-page-canvas { min-width: 0; }
+
+@media (max-height: 820px) {
+  .premium-table-play-oval { opacity: 0.78; }
+  .premium-table-spotlight { height: 50%; }
+}
+
+/* =============================================================================
+   REDUCED MOTION — pause every infinite loop and shorten one-shot durations
+   so anything important still plays once but nothing strobes. Critical for
+   accessibility and also for users who keep the table open in the background.
+   ============================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+
+/* =============================================================================
+   STEP 6 ADDITIONS — page-level texture and chrome.
+
+   This file is meant to be APPENDED to the existing
+   `src/styles/globals.css` (the patch-1 version). Nothing here overrides
+   anything that's already there; every selector is new.
+
+   What's added:
+     • `.surface-felt-grain`       — SVG noise overlay you stack inside any
+                                     dark surface to give it premium texture.
+     • `.surface-paper-grain`      — light paper grain for text-heavy panels.
+     • `.surface-hairline-gold`    — single-pixel gold rule used at the top
+                                     of section cards (matches the table bezel).
+     • `.surface-card-premium`     — a card style that already composes wood-
+                                     adjacent dark gradient + hairline + grain
+                                     so home/lobby cards stop being flat
+                                     dashboard tiles.
+     • `.divider-gold-soft`        — a horizontal soft divider for between
+                                     sections (lobby ranking ↔ last match).
+     • `.text-display-italic`      — Georgia italic display weight, used as
+                                     an editorial accent in the hero word
+                                     ("mais elegante").
+     • `.bg-noise-soft`            — body-level noise that ties the page to
+                                     the table's felt grain. Apply to <body>
+                                     or <main> for an immediate atmospheric
+                                     upgrade.
+
+   Animations: none new. Everything here is static styling so the page
+   stays calm while the table is loud.
+   ============================================================================= */
+
+/* SVG noise overlay — works on any block when applied as ::after. The
+   data URI is small (a single fractalNoise tile) and the opacity is low
+   so it never reads as "static" on top of content. */
+.surface-felt-grain {
+  position: relative;
+}
+.surface-felt-grain::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+  opacity: 0.55;
+  mix-blend-mode: overlay;
+}
+
+/* Paper grain — finer pattern, brighter, for parchment-feeling cards.
+   Used by the home features strip and the lobby ranking panel header. */
+.surface-paper-grain {
+  position: relative;
+}
+.surface-paper-grain::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.42;
+  mix-blend-mode: soft-light;
+}
+
+/* Hairline gold rule at the top of a card — the same vocabulary as the
+   table's gold bezel, brought to the home/lobby surfaces. Apply via
+   `::before` so the consumer doesn't need an extra wrapper element. */
+.surface-hairline-gold {
+  position: relative;
+}
+.surface-hairline-gold::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(232, 199, 106, 0.62) 50%,
+    transparent 100%
+  );
+}
+
+/* Premium card — the standard "this surface is part of the same world as
+   the table" panel. Composes the warm dark gradient, the hairline, the
+   subtle felt grain, and the inset shadow that mimics the leather lip
+   in miniature. Use this on home features and lobby panels. */
+.surface-card-premium {
+  position: relative;
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      circle at 50% -20%,
+      rgba(255, 223, 128, 0.06),
+      transparent 38%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(18, 26, 22, 0.92) 0%,
+      rgba(8, 12, 18, 0.94) 100%
+    );
+  border: 1px solid rgba(201, 168, 76, 0.20);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.36),
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 38px rgba(201, 168, 76, 0.04);
+}
+.surface-card-premium::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(232, 199, 106, 0.62) 50%,
+    transparent 100%
+  );
+}
+
+/* Soft horizontal divider — paint it between sections instead of borders.
+   Doesn't add weight; the gold pulse fades out on both sides. */
+.divider-gold-soft {
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(201, 168, 76, 0.24) 28%,
+    rgba(201, 168, 76, 0.24) 72%,
+    transparent 100%
+  );
+}
+
+/* Editorial italic display — used as a "drop cap" accent in headlines.
+   Pairs with Georgia regular for the rest of the line. */
+.text-display-italic {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* Body-level noise — applied to <body> via class or to a top-level page
+   wrapper. This is the cheapest way to make the entire app stop feeling
+   like a flat dark layer and start feeling like atmospheric depth. */
+.bg-noise-soft {
+  position: relative;
+}
+.bg-noise-soft::before {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 360 360' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity: 0.6;
+  mix-blend-mode: overlay;
+}
+
+
+/* =============================================================================
+   PHASE B — MATCH EVENT DESIGN SYSTEM
+
+   These primitives are intentionally visual-only. They standardize the
+   emotional chrome used by truco pressure, mão de 11, response banners,
+   resolution badges, and final match moments without changing game flow.
+   ============================================================================= */
+:root {
+  --event-neutral-bg: linear-gradient(180deg, rgba(11, 18, 24, 0.92), rgba(5, 9, 14, 0.96));
+  --event-neutral-border: rgba(201, 168, 76, 0.18);
+  --event-neutral-text: rgba(240, 230, 211, 0.82);
+  --event-neutral-glow: rgba(201, 168, 76, 0.10);
+
+  --event-action-bg: linear-gradient(180deg, rgba(16, 42, 30, 0.92), rgba(5, 16, 12, 0.96));
+  --event-action-border: rgba(104, 211, 145, 0.24);
+  --event-action-text: #d8f4df;
+  --event-action-glow: rgba(45, 106, 79, 0.18);
+
+  --event-truco-bg: linear-gradient(180deg, rgba(58, 35, 8, 0.96), rgba(17, 10, 4, 0.98));
+  --event-truco-border: rgba(255, 223, 128, 0.54);
+  --event-truco-text: #fff1b8;
+  --event-truco-glow: rgba(201, 168, 76, 0.34);
+
+  --event-response-bg: linear-gradient(180deg, rgba(57, 30, 14, 0.96), rgba(18, 10, 7, 0.98));
+  --event-response-border: rgba(244, 170, 93, 0.38);
+  --event-response-text: #ffe1b3;
+  --event-response-glow: rgba(180, 83, 9, 0.22);
+
+  --event-special-bg: linear-gradient(180deg, rgba(47, 32, 12, 0.96), rgba(12, 9, 6, 0.98));
+  --event-special-border: rgba(255, 223, 128, 0.62);
+  --event-special-text: #fff8e1;
+  --event-special-glow: rgba(245, 158, 11, 0.26);
+
+  --event-resolution-bg: linear-gradient(180deg, rgba(28, 31, 24, 0.95), rgba(9, 12, 9, 0.98));
+  --event-resolution-border: rgba(232, 199, 106, 0.34);
+  --event-resolution-text: #f5df9a;
+  --event-resolution-glow: rgba(232, 199, 106, 0.20);
+
+  --event-final-bg: linear-gradient(180deg, rgba(67, 44, 10, 0.97), rgba(11, 8, 5, 0.99));
+  --event-final-border: rgba(255, 241, 184, 0.72);
+  --event-final-text: #fff6ce;
+  --event-final-glow: rgba(255, 223, 128, 0.42);
+
+  --event-danger-bg: linear-gradient(180deg, rgba(77, 18, 18, 0.97), rgba(22, 6, 6, 0.99));
+  --event-danger-border: rgba(248, 113, 113, 0.44);
+  --event-danger-text: #ffe1d8;
+  --event-danger-glow: rgba(220, 38, 38, 0.28);
+
+  --motion-event-in: cubic-bezier(0.20, 0.90, 0.24, 1);
+  --motion-event-out: cubic-bezier(0.40, 0, 0.60, 1);
+  --motion-card-settle: cubic-bezier(0.20, 0.90, 0.24, 1);
+
+  --z-table-card: 30;
+  --z-table-badge: 52;
+  --z-table-drama: 65;
+  --z-table-decision: 160;
+  --z-table-modal: 190;
+}
+
+.event-banner-shell {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--event-neutral-border);
+  border-radius: 24px;
+  background: var(--event-neutral-bg);
+  color: var(--event-neutral-text);
+  box-shadow:
+    0 22px 48px rgba(0, 0, 0, 0.44),
+    0 0 32px var(--event-neutral-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(16px);
+}
+
+.event-banner-shell::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 241, 184, 0.68) 50%,
+    transparent 100%
+  );
+}
+
+.event-banner-shell::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 255, 255, 0.08), transparent 26%),
+    radial-gradient(circle at 86% 100%, rgba(201, 168, 76, 0.10), transparent 34%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='eventNoise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23eventNoise)' opacity='0.035'/%3E%3C/svg%3E");
+  opacity: 0.72;
+  mix-blend-mode: overlay;
+}
+
+.event-banner-shell > :not([aria-hidden='true']) {
+  position: relative;
+  z-index: 1;
+}
+
+.event-banner--action {
+  border-color: var(--event-action-border);
+  background: var(--event-action-bg);
+  color: var(--event-action-text);
+  box-shadow:
+    0 22px 48px rgba(0, 0, 0, 0.42),
+    0 0 32px var(--event-action-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.event-banner--truco {
+  border-color: var(--event-truco-border);
+  background: var(--event-truco-bg);
+  color: var(--event-truco-text);
+  box-shadow:
+    0 24px 54px rgba(0, 0, 0, 0.48),
+    0 0 42px var(--event-truco-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+.event-banner--response {
+  border-color: var(--event-response-border);
+  background: var(--event-response-bg);
+  color: var(--event-response-text);
+  box-shadow:
+    0 24px 54px rgba(0, 0, 0, 0.48),
+    0 0 38px var(--event-response-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.event-banner--special {
+  border-color: var(--event-special-border);
+  background: var(--event-special-bg);
+  color: var(--event-special-text);
+  box-shadow:
+    0 28px 62px rgba(0, 0, 0, 0.54),
+    0 0 44px var(--event-special-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.48);
+}
+
+.event-banner--resolution {
+  border-color: var(--event-resolution-border);
+  background: var(--event-resolution-bg);
+  color: var(--event-resolution-text);
+  box-shadow:
+    0 22px 46px rgba(0, 0, 0, 0.44),
+    0 0 34px var(--event-resolution-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.event-banner--final {
+  border-color: var(--event-final-border);
+  background: var(--event-final-bg);
+  color: var(--event-final-text);
+  box-shadow:
+    0 34px 78px rgba(0, 0, 0, 0.58),
+    0 0 56px var(--event-final-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.event-banner--danger {
+  border-color: var(--event-danger-border);
+  background: var(--event-danger-bg);
+  color: var(--event-danger-text);
+  box-shadow:
+    0 24px 54px rgba(0, 0, 0, 0.50),
+    0 0 42px var(--event-danger-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.event-banner-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 223, 128, 0.26);
+  border-radius: 999px;
+  background: rgba(255, 223, 128, 0.08);
+  color: rgba(255, 241, 184, 0.86);
+  padding: 4px 12px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.event-banner-title {
+  color: currentColor;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-shadow:
+    0 3px 14px rgba(0, 0, 0, 0.48),
+    0 0 24px rgba(255, 223, 128, 0.14);
+}
+
+.event-banner-copy {
+  color: rgba(255, 248, 225, 0.74);
+  font-family: Inter, system-ui, sans-serif;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.event-action-surface {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(201, 168, 76, 0.12);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 223, 128, 0.06), transparent 42%),
+    linear-gradient(180deg, rgba(6, 12, 22, 0.86), rgba(3, 8, 16, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 12px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.event-action-surface--critical {
+  border-color: rgba(201, 168, 76, 0.24);
+  box-shadow:
+    0 0 0 1px rgba(201, 168, 76, 0.08),
+    0 18px 38px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.event-action-helper-chip {
+  border: 1px solid rgba(201, 168, 76, 0.14);
+  border-radius: 999px;
+  background: rgba(201, 168, 76, 0.08);
+  color: rgba(201, 168, 76, 0.78);
+  padding: 4px 10px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.event-action-helper-chip--hot {
+  border-color: rgba(201, 168, 76, 0.28);
+  background: rgba(201, 168, 76, 0.15);
+  color: #e8c76a;
+}
+
+
+/* PHASE B.1 — Unified compact action chrome. */
+.event-action-dock {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(201, 168, 76, 0.22);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 223, 128, 0.10), transparent 48%),
+    linear-gradient(180deg, rgba(20, 15, 8, 0.90), rgba(6, 10, 12, 0.94));
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.34),
+    0 0 24px rgba(201, 168, 76, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.44);
+  backdrop-filter: blur(14px);
+}
+
+.event-action-dock::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 241, 184, 0.54), transparent);
+}
+
+.event-action-dock::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.07), transparent 28%),
+    radial-gradient(circle at 88% 100%, rgba(201, 168, 76, 0.12), transparent 38%);
+  opacity: 0.74;
+  mix-blend-mode: overlay;
+}
+
+.event-action-dock--decision {
+  border-color: rgba(255, 223, 128, 0.34);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 223, 128, 0.13), transparent 48%),
+    linear-gradient(180deg, rgba(39, 24, 8, 0.93), rgba(8, 11, 12, 0.96));
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.38),
+    0 0 30px rgba(201, 168, 76, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.event-action-dock--open {
+  border-color: rgba(248, 113, 113, 0.22);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(220, 38, 38, 0.12), transparent 44%),
+    linear-gradient(180deg, rgba(24, 10, 8, 0.90), rgba(6, 10, 12, 0.94));
+}
+
+.event-action-dock--waiting {
+  border-color: rgba(201, 168, 76, 0.16);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(201, 168, 76, 0.07), transparent 44%),
+    linear-gradient(180deg, rgba(14, 18, 16, 0.88), rgba(5, 9, 12, 0.94));
+}
+
+.event-action-dock__header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.event-action-dock__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 223, 128, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 223, 128, 0.08);
+  color: rgba(255, 241, 184, 0.78);
+  padding: 3px 10px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.20em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.event-action-dock__buttons {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.event-action-chip {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.event-action-chip::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 1px 10px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+}

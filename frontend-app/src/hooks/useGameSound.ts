@@ -1,58 +1,30 @@
-// =============================================================================
-//  useGameSound.ts — som do jogo, com fallback procedural.
-// =============================================================================
+// PREMIUM PATCH — useGameSound
 //
-//  Estratégia em duas camadas:
-//
-//   1) Se existir um arquivo em `/public/sounds/<nome>.mp3`, ele é usado.
-//   2) Caso contrário, um som procedural (Web Audio API) é sintetizado em
-//      runtime — sempre que o efeito é disparado.
-//
-//  Isso significa que o jogo TEM SOM imediatamente, antes mesmo de o time
-//  produzir/licenciar samples reais. Quando os arquivos forem colocados na
-//  pasta `/public/sounds/`, o cache de <audio> assume e o procedural some.
-//
-//  Decisões importantes:
-//   - Volume mestre persistido em localStorage (`tp:soundVolume`).
-//   - Mute persistido em localStorage (`tp:soundMuted`).
-//   - O AudioContext é instanciado preguiçosamente, no primeiro `play()`,
-//     para respeitar a política de autoplay dos navegadores. Antes do
-//     primeiro gesto do usuário nada toca — isso é correto.
-//   - Sons proceduralmente gerados ficam abaixo de 1.5s pra não competir
-//     com a próxima ação. Truco/Seis/Nove/Doze podem chegar a 1.8s.
-//   - Cada som procedural é uma função pura que recebe o ctx e o destino
-//     (gainNode mestre), permitindo que o mute/volume globais sempre se
-//     apliquem sem retrabalho.
-//
-//  Para adicionar um som novo: estenda o type `SoundType`, dê um caminho em
-//  `soundUrls` (ainda que o arquivo não exista), e implemente o procedural
-//  em `proceduralSounds` — preferencialmente curto e em harmonia com os
-//  outros (mesma escala: A natural minor / D dorian funcionam bem).
-// =============================================================================
+// Keeps the original public API intact: play, setMuted, setVolume, toggleMute,
+// muted, and volume. The sound director controls mix balance through per-call
+// volumes while this hook keeps the shared engine and procedural fallbacks.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type SoundType =
-  // cartas
   | 'card-deal'
   | 'card-slide'
   | 'card-hover'
   | 'card-impact'
-  // vira
   | 'vira-flip'
-  // pedidos
+  | 'vira-reveal'
+  | 'card-shuffle'
+  | 'coin-flip'
+  | 'chip-drop'
   | 'truco-call'
   | 'seis-call'
   | 'nove-call'
   | 'doze-call'
-  // respostas
   | 'accept'
   | 'run'
-  // resolução de rodada
   | 'round-win'
   | 'round-loss'
   | 'round-tie'
-  // resolução de mão / partida
   | 'hand-win'
   | 'hand-loss'
   | 'game-win'
@@ -62,10 +34,7 @@ type LegacySoundType = 'play-card';
 type PlayableSoundType = SoundType | LegacySoundType;
 
 function normalizeSoundType(type: PlayableSoundType): SoundType {
-  if (type === 'play-card') {
-    return 'card-slide';
-  }
-
+  if (type === 'play-card') return 'card-slide';
   return type;
 }
 
@@ -75,6 +44,10 @@ const soundUrls: Record<SoundType, string> = {
   'card-hover': '/sounds/card-hover.mp3',
   'card-impact': '/sounds/card-impact.mp3',
   'vira-flip': '/sounds/vira-flip.mp3',
+  'vira-reveal': '/sounds/vira-reveal.mp3',
+  'card-shuffle': '/sounds/card-shuffle.mp3',
+  'coin-flip': '/sounds/coin-flip.mp3',
+  'chip-drop': '/sounds/chip-drop.mp3',
   'truco-call': '/sounds/truco.mp3',
   'seis-call': '/sounds/seis.mp3',
   'nove-call': '/sounds/nove.mp3',
@@ -90,9 +63,6 @@ const soundUrls: Record<SoundType, string> = {
   'game-loss': '/sounds/game-loss.mp3',
 };
 
-// ---------------------------------------------------------------------------
-//  Persistência de preferências do usuário.
-// ---------------------------------------------------------------------------
 const STORAGE_VOLUME_KEY = 'tp:soundVolume';
 const STORAGE_MUTED_KEY = 'tp:soundMuted';
 
@@ -109,14 +79,8 @@ function readStoredMuted(): boolean {
   return window.localStorage.getItem(STORAGE_MUTED_KEY) === '1';
 }
 
-// ---------------------------------------------------------------------------
-//  Síntese procedural — Web Audio API.
-//  Cada função recebe (ctx, destination, when) e retorna a duração em
-//  segundos. `when` é um offset opcional pra agendar no futuro.
-// ---------------------------------------------------------------------------
 type Synth = (ctx: AudioContext, dest: AudioNode, when?: number) => number;
 
-// helpers ------------------------------------------------------------
 function envelope(
   ctx: AudioContext,
   dest: AudioNode,
@@ -158,82 +122,98 @@ function tone(
   return attack + hold + release;
 }
 
-// efeitos curtos ------------------------------------------------------
-const cardSlide: Synth = (ctx, dest, when = 0) => {
-  // ruído filtrado descendo — fricção.
-  const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+function noiseBuffer(ctx: AudioContext, duration: number, highpass = 0): AudioNode {
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * duration), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  if (highpass > 0) {
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = highpass;
+    src.connect(hp);
+    return src;
   }
+  return src;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXISTING SYNTHS (unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const cardSlide: Synth = (ctx, dest, when = 0) => {
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < data.length; i++)
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.35);
+
   const noise = ctx.createBufferSource();
   noise.buffer = buffer;
   const filter = ctx.createBiquadFilter();
   filter.type = 'bandpass';
-  filter.frequency.setValueAtTime(2200, ctx.currentTime + when);
-  filter.frequency.exponentialRampToValueAtTime(700, ctx.currentTime + when + 0.18);
-  filter.Q.value = 4;
-  const env = envelope(ctx, dest, 0.005, 0.04, 0.14, 0.45, when);
+  filter.frequency.setValueAtTime(2600, ctx.currentTime + when);
+  filter.frequency.exponentialRampToValueAtTime(760, ctx.currentTime + when + 0.2);
+  filter.Q.value = 4.8;
+  const env = envelope(ctx, dest, 0.004, 0.05, 0.15, 0.58, when);
   noise.connect(filter);
   filter.connect(env);
   noise.start(ctx.currentTime + when);
-  noise.stop(ctx.currentTime + when + 0.2);
-  return 0.2;
+  noise.stop(ctx.currentTime + when + 0.22);
+  return 0.22;
 };
 
 const cardImpact: Synth = (ctx, dest, when = 0) => {
-  // baque seco: thump grave + click agudo curto.
-  tone(ctx, dest, 80, 'sine', 0.001, 0.02, 0.12, 0.7, when);
-  tone(ctx, dest, 160, 'triangle', 0.001, 0.01, 0.08, 0.4, when);
-  // click agudo
-  const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  tone(ctx, dest, 76, 'sine', 0.001, 0.018, 0.13, 0.84, when);
+  tone(ctx, dest, 152, 'triangle', 0.001, 0.012, 0.09, 0.48, when);
+  tone(ctx, dest, 310, 'triangle', 0.001, 0.006, 0.04, 0.18, when + 0.004);
+
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.038, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+
+  for (let i = 0; i < data.length; i++)
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.7);
+
   const noise = ctx.createBufferSource();
-  noise.buffer = buffer;
+  noise.buffer = buf;
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
-  hp.frequency.value = 4000;
-  const env = envelope(ctx, dest, 0.002, 0.005, 0.025, 0.18, when);
+  hp.frequency.value = 3200;
+  const env = envelope(ctx, dest, 0.001, 0.006, 0.03, 0.24, when);
   noise.connect(hp);
   hp.connect(env);
   noise.start(ctx.currentTime + when);
-  noise.stop(ctx.currentTime + when + 0.04);
-  return 0.16;
+  noise.stop(ctx.currentTime + when + 0.05);
+  return 0.18;
 };
 
 const cardDeal: Synth = (ctx, dest, when = 0) => {
-  // deslize + leve impacto agudo no fim
   cardSlide(ctx, dest, when);
   cardImpact(ctx, dest, when + 0.14);
   return 0.32;
 };
 
 const cardHover: Synth = (ctx, dest, when = 0) => {
-  // pluck cristalino, muito curto e baixo.
   tone(ctx, dest, 1320, 'sine', 0.003, 0.005, 0.08, 0.18, when);
   tone(ctx, dest, 1980, 'sine', 0.003, 0.004, 0.05, 0.10, when);
   return 0.09;
 };
 
 const viraFlip: Synth = (ctx, dest, when = 0) => {
-  // sweep ascendente + chime
   tone(ctx, dest, 220, 'sawtooth', 0.005, 0.01, 0.18, 0.18, when);
   tone(ctx, dest, 660, 'sine', 0.01, 0.06, 0.32, 0.45, when + 0.08);
   tone(ctx, dest, 990, 'sine', 0.01, 0.04, 0.22, 0.30, when + 0.12);
   return 0.46;
 };
 
-// pedidos: gravidade aumenta com o valor ----------------------------
 function callTone(base: number, layers: number, peak: number): Synth {
   return (ctx, dest, when = 0) => {
-    // 3 ondas em fifths, decaimento dramático
     const dur = 0.35 + layers * 0.05;
     for (let i = 0; i < layers; i++) {
       const f = base * (1 + i * 0.5);
       tone(ctx, dest, f, i === 0 ? 'sawtooth' : 'square', 0.008, 0.06, dur - 0.06, peak * (1 - i * 0.18), when);
     }
-    // tail boom
     tone(ctx, dest, base * 0.5, 'sine', 0.01, 0.12, 0.5, peak * 0.5, when + 0.05);
     return dur + 0.5;
   };
@@ -244,9 +224,7 @@ const seisCall = callTone(165, 3, 0.62);
 const noveCall = callTone(123, 3, 0.7);
 const dozeCall = callTone(98, 4, 0.78);
 
-// respostas ----------------------------------------------------------
 const accept: Synth = (ctx, dest, when = 0) => {
-  // dois tons ascendentes + chime
   tone(ctx, dest, 523, 'sine', 0.01, 0.05, 0.18, 0.4, when);
   tone(ctx, dest, 784, 'sine', 0.01, 0.05, 0.22, 0.4, when + 0.09);
   tone(ctx, dest, 1046, 'triangle', 0.005, 0.04, 0.2, 0.25, when + 0.18);
@@ -254,39 +232,37 @@ const accept: Synth = (ctx, dest, when = 0) => {
 };
 
 const run: Synth = (ctx, dest, when = 0) => {
-  // descendente desistente
   tone(ctx, dest, 587, 'triangle', 0.01, 0.04, 0.16, 0.32, when);
   tone(ctx, dest, 392, 'triangle', 0.01, 0.05, 0.2, 0.28, when + 0.1);
   tone(ctx, dest, 261, 'sine', 0.015, 0.08, 0.3, 0.22, when + 0.22);
   return 0.6;
 };
 
-// rodada -------------------------------------------------------------
 const roundWin: Synth = (ctx, dest, when = 0) => {
-  // arpeggio ascendente curto e brilhante
-  tone(ctx, dest, 659, 'sine', 0.006, 0.04, 0.16, 0.32, when);
-  tone(ctx, dest, 880, 'sine', 0.006, 0.04, 0.18, 0.34, when + 0.07);
-  tone(ctx, dest, 1175, 'triangle', 0.006, 0.06, 0.24, 0.30, when + 0.14);
-  return 0.44;
+  cardImpact(ctx, dest, when);
+  tone(ctx, dest, 659, 'sine', 0.006, 0.04, 0.14, 0.32, when + 0.03);
+  tone(ctx, dest, 880, 'sine', 0.006, 0.04, 0.18, 0.36, when + 0.08);
+  tone(ctx, dest, 1175, 'triangle', 0.006, 0.06, 0.24, 0.34, when + 0.15);
+  tone(ctx, dest, 1568, 'sine', 0.004, 0.025, 0.18, 0.16, when + 0.2);
+  return 0.48;
 };
 
 const roundLoss: Synth = (ctx, dest, when = 0) => {
-  // par descendente menor, sem ser melodramático
-  tone(ctx, dest, 392, 'triangle', 0.01, 0.06, 0.2, 0.32, when);
-  tone(ctx, dest, 311, 'sine', 0.01, 0.08, 0.28, 0.26, when + 0.1);
-  return 0.46;
+  cardImpact(ctx, dest, when);
+  tone(ctx, dest, 392, 'triangle', 0.01, 0.05, 0.18, 0.36, when + 0.02);
+  tone(ctx, dest, 311, 'sine', 0.01, 0.08, 0.28, 0.3, when + 0.1);
+  tone(ctx, dest, 196, 'sine', 0.012, 0.06, 0.22, 0.16, when + 0.16);
+  return 0.48;
 };
 
 const roundTie: Synth = (ctx, dest, when = 0) => {
-  // tom neutro com leve tremor
-  tone(ctx, dest, 523, 'sine', 0.01, 0.06, 0.18, 0.28, when);
-  tone(ctx, dest, 523, 'sine', 0.01, 0.04, 0.18, 0.20, when + 0.16);
-  return 0.4;
+  tone(ctx, dest, 740, 'sine', 0.006, 0.04, 0.18, 0.28, when);
+  tone(ctx, dest, 523, 'sine', 0.008, 0.05, 0.18, 0.24, when + 0.1);
+  tone(ctx, dest, 740, 'sine', 0.006, 0.03, 0.16, 0.18, when + 0.22);
+  return 0.42;
 };
 
-// mão e partida ------------------------------------------------------
 const handWin: Synth = (ctx, dest, when = 0) => {
-  // fanfarra curta
   tone(ctx, dest, 523, 'triangle', 0.008, 0.05, 0.18, 0.4, when);
   tone(ctx, dest, 659, 'triangle', 0.008, 0.05, 0.2, 0.4, when + 0.1);
   tone(ctx, dest, 784, 'triangle', 0.008, 0.06, 0.22, 0.4, when + 0.2);
@@ -295,7 +271,6 @@ const handWin: Synth = (ctx, dest, when = 0) => {
 };
 
 const handLoss: Synth = (ctx, dest, when = 0) => {
-  // queda em mi menor
   tone(ctx, dest, 440, 'triangle', 0.01, 0.08, 0.2, 0.36, when);
   tone(ctx, dest, 349, 'triangle', 0.01, 0.08, 0.22, 0.32, when + 0.14);
   tone(ctx, dest, 277, 'sine', 0.015, 0.12, 0.42, 0.28, when + 0.3);
@@ -303,7 +278,6 @@ const handLoss: Synth = (ctx, dest, when = 0) => {
 };
 
 const gameWin: Synth = (ctx, dest, when = 0) => {
-  // fanfarra grande
   handWin(ctx, dest, when);
   tone(ctx, dest, 1046, 'sine', 0.01, 0.1, 0.38, 0.32, when + 0.5);
   tone(ctx, dest, 1318, 'sine', 0.01, 0.1, 0.4, 0.32, when + 0.62);
@@ -312,12 +286,120 @@ const gameWin: Synth = (ctx, dest, when = 0) => {
 };
 
 const gameLoss: Synth = (ctx, dest, when = 0) => {
-  // peso, baixo grave decaindo
   tone(ctx, dest, 196, 'sawtooth', 0.02, 0.2, 0.4, 0.42, when);
   tone(ctx, dest, 147, 'triangle', 0.02, 0.25, 0.5, 0.36, when + 0.2);
   tone(ctx, dest, 110, 'sine', 0.03, 0.4, 0.7, 0.32, when + 0.45);
   return 1.5;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW PREMIUM SYNTHS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Card shuffle fallback: five quick paper slaps with varied filters.
+ * It keeps the new-hand reveal audible even when audio assets are unavailable.
+ */
+const cardShuffle: Synth = (ctx, dest, when = 0) => {
+  const SLAPS = 5;
+  const GAP = 0.065;
+  for (let i = 0; i < SLAPS; i++) {
+    const t = when + i * GAP;
+    const dur = 0.055 + Math.random() * 0.02;
+    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let j = 0; j < data.length; j++)
+      data[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / data.length, 1.5);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1200 + i * 180;
+    bp.Q.value = 3 + i * 0.4;
+
+    const env2 = envelope(ctx, dest, 0.003, dur * 0.3, dur * 0.7, 0.38 - i * 0.04, t);
+    src.connect(bp);
+    bp.connect(env2);
+    src.start(ctx.currentTime + t);
+    src.stop(ctx.currentTime + t + dur + 0.05);
+  }
+  // Trailing paper whisper
+  tone(ctx, dest, 3200, 'sine', 0.006, 0.02, 0.12, 0.08, when + SLAPS * GAP);
+  return SLAPS * GAP + 0.18;
+};
+
+/**
+ * Vira reveal fallback: air whoosh, dry table hit, and a bright shimmer
+ * so the manilha reveal stays more dramatic than a regular card flip.
+ */
+const viraReveal: Synth = (ctx, dest, when = 0) => {
+  // Fast descending air whoosh.
+  const whooshBuf = ctx.createBuffer(1, ctx.sampleRate * 0.22, ctx.sampleRate);
+  const wData = whooshBuf.getChannelData(0);
+  for (let i = 0; i < wData.length; i++)
+    wData[i] = (Math.random() * 2 - 1) * (1 - i / wData.length);
+  const whoosh = ctx.createBufferSource();
+  whoosh.buffer = whooshBuf;
+  const wFilter = ctx.createBiquadFilter();
+  wFilter.type = 'bandpass';
+  wFilter.frequency.setValueAtTime(3800, ctx.currentTime + when);
+  wFilter.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + when + 0.22);
+  wFilter.Q.value = 2;
+  const wEnv = envelope(ctx, dest, 0.004, 0.06, 0.16, 0.5, when);
+  whoosh.connect(wFilter);
+  wFilter.connect(wEnv);
+  whoosh.start(ctx.currentTime + when);
+  whoosh.stop(ctx.currentTime + when + 0.28);
+
+  // Dry table impact.
+  tone(ctx, dest, 90, 'sine', 0.001, 0.018, 0.1, 0.65, when + 0.18);
+  tone(ctx, dest, 200, 'triangle', 0.001, 0.008, 0.06, 0.35, when + 0.18);
+
+  // Bright shimmer announcing the manilha.
+  tone(ctx, dest, 1760, 'sine', 0.004, 0.08, 0.5, 0.36, when + 0.22);
+  tone(ctx, dest, 2637, 'sine', 0.004, 0.06, 0.4, 0.26, when + 0.28);
+  tone(ctx, dest, 3520, 'sine', 0.003, 0.04, 0.3, 0.16, when + 0.34);
+
+  return 0.75;
+};
+
+/**
+ * Short metallic accent for chips, ties, and confirmation beats.
+ */
+const coinFlip: Synth = (ctx, dest, when = 0) => {
+  tone(ctx, dest, 2100, 'sine', 0.002, 0.015, 0.28, 0.32, when);
+  tone(ctx, dest, 3150, 'sine', 0.002, 0.01, 0.22, 0.22, when + 0.025);
+  tone(ctx, dest, 1400, 'sine', 0.003, 0.02, 0.18, 0.18, when + 0.04);
+  return 0.32;
+};
+
+/**
+ * Dry chip/table drop used as a low accent under card landings.
+ */
+const chipDrop: Synth = (ctx, dest, when = 0) => {
+  tone(ctx, dest, 140, 'sine', 0.001, 0.012, 0.08, 0.72, when);
+  tone(ctx, dest, 280, 'triangle', 0.001, 0.006, 0.04, 0.34, when);
+  // Click
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 0.01), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 5000;
+  const env2 = envelope(ctx, dest, 0.001, 0.002, 0.008, 0.24, when);
+  src.connect(hp);
+  hp.connect(env2);
+  src.start(ctx.currentTime + when);
+  src.stop(ctx.currentTime + when + 0.015);
+  return 0.12;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REGISTRY
+// ─────────────────────────────────────────────────────────────────────────────
 
 const proceduralSounds: Record<SoundType, Synth> = {
   'card-deal': cardDeal,
@@ -325,6 +407,10 @@ const proceduralSounds: Record<SoundType, Synth> = {
   'card-hover': cardHover,
   'card-impact': cardImpact,
   'vira-flip': viraFlip,
+  'vira-reveal': viraReveal,
+  'card-shuffle': cardShuffle,
+  'coin-flip': coinFlip,
+  'chip-drop': chipDrop,
   'truco-call': trucoCall,
   'seis-call': seisCall,
   'nove-call': noveCall,
@@ -340,16 +426,15 @@ const proceduralSounds: Record<SoundType, Synth> = {
   'game-loss': gameLoss,
 };
 
-// ---------------------------------------------------------------------------
-//  Singleton: AudioContext + cache de <audio> elements + estado mestre.
-//  Mantemos isso fora do hook pra que múltiplos consumidores compartilhem
-//  o mesmo contexto e o estado de mute seja realmente global.
-// ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGINE (shared singleton, unchanged from original)
+// ─────────────────────────────────────────────────────────────────────────────
+
 type GameSoundEngine = {
   ctx: AudioContext | null;
   master: GainNode | null;
   audioCache: Map<SoundType, HTMLAudioElement>;
-  audioFailed: Set<SoundType>; // se o arquivo falhou ao carregar, vai aqui
+  audioFailed: Set<SoundType>;
   volume: number;
   muted: boolean;
   listeners: Set<(s: { volume: number; muted: boolean }) => void>;
@@ -366,9 +451,7 @@ const engine: GameSoundEngine = {
 };
 
 function ensureCtx(): { ctx: AudioContext; master: GainNode } | null {
-  if (engine.ctx && engine.master) {
-    return { ctx: engine.ctx, master: engine.master };
-  }
+  if (engine.ctx && engine.master) return { ctx: engine.ctx, master: engine.master };
   try {
     const Ctor =
       (window as unknown as { AudioContext?: typeof AudioContext }).AudioContext ??
@@ -398,9 +481,6 @@ function notify() {
   engine.listeners.forEach((cb) => cb(snapshot));
 }
 
-// ---------------------------------------------------------------------------
-//  Hook público.
-// ---------------------------------------------------------------------------
 export type GameSoundApi = {
   play: (type: PlayableSoundType, volume?: number) => void;
   setMuted: (muted: boolean) => void;
@@ -413,111 +493,84 @@ export type GameSoundApi = {
 export function useGameSound(): GameSoundApi {
   const [muted, setMutedState] = useState(engine.muted);
   const [volume, setVolumeState] = useState(engine.volume);
-
-  // pré-carrega os <audio> existentes uma vez por mount; falhas mudam pra
-  // procedural silenciosamente (o navegador não bloqueia o jogo).
   const preloadedRef = useRef(false);
+
   useEffect(() => {
     if (preloadedRef.current) return;
     preloadedRef.current = true;
-
     (Object.keys(soundUrls) as SoundType[]).forEach((key) => {
       const url = soundUrls[key];
       const audio = new Audio(url);
       audio.preload = 'auto';
-      audio.addEventListener('error', () => {
-        engine.audioFailed.add(key);
-      });
-      // Em alguns navegadores, o evento `error` só dispara depois do
-      // primeiro play(). Por isso também detectamos via NotSupportedError
-      // no catch do play().
+      audio.addEventListener('error', () => { engine.audioFailed.add(key); });
       engine.audioCache.set(key, audio);
     });
   }, []);
 
-  // sincroniza state local com o engine (suporta múltiplos hooks).
   useEffect(() => {
     const cb = ({ volume: v, muted: m }: { volume: number; muted: boolean }) => {
       setVolumeState(v);
       setMutedState(m);
     };
     engine.listeners.add(cb);
-    return () => {
-      engine.listeners.delete(cb);
-    };
+    return () => { engine.listeners.delete(cb); };
   }, []);
 
   const play = useCallback((type: PlayableSoundType, perCallVolume = 1) => {
     if (engine.muted) return;
-
     const normalizedType = normalizeSoundType(type);
     const audio = engine.audioCache.get(normalizedType);
     const fileLikelyExists = audio && !engine.audioFailed.has(normalizedType);
 
-    if (fileLikelyExists) {
-      try {
-        audio.volume = Math.max(0, Math.min(1, engine.volume * perCallVolume));
-        audio.currentTime = 0;
-        audio.play().catch(() => {
-          engine.audioFailed.add(normalizedType);
-          // fallback procedural quando o autoplay falha ou o arquivo erra
-          playProcedural(normalizedType, perCallVolume);
-        });
-        return;
-      } catch {
+    if (fileLikelyExists && audio) {
+      const cloned = audio.cloneNode() as HTMLAudioElement;
+      cloned.volume = Math.min(1, engine.volume * perCallVolume);
+      cloned.play().catch(() => {
         engine.audioFailed.add(normalizedType);
-      }
+        playProcedural(normalizedType, perCallVolume);
+      });
+      return;
     }
 
     playProcedural(normalizedType, perCallVolume);
   }, []);
 
-  const setMuted = useCallback((next: boolean) => {
-    engine.muted = next;
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_MUTED_KEY, next ? '1' : '0');
-    }
+  const setMuted = useCallback((m: boolean) => {
+    engine.muted = m;
+    window.localStorage.setItem(STORAGE_MUTED_KEY, m ? '1' : '0');
     applyMasterGain();
     notify();
   }, []);
 
-  const setVolume = useCallback((next: number) => {
-    const clamped = Math.max(0, Math.min(1, next));
-    engine.volume = clamped;
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_VOLUME_KEY, String(clamped));
-    }
+  const setVolume = useCallback((v: number) => {
+    engine.volume = Math.max(0, Math.min(1, v));
+    window.localStorage.setItem(STORAGE_VOLUME_KEY, String(engine.volume));
     applyMasterGain();
     notify();
   }, []);
 
-  const toggleMute = useCallback(() => {
-    setMuted(!engine.muted);
-  }, [setMuted]);
+  const toggleMute = useCallback(() => { setMuted(!engine.muted); }, [setMuted]);
 
-  return useMemo(
-    () => ({ play, setMuted, setVolume, toggleMute, muted, volume }),
-    [play, setMuted, setVolume, toggleMute, muted, volume],
-  );
+  return { play, setMuted, setVolume, toggleMute, muted, volume };
 }
 
 function playProcedural(type: SoundType, perCallVolume: number) {
   const synth = proceduralSounds[type];
-
-  if (!synth) {
-    return;
+  if (!synth) return;
+  const ctx = ensureCtx();
+  if (!ctx) return;
+  if (ctx.ctx.state === 'suspended') {
+    ctx.ctx.resume().catch(() => {});
   }
-
-  const ensured = ensureCtx();
-  if (!ensured) return;
-  const { ctx, master } = ensured;
-  // resume() é necessário em iOS/Safari após o primeiro gesto.
-  if (ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-  // gain por chamada — multiplicado pelo master.
-  const perCall = ctx.createGain();
-  perCall.gain.value = Math.max(0, Math.min(1.5, perCallVolume));
-  perCall.connect(master);
-  synth(ctx, perCall);
+  const limiter = ctx.ctx.createDynamicsCompressor();
+  limiter.threshold.value = -6;
+  limiter.knee.value = 3;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.001;
+  limiter.release.value = 0.08;
+  limiter.connect(ctx.master);
+  const scaler = ctx.ctx.createGain();
+  scaler.gain.value = perCallVolume;
+  scaler.connect(limiter);
+  synth(ctx.ctx, scaler);
 }

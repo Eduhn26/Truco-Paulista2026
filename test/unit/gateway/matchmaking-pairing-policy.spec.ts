@@ -69,7 +69,7 @@ describe('MatchmakingPairingPolicy', () => {
     expect(result?.players.map((player) => player.socketId)).toEqual(['socket-2', 'socket-3']);
   });
 
-  it('returns the closest rating block for 2v2', () => {
+  it('returns the closest human pair for public 2v2', () => {
     const policy = new MatchmakingPairingPolicy();
 
     const result = policy.findPair('2v2', [
@@ -94,31 +94,12 @@ describe('MatchmakingPairingPolicy', () => {
         rating: 1110,
         joinedAt: 3,
       }),
-      createEntry({
-        socketId: 'socket-4',
-        playerToken: 'token-4',
-        userId: 'user-4',
-        rating: 1090,
-        joinedAt: 4,
-      }),
-      createEntry({
-        socketId: 'socket-5',
-        playerToken: 'token-5',
-        userId: 'user-5',
-        rating: 1120,
-        joinedAt: 5,
-      }),
     ]);
 
     expect(result).not.toBeNull();
     expect(result?.mode).toBe('2v2');
     expect(result?.averageRating).toBe(1105);
-    expect(result?.players).toHaveLength(4);
-    expect(result?.players.map((player) => player.socketId)).toEqual([
-      'socket-2',
-      'socket-3',
-      'socket-4',
-      'socket-5',
-    ]);
+    expect(result?.players).toHaveLength(2);
+    expect(result?.players.map((player) => player.socketId)).toEqual(['socket-2', 'socket-3']);
   });
 });

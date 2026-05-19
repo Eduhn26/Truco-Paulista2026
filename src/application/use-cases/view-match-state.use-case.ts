@@ -26,6 +26,6 @@ export class ViewMatchStateUseCase {
       throw new Error('match not found');
     }
 
-    return mapMatchToViewMatchState(matchId, match, request.viewerPlayerId);
+    return mapMatchToViewMatchState(matchId, match, request.viewerPlayerId, request.viewerSeatId);
   }
 }

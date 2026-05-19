@@ -10,7 +10,6 @@ import type {
 
 const TABLE_SEAT_ORDER_1V1 = ['T2A', 'T1A'] as const;
 
-
 const EMPTY_AVAILABLE_ACTIONS = {
   canRequestTruco: false,
   canRaiseToSix: false,
@@ -29,6 +28,9 @@ export type TableSeatView = {
   isBot: boolean;
   isCurrentTurn: boolean;
   isMine: boolean;
+  displayName: string | null;
+  publicName: string | null;
+  publicSlug: string | null;
   botIdentity: BotIdentityPayload | null;
 };
 
@@ -91,6 +93,9 @@ export function useMatchPageViewModel({
         isBot: player?.isBot ?? false,
         isCurrentTurn: inferredCurrentTurnSeatId === seatId,
         isMine: seatId === mySeat,
+        displayName: player?.displayName ?? null,
+        publicName: player?.publicName ?? null,
+        publicSlug: player?.publicSlug ?? null,
         botIdentity: player?.botIdentity ?? null,
       };
     });
@@ -100,8 +105,8 @@ export function useMatchPageViewModel({
 
     const myIsPlayerOne = mySeat === 'T1A';
     const rawViewerCards = myIsPlayerOne
-      ? currentPrivateHand?.playerOneHand ?? []
-      : currentPrivateHand?.playerTwoHand ?? [];
+      ? (currentPrivateHand?.playerOneHand ?? [])
+      : (currentPrivateHand?.playerTwoHand ?? []);
 
     const myCards = rawViewerCards
       .map((card) => cardStringToPayload(card))
@@ -130,8 +135,8 @@ export function useMatchPageViewModel({
     // if room ready flags are temporarily stale.
     const canStartHand = Boolean(
       !matchFinished &&
-        (nextDecisionType === 'start-next-hand' ||
-          (publicMatchState?.state === 'waiting' && roomState?.canStart === true)),
+      (nextDecisionType === 'start-next-hand' ||
+        (publicMatchState?.state === 'waiting' && roomState?.canStart === true)),
     );
 
     const canPlayCard = Boolean(mySeat && availableActions.canAttemptPlayCard);

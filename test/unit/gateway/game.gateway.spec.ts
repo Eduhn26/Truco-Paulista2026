@@ -87,7 +87,9 @@ describe('GameGateway bot profile flow', () => {
       execute: jest.fn().mockResolvedValue({ matchId: 'queue-match-1' }),
     };
     const startHandUseCase = { execute: jest.fn() };
-    const playCardUseCase = { execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }) };
+    const playCardUseCase = {
+      execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
+    };
     const requestTrucoUseCase = {
       execute: jest.fn().mockResolvedValue({ matchId: 'match-1' }),
     };
@@ -150,6 +152,7 @@ describe('GameGateway bot profile flow', () => {
       getSessionBySocketId: jest.fn(),
       leave: jest.fn(),
       fillMissingSeatsWithBots: jest.fn(),
+      reserveNextHumanSeat: jest.fn(),
       setReady: jest.fn(),
       canStart: jest.fn(),
       beginHand: jest.fn(),
@@ -393,7 +396,7 @@ describe('GameGateway bot profile flow', () => {
 
       tryResolvePair: jest.fn((mode: MatchmakingMode) => {
         const maintenance = expireQueue(mode);
-        const requiredPlayers = mode === '1v1' ? 2 : 4;
+        const requiredPlayers = mode === '1v1' ? 2 : 2;
 
         if (maintenance.snapshot.playersWaiting.length < requiredPlayers) {
           return {
@@ -603,6 +606,7 @@ describe('GameGateway bot profile flow', () => {
       matchId: 'match-1',
       playerId: 'P1',
       card: '3P',
+      seatId: 'T1A',
     });
   });
 
@@ -688,6 +692,7 @@ describe('GameGateway bot profile flow', () => {
       matchId: 'match-1',
       playerId: 'P1',
       card: '4O',
+      seatId: 'T1A',
     });
   });
 
@@ -1078,7 +1083,9 @@ describe('GameGateway bot profile flow', () => {
       authToken: 'auth-token-state-1',
     });
 
-    deps.authTokenService.verifyToken.mockReturnValueOnce({ sub: 'auth-user-state-1' });
+    deps.authTokenService.verifyToken.mockReturnValueOnce({
+      sub: 'auth-user-state-1',
+    });
 
     deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValueOnce({
       profile: {
@@ -1178,7 +1185,9 @@ describe('GameGateway bot profile flow', () => {
     });
 
     await gateway.handleJoinQueue(firstSocket as never, { mode: '1v1' });
-    const response = await gateway.handleJoinQueue(secondSocket as never, { mode: '1v1' });
+    const response = await gateway.handleJoinQueue(secondSocket as never, {
+      mode: '1v1',
+    });
 
     expect(deps.createMatchUseCase.execute).toHaveBeenCalledWith({
       mode: '1v1',
@@ -1244,6 +1253,117 @@ describe('GameGateway bot profile flow', () => {
     });
   });
 
+  it('creates a public 2v2 match with two humans and fills partner seats with bots', async () => {
+    const { gateway, deps, registerSocket } = createGateway();
+    const firstSocket = createSocket({
+      id: 'socket-public-2v2-1',
+      authToken: 'auth-token-public-2v2-1',
+    });
+    const secondSocket = createSocket({
+      id: 'socket-public-2v2-2',
+      authToken: 'auth-token-public-2v2-2',
+    });
+
+    registerSocket(firstSocket);
+    registerSocket(secondSocket);
+
+    deps.createMatchUseCase.execute.mockResolvedValue({ matchId: 'queue-match-2v2' });
+    deps.authTokenService.verifyToken
+      .mockReturnValueOnce({ sub: 'auth-user-public-1' })
+      .mockReturnValueOnce({ sub: 'auth-user-public-2' });
+
+    deps.getOrCreatePlayerProfileUseCase.execute
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-public-1',
+          rating: 1200,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-public-2',
+          rating: 1210,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-public-1',
+          rating: 1200,
+        },
+      })
+      .mockResolvedValueOnce({
+        profile: {
+          id: 'profile-public-2',
+          rating: 1210,
+        },
+      });
+
+    deps.roomManager.join
+      .mockReturnValueOnce({
+        matchId: 'queue-match-2v2',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      })
+      .mockReturnValueOnce({
+        matchId: 'queue-match-2v2',
+        seatId: 'T2A',
+        teamId: 'T2',
+        domainPlayerId: 'P2',
+      });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'queue-match-2v2',
+      state: 'waiting',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: null,
+    });
+
+    await gateway.handleJoinQueue(firstSocket as never, { mode: '2v2' });
+    const response = await gateway.handleJoinQueue(secondSocket as never, { mode: '2v2' });
+
+    expect(deps.createMatchUseCase.execute).toHaveBeenCalledWith({
+      mode: '2v2',
+    });
+    expect(deps.roomManager.ensureRoom).toHaveBeenCalledWith('queue-match-2v2', '2v2');
+    expect(deps.roomManager.fillMissingSeatsWithBots).toHaveBeenCalledWith('queue-match-2v2');
+    expect(firstSocket.join).toHaveBeenCalledWith('queue-match-2v2');
+    expect(secondSocket.join).toHaveBeenCalledWith('queue-match-2v2');
+
+    expect(firstSocket.emit).toHaveBeenCalledWith(
+      'player-assigned',
+      expect.objectContaining({
+        matchId: 'queue-match-2v2',
+        seatId: 'T1A',
+        teamId: 'T1',
+        playerId: 'P1',
+      }),
+    );
+    expect(secondSocket.emit).toHaveBeenCalledWith(
+      'player-assigned',
+      expect.objectContaining({
+        matchId: 'queue-match-2v2',
+        seatId: 'T2A',
+        teamId: 'T2',
+        playerId: 'P2',
+      }),
+    );
+
+    expect(response).toEqual({
+      event: 'match-found',
+      data: {
+        matchId: 'queue-match-2v2',
+        mode: '2v2',
+        players: [
+          expect.objectContaining({ userId: 'auth-user-public-1', rating: 1200 }),
+          expect.objectContaining({ userId: 'auth-user-public-2', rating: 1210 }),
+        ],
+      },
+    });
+  });
   it('emits queue-timeout and removes expired players during queue state reads', async () => {
     const { gateway, deps, server } = createGateway();
     const expiredSocket = createSocket({
@@ -1251,7 +1371,9 @@ describe('GameGateway bot profile flow', () => {
       authToken: 'auth-token-expired-1',
     });
 
-    deps.authTokenService.verifyToken.mockReturnValueOnce({ sub: 'auth-user-expired-1' });
+    deps.authTokenService.verifyToken.mockReturnValueOnce({
+      sub: 'auth-user-expired-1',
+    });
     deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValueOnce({
       profile: {
         id: 'profile-expired-1',

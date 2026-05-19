@@ -6,8 +6,12 @@ import type {
   BotDecisionMetadata,
   BotDecisionPort,
   BotDecisionStrategy,
+  BotDecisionTacticalTelemetry,
+  BotDecisionBetTelemetry,
   BotHandProgressView,
   BotProfile,
+  BotSeatId,
+  BotTeamId,
   BotRoundView,
 } from '@game/application/ports/bot-decision.port';
 import { compareCards, manilhaRankFromVira } from '@game/domain/services/truco-rules';
@@ -15,6 +19,11 @@ import { Card } from '@game/domain/value-objects/card';
 import type { Rank } from '@game/domain/value-objects/rank';
 
 type CardSelectionStrategy = 'weakest' | 'middle' | 'strongest';
+type BotCardSelection = {
+  card: string;
+  strategy: BotDecisionStrategy;
+  tactical?: BotDecisionTacticalTelemetry;
+};
 type BotBetAction = Extract<
   BotDecision,
   {
@@ -31,32 +40,60 @@ type BotBetAction = Extract<
 type BotBetThresholds = {
   accept: number;
   raise: number;
-  // Initiative threshold: minimum hand strength (0..1) to call truco / raise on own turn
-  // without any positional advantage (no rounds won, balanced score).
+  // Minimum hand strength required before positional and score boosts.
   initiative: number;
-  // Bluff probability when hand strength is clearly below `initiative` but positional
-  // context is favourable (won R1, opponent under score pressure, etc.).
+  // Profile-specific bluff rate used only when positional context is favourable.
   bluffProbability: number;
 };
 
 type ScorePressure = {
-  // My remaining points to reach victory (>= 1).
   myPointsToWin: number;
-  // Opponent's remaining points to reach victory (>= 1).
   opponentPointsToWin: number;
-  // True if declining the current pending bet ends the match for me.
   declineLosesMatch: boolean;
-  // True if accepting the current pending bet could end the match for me if I lose.
   acceptRisksMatch: boolean;
 };
 
 type MaoDeOnzeDecisionAction = 'accept-mao-de-onze' | 'decline-mao-de-onze';
+
+type TwoVersusTwoRoundPlay = {
+  seatId: BotSeatId;
+  playerId: 'P1' | 'P2';
+  card: string;
+};
+
+type TwoVersusTwoRoundState = {
+  plays: TwoVersusTwoRoundPlay[];
+  winningSeatId: BotSeatId | null;
+  winningTeamId: BotTeamId | null;
+  winningCard: string | null;
+};
 
 const FULL_DECK_SUITS = ['C', 'O', 'P', 'E'] as const;
 const FULL_DECK_RANKS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'] as const;
 const FULL_DECK = FULL_DECK_RANKS.flatMap((rank) =>
   FULL_DECK_SUITS.map((suit) => `${rank}${suit}`),
 );
+
+const TWO_VERSUS_TWO_SEATS: BotSeatId[] = ['T1A', 'T2A', 'T1B', 'T2B'];
+
+const TEAM_BY_SEAT: Record<BotSeatId, BotTeamId> = {
+  T1A: 'T1',
+  T2A: 'T2',
+  T1B: 'T1',
+  T2B: 'T2',
+};
+
+const PLAYER_BY_TEAM: Record<BotTeamId, 'P1' | 'P2'> = {
+  T1: 'P1',
+  T2: 'P2',
+};
+
+const PARTNER_BY_SEAT: Record<BotSeatId, BotSeatId> = {
+  T1A: 'T1B',
+  T1B: 'T1A',
+  T2A: 'T2B',
+  T2B: 'T2A',
+};
 
 @Injectable()
 export class HeuristicBotAdapter implements BotDecisionPort {
@@ -71,7 +108,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return betResponse;
     }
 
-    // New: take truco initiative BEFORE choosing a card, when legal.
+    // Bet initiative is evaluated before card selection so a legal raise can take priority.
     const initiative = this.decideBetInitiative(context);
     if (initiative) {
       return initiative;
@@ -99,11 +136,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       this.compareCardStrength(left, right, context.viraRank),
     );
 
-    const opponentCard = this.getOpponentCard(context.currentRound, context.player.playerId);
-
-    const selection = opponentCard
-      ? this.pickResponseCard(orderedHand, opponentCard, context.viraRank, context.profile)
-      : this.pickOpeningCard(orderedHand, context.profile);
+    const twoVersusTwoSelection = this.pickTwoVersusTwoCard(context, orderedHand);
+    const selection =
+      twoVersusTwoSelection ??
+      this.pickOneVersusOneCard(context, orderedHand, context.currentRound);
 
     if (!selection) {
       return {
@@ -116,15 +152,12 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return {
       action: 'play-card',
       card: selection.card,
-      // NOTE (22.A): handStrength is intentionally omitted on play-card paths to avoid running
-      // calculateHandStrength on every bot turn. It is only populated on bet-response decisions.
-      metadata: this.buildMetadata(selection.strategy),
+      // Hand strength is omitted here to avoid scoring every regular bot turn.
+      metadata: this.buildMetadata(selection.strategy, undefined, selection.tactical),
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Mão de 11 decision (bot owns the special accept/decline step)
-  // ---------------------------------------------------------------------------
+  // Mao de Onze decisions run before normal play because the hand is locked until accepted.
   private decideMaoDeOnze(context: BotDecisionContext): BotDecision | null {
     const bet = context.bet;
     if (!bet) return null;
@@ -269,8 +302,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       }
     }
 
-    // Square root makes the two best cards more legible for mão de 11. Raw win-rate is too
-    // conservative because even excellent non-manilhas still lose to all four manilhas.
+    // Square root weighting keeps strong non-manilha hands playable in Mao de Onze decisions.
     return Math.sqrt(wins / totalPossibleWins);
   }
 
@@ -342,9 +374,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return opponentScore + 3 >= score.pointsToWin;
   }
 
-  // ---------------------------------------------------------------------------
-  // Bet response (opponent has pending truco/raise request)
-  // ---------------------------------------------------------------------------
+  // Pending truco responses are resolved before card-play decisions.
   private decideBetResponse(context: BotDecisionContext): BotDecision | null {
     const bet = context.bet;
     if (!bet) return null;
@@ -367,8 +397,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const thresholds = this.resolveBetThresholds(context.profile);
     const pressure = this.computeScorePressure(context, bet);
 
-    // 1. Score forces a decline: if accepting risks losing the match AND hand is weak,
-    //    cautious/balanced prefer to run. Aggressive still accepts more liberally.
+    // Weak hands may decline when accepting could immediately lose the match.
     if (
       pressure.acceptRisksMatch &&
       availableActions.canDeclineBet &&
@@ -376,57 +405,136 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     ) {
       return {
         action: 'decline-bet',
-        metadata: this.buildMetadata('bet-decline-by-score', handStrength),
+        metadata: this.buildMetadata(
+          'bet-decline-by-score',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: 'decline-bet',
+          }),
+        ),
       };
     }
 
-    // 2. Declining loses the match: we have nothing to lose by accepting, regardless of strength.
+    // If running loses the match, accepting is the only viable response.
     if (pressure.declineLosesMatch && availableActions.canAcceptBet) {
       return {
         action: 'accept-bet',
-        metadata: this.buildMetadata('bet-accept-forced-by-score', handStrength),
+        metadata: this.buildMetadata(
+          'bet-accept-forced-by-score',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: 'accept-bet',
+          }),
+        ),
       };
     }
 
-    // 3. Strong hand + not yet at max → raise.
     const strongestRaise = this.getStrongestAvailableRaise(availableActions);
     if (strongestRaise && effectiveStrength >= thresholds.raise) {
       return {
         action: strongestRaise,
-        metadata: this.buildMetadata('bet-raise', handStrength),
+        metadata: this.buildMetadata(
+          'bet-raise',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: strongestRaise,
+          }),
+        ),
       };
     }
 
-    // 4. Good-enough hand → accept.
     if (availableActions.canAcceptBet && effectiveStrength >= thresholds.accept) {
       return {
         action: 'accept-bet',
-        metadata: this.buildMetadata('bet-accept', handStrength),
+        metadata: this.buildMetadata(
+          'bet-accept',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: 'accept-bet',
+          }),
+        ),
       };
     }
 
-    // 5. Can decline → decline.
     if (availableActions.canDeclineBet) {
       return {
         action: 'decline-bet',
-        metadata: this.buildMetadata('bet-decline', handStrength),
+        metadata: this.buildMetadata(
+          'bet-decline',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: 'decline-bet',
+          }),
+        ),
       };
     }
 
-    // 6. No decline available (e.g. first truco cannot be declined in some rules) → accept.
+    // Fallback for rule variants where the available action set does not include decline.
     if (availableActions.canAcceptBet) {
       return {
         action: 'accept-bet',
-        metadata: this.buildMetadata('bet-no-response', handStrength),
+        metadata: this.buildMetadata(
+          'bet-no-response',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost: 0,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: 'accept-bet',
+          }),
+        ),
       };
     }
 
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // Bet initiative (bot's own turn, no pending bet) — NEW
-  // ---------------------------------------------------------------------------
+  // Bot initiative is limited to its own playable turn and normal betting state.
   private decideBetInitiative(context: BotDecisionContext): BotDecision | null {
     const bet = context.bet;
     if (!bet) return null;
@@ -435,17 +543,12 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     if (bet.specialDecisionPending) return null;
 
     const actions = bet.availableActions;
-    // Must be able to both play a card (i.e. bot's card-play turn) AND escalate.
     if (!actions.canAttemptPlayCard) return null;
 
     const initiativeAction = this.resolveInitiativeAction(actions);
     if (!initiativeAction) return null;
 
-    // Skip the initiative branch entirely on the opening move of the hand: pushing
-    // truco with zero rounds played and no table information is robotic, not human.
-    // Players typically feel out the first round first. Exception: mão de 11/ferro
-    // is already filtered above; here we're only blocking the very first card of a
-    // normal hand.
+    // Avoid opening-hand raises before any table information exists.
     if (this.isBeforeAnyRound(context)) return null;
 
     const hand = context.player.hand;
@@ -457,31 +560,70 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const scoreBoost = this.computeScoreInitiativeBoost(context);
     const effectiveStrength = this.clamp01(handStrength + progressBoost + scoreBoost);
 
-    // Value-driven initiative: genuinely strong hand.
+    const pressure = this.computeScorePressure(context, bet);
+
     if (effectiveStrength >= thresholds.initiative) {
       return {
         action: initiativeAction,
-        metadata: this.buildMetadata('bet-initiative-value', handStrength),
+        metadata: this.buildMetadata(
+          'bet-initiative-value',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: initiativeAction,
+          }),
+        ),
       };
     }
 
-    // Pressure-driven initiative: won R1, opponent under score pressure, etc.
-    // Lower bar than pure value because positional context already de-risks the call.
+    // Positional pressure lowers the required raw hand strength.
     if (progressBoost + scoreBoost >= 0.2 && effectiveStrength >= thresholds.initiative - 0.18) {
       return {
         action: initiativeAction,
-        metadata: this.buildMetadata('bet-initiative-pressure', handStrength),
+        metadata: this.buildMetadata(
+          'bet-initiative-pressure',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: initiativeAction,
+          }),
+        ),
       };
     }
 
-    // Controlled bluff: small, profile-weighted probability of calling truco on a weak
-    // hand when the situation is not obviously suicidal (we are not actively losing R1
-    // with a terrible hand). Deterministic per (matchId, round, hand) so tests are
-    // reproducible and we do not spam repeated bluffs.
+    // Bluffing is deterministic per hand so tests stay stable and repeated calls do not spam.
     if (this.shouldBluff(context, thresholds, handStrength)) {
       return {
         action: initiativeAction,
-        metadata: this.buildMetadata('bet-initiative-bluff', handStrength),
+        metadata: this.buildMetadata(
+          'bet-initiative-bluff',
+          handStrength,
+          undefined,
+          this.buildBetAuditTelemetry({
+            context,
+            handStrength,
+            progressBoost,
+            scoreBoost,
+            effectiveStrength,
+            thresholds,
+            pressure,
+            selectedAction: initiativeAction,
+          }),
+        ),
       };
     }
 
@@ -491,8 +633,6 @@ export class HeuristicBotAdapter implements BotDecisionPort {
   private resolveInitiativeAction(
     actions: NonNullable<BotDecisionContext['bet']>['availableActions'],
   ): BotBetAction | null {
-    // Follow the natural escalation ladder. Only one of these should be legal at a time
-    // (depending on currentValue), but we check defensively.
     if (actions.canRequestTruco) return 'request-truco';
     if (actions.canRaiseToSix) return 'raise-to-six';
     if (actions.canRaiseToNine) return 'raise-to-nine';
@@ -513,14 +653,11 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       );
     }
 
-    // Fallback when gateway does not populate handProgress.
+    // Preserve compatibility with older gateway payloads that omit handProgress.
     const round = context.currentRound;
     return !round?.playerOneCard && !round?.playerTwoCard;
   }
 
-  // ---------------------------------------------------------------------------
-  // Bluff (deterministic PRNG)
-  // ---------------------------------------------------------------------------
   private shouldBluff(
     context: BotDecisionContext,
     thresholds: BotBetThresholds,
@@ -528,13 +665,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
   ): boolean {
     if (thresholds.bluffProbability <= 0) return false;
 
-    // Do not bluff when already losing the current round badly: opponent has played a
-    // visibly strong card on the board. We don't know opponent's hand, but if they
-    // played and we cannot beat it, bluffing on top is suicide.
+    // Do not bluff when the visible table card already beats every available response.
     if (this.isLosingCurrentRoundVisibly(context)) return false;
 
-    // Do not bluff if the hand is outright terrible — bluffing with a 0.05 hand is not
-    // "brave", it's just noise. Require some baseline.
+    // Require a minimum baseline so bluffing remains intentional instead of random noise.
     if (handStrength < 0.18) return false;
 
     const seed = this.deterministicSeed(context);
@@ -551,7 +685,6 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
     if (!opCard || myCard) return false;
 
-    // Opponent played; check whether any card in my hand beats it.
     return !context.player.hand.some((candidate) =>
       this.beats(candidate, opCard, context.viraRank),
     );
@@ -570,7 +703,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return hash >>> 0;
   }
 
-  // Mulberry32 — tiny, fast, deterministic.
+  // Small deterministic PRNG used only for reproducible bluff decisions.
   private mulberry32(seed: number): number {
     let t = (seed + 0x6d2b79f5) >>> 0;
     t = Math.imul(t ^ (t >>> 15), t | 1);
@@ -578,9 +711,59 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 
-  // ---------------------------------------------------------------------------
-  // Score / progress boosts
-  // ---------------------------------------------------------------------------
+  private buildBetAuditTelemetry({
+    context,
+    handStrength,
+    progressBoost,
+    scoreBoost,
+    effectiveStrength,
+    thresholds,
+    pressure,
+    selectedAction,
+  }: {
+    context: BotDecisionContext;
+    handStrength: number;
+    progressBoost: number;
+    scoreBoost: number;
+    effectiveStrength: number;
+    thresholds: BotBetThresholds;
+    pressure: ScorePressure;
+    selectedAction: BotBetAction;
+  }): BotDecisionBetTelemetry {
+    const bet = context.bet;
+    const progress = context.handProgress;
+
+    return {
+      ...(bet ? { currentValue: bet.currentValue } : {}),
+      ...(bet && 'pendingValue' in bet ? { pendingValue: bet.pendingValue ?? null } : {}),
+      ...(bet ? { betState: bet.betState } : {}),
+      ...(bet && 'requestedBy' in bet ? { requestedBy: bet.requestedBy ?? null } : {}),
+      ...(bet ? { specialState: bet.specialState } : {}),
+      selectedBetAction: selectedAction,
+      handStrength: this.roundStrength(handStrength),
+      progressBoost: this.roundStrength(progressBoost),
+      scoreBoost: this.roundStrength(scoreBoost),
+      effectiveStrength: this.roundStrength(effectiveStrength),
+      acceptThreshold: thresholds.accept,
+      raiseThreshold: thresholds.raise,
+      initiativeThreshold: thresholds.initiative,
+      bluffProbability: thresholds.bluffProbability,
+      declineFloor: this.declineFloor(context.profile),
+      myPointsToWin: pressure.myPointsToWin,
+      opponentPointsToWin: pressure.opponentPointsToWin,
+      declineLosesMatch: pressure.declineLosesMatch,
+      acceptRisksMatch: pressure.acceptRisksMatch,
+      ...(progress
+        ? {
+            roundsWonByMe: progress.roundsWonByMe,
+            roundsWonByOpponent: progress.roundsWonByOpponent,
+            roundsTied: progress.roundsTied,
+            currentRoundIndex: progress.currentRoundIndex,
+          }
+        : {}),
+    };
+  }
+
   private computeScorePressure(
     context: BotDecisionContext,
     bet: NonNullable<BotDecisionContext['bet']>,
@@ -601,9 +784,9 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const currentValue = bet.currentValue ?? 1;
     const pendingValue = bet.pendingValue ?? currentValue;
 
-    // Declining awards `currentValue` to the requester (the opponent, since we're responding).
+    // Declining awards the current value to the requester.
     const declineLosesMatch = opScore + currentValue >= score.pointsToWin;
-    // Accepting risks `pendingValue` going to the opponent if we lose the hand.
+    // Accepting risks the pending value if the bot loses the hand.
     const acceptRisksMatch = opScore + pendingValue >= score.pointsToWin;
 
     return {
@@ -614,14 +797,13 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     };
   }
 
-  // Additive boost to hand strength when deciding initiative, based on rounds won so far.
-  // Max boost is around 0.22 (won R1 AND tied R2) — meaningful but not overwhelming.
+  // Round progress adjusts initiative without overpowering raw hand strength.
   private computeProgressBoost(progress?: BotHandProgressView): number {
     if (!progress) return 0;
     let boost = 0;
 
     if (progress.roundsWonByMe === 1 && progress.roundsWonByOpponent === 0) {
-      // Classic "won R1" — very strong position for pressuring truco.
+      // Winning the first round is the strongest positional trigger for pressure.
       boost += 0.18;
     } else if (
       progress.roundsWonByMe >= 1 &&
@@ -629,21 +811,19 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     ) {
       boost += 0.1;
     } else if (progress.roundsWonByOpponent > progress.roundsWonByMe) {
-      // Behind — lowers effective strength (less appetite for initiative; more appetite for folding).
+      // Being behind lowers initiative and increases fold pressure.
       boost -= 0.12;
     }
 
     if (progress.roundsTied >= 1) {
-      // A tied round typically favours whoever won the opposite round; neutral on its own.
+      // A tied round is a small positional signal, not a decisive one.
       boost += 0.03;
     }
 
     return boost;
   }
 
-  // When ahead on the match score, bot is slightly more willing to escalate (close it out).
-  // When behind and running low on remaining points, bot is MUCH more willing to escalate
-  // (only path to comeback). Keeps boost bounded.
+  // Score pressure nudges initiative while keeping the hand-strength model dominant.
   private computeScoreInitiativeBoost(context: BotDecisionContext): number {
     const score = context.score;
     if (!score) return 0;
@@ -657,38 +837,28 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     let boost = 0;
 
     if (myRemaining <= 3 && diff >= 0) {
-      // Close to winning and tied/ahead — finish the job.
       boost += 0.08;
     }
 
     if (opRemaining <= 3 && diff < 0) {
-      // Opponent is about to win and we're behind — gamble for comeback.
       boost += 0.14;
     }
 
     if (diff >= 6) {
-      // Large lead — no need to escalate, lock in.
       boost -= 0.1;
     }
 
     return boost;
   }
 
-  // Minimum strength required to accept when accept would risk losing the match.
-  // Profile-aware: aggressive accepts on less; cautious demands more.
+  // Profile-specific floor for accepting when the bet can decide the match.
   private declineFloor(profile: BotProfile): number {
     if (profile === 'aggressive') return 0.38;
     if (profile === 'cautious') return 0.72;
     return 0.55;
   }
 
-  // ---------------------------------------------------------------------------
-  // Profile thresholds
-  // ---------------------------------------------------------------------------
-  // 22.B: thresholds widened between profiles to make bet behaviour perceptibly distinct.
-  // - aggressive: accepts earlier, raises on solid hands, takes more initiative, bluffs more.
-  // - balanced:   anchor values — preserves regression baseline for the default profile.
-  // - cautious:   only raises on near-unbeatable hands, rarely bluffs, needs strong hand to accept.
+  // Thresholds make each bot profile visibly distinct without changing the rule model.
   private resolveBetThresholds(profile: BotProfile): BotBetThresholds {
     if (profile === 'aggressive') {
       return {
@@ -734,9 +904,6 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // Hand strength (unchanged)
-  // ---------------------------------------------------------------------------
   private calculateHandStrength(hand: string[], viraRank: Rank): number {
     if (hand.length === 0) {
       return 0;
@@ -779,17 +946,291 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return Math.round(value * 100) / 100;
   }
 
-  // ---------------------------------------------------------------------------
-  // Card selection (unchanged behaviour vs. previous version)
-  // ---------------------------------------------------------------------------
   private getOpponentCard(currentRound: BotRoundView, playerId: 'P1' | 'P2'): string | null {
     return playerId === 'P1' ? currentRound.playerTwoCard : currentRound.playerOneCard;
   }
 
-  private pickOpeningCard(
-    hand: string[],
-    profile: BotProfile,
-  ): { card: string; strategy: BotDecisionStrategy } {
+  private pickOneVersusOneCard(
+    context: BotDecisionContext,
+    orderedHand: string[],
+    currentRound: BotRoundView,
+  ): BotCardSelection {
+    const opponentCard = this.getOpponentCard(currentRound, context.player.playerId);
+
+    return opponentCard
+      ? this.pickResponseCard(orderedHand, opponentCard, context.viraRank, context.profile)
+      : this.pickOpeningCard(orderedHand, context.profile);
+  }
+
+  private pickTwoVersusTwoCard(
+    context: BotDecisionContext,
+    orderedHand: string[],
+  ): BotCardSelection | null {
+    const currentRound = context.currentRound;
+    const actorSeatId = context.actorSeatId;
+
+    if (context.mode !== '2v2' || !currentRound || currentRound.finished || !actorSeatId) {
+      return null;
+    }
+
+    const roundState = this.resolveTwoVersusTwoRoundState(currentRound, context.viraRank);
+
+    if (!roundState || roundState.plays.length === 0) {
+      return this.pickTwoVersusTwoOpeningCard(context, orderedHand, roundState);
+    }
+
+    const partnerSeatId = context.partnerSeatId ?? PARTNER_BY_SEAT[actorSeatId];
+
+    if (roundState.winningSeatId === partnerSeatId) {
+      const selectedCard = orderedHand[0]!;
+
+      return {
+        card: selectedCard,
+        strategy: 'two-versus-two-partner-winning-save-weakest',
+        tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
+      };
+    }
+
+    const actorTeamId = context.actorTeamId ?? TEAM_BY_SEAT[actorSeatId];
+
+    if (roundState.winningTeamId !== actorTeamId && roundState.winningCard) {
+      const winningCards = orderedHand.filter((candidate) =>
+        this.beats(candidate, roundState.winningCard!, context.viraRank),
+      );
+
+      if (winningCards.length === 0) {
+        const selectedCard = orderedHand[0]!;
+
+        return {
+          card: selectedCard,
+          strategy: 'two-versus-two-response-losing-save-weakest',
+          tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
+        };
+      }
+
+      const selection = this.pickResponseCard(
+        orderedHand,
+        roundState.winningCard,
+        context.viraRank,
+        context.profile,
+      );
+
+      return {
+        ...selection,
+        tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selection.card),
+      };
+    }
+
+    return null;
+  }
+
+  private pickTwoVersusTwoOpeningCard(
+    context: BotDecisionContext,
+    orderedHand: string[],
+    roundState: TwoVersusTwoRoundState | null,
+  ): BotCardSelection {
+    const progress = context.handProgress;
+    const hasFirstRoundLead = Boolean(
+      progress &&
+      progress.currentRoundIndex > 0 &&
+      progress.roundsWonByMe > progress.roundsWonByOpponent,
+    );
+
+    if (!hasFirstRoundLead) {
+      const selection = this.pickOpeningCard(orderedHand, context.profile);
+
+      return {
+        ...selection,
+        tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selection.card),
+      };
+    }
+
+    const shouldPressure = this.shouldPressureTwoVersusTwoOpeningAfterLead(context, orderedHand);
+    const selectedCard = shouldPressure ? orderedHand[orderedHand.length - 1]! : orderedHand[0]!;
+
+    return {
+      card: selectedCard,
+      strategy: shouldPressure
+        ? 'two-versus-two-opening-after-first-win-pressure'
+        : 'two-versus-two-opening-after-first-win-save-weakest',
+      tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
+    };
+  }
+
+  private shouldPressureTwoVersusTwoOpeningAfterLead(
+    context: BotDecisionContext,
+    orderedHand: string[],
+  ): boolean {
+    const currentValue = context.bet?.currentValue ?? 1;
+    const remainingHandStrength = this.calculateHandStrength(orderedHand, context.viraRank);
+    const hasScorePressure = this.hasTwoVersusTwoOpeningScorePressure(context, currentValue);
+
+    if (context.profile === 'aggressive') {
+      return currentValue >= 3 || remainingHandStrength >= 0.48 || hasScorePressure;
+    }
+
+    if (context.profile === 'cautious') {
+      return currentValue >= 9 || remainingHandStrength >= 0.74 || hasScorePressure;
+    }
+
+    return currentValue >= 6 || remainingHandStrength >= 0.62 || hasScorePressure;
+  }
+
+  private hasTwoVersusTwoOpeningScorePressure(
+    context: BotDecisionContext,
+    currentValue: number,
+  ): boolean {
+    const score = context.score;
+
+    if (!score) {
+      return false;
+    }
+
+    const myScore = context.player.playerId === 'P1' ? score.playerOne : score.playerTwo;
+    const opponentScore = context.player.playerId === 'P1' ? score.playerTwo : score.playerOne;
+
+    return (
+      myScore + currentValue >= score.pointsToWin ||
+      opponentScore + currentValue >= score.pointsToWin ||
+      score.pointsToWin - opponentScore <= 3
+    );
+  }
+
+  private buildTwoVersusTwoTacticalTelemetry(
+    context: BotDecisionContext,
+    roundState: TwoVersusTwoRoundState | null,
+    selectedCard: string,
+  ): BotDecisionTacticalTelemetry {
+    const actorSeatId = context.actorSeatId;
+    const actorTeamId = actorSeatId
+      ? (context.actorTeamId ?? TEAM_BY_SEAT[actorSeatId])
+      : context.actorTeamId;
+    const partnerSeatId =
+      context.partnerSeatId ?? (actorSeatId ? PARTNER_BY_SEAT[actorSeatId] : null);
+
+    const seatPlays = (roundState?.plays ?? []).reduce<Partial<Record<BotSeatId, string | null>>>(
+      (accumulator, play) => ({
+        ...accumulator,
+        [play.seatId]: play.card,
+      }),
+      {},
+    );
+
+    return {
+      mode: '2v2',
+      ...(actorSeatId ? { actorSeatId } : {}),
+      ...(actorTeamId ? { actorTeamId } : {}),
+      partnerSeatId,
+      winningSeatIdBeforeDecision: roundState?.winningSeatId ?? null,
+      winningTeamIdBeforeDecision: roundState?.winningTeamId ?? null,
+      winningCardBeforeDecision: roundState?.winningCard ?? null,
+      partnerWasWinning: roundState?.winningSeatId === partnerSeatId,
+      actorHandBefore: [...context.player.hand],
+      selectedCard,
+      seatPlays,
+      orderedPlays: (roundState?.plays ?? []).map((play) => ({
+        ownerId: play.seatId,
+        seatId: play.seatId,
+        playerId: play.playerId,
+        card: play.card,
+      })),
+    };
+  }
+
+  private resolveTwoVersusTwoRoundState(
+    currentRound: BotRoundView,
+    viraRank: Rank,
+  ): TwoVersusTwoRoundState | null {
+    const plays = this.resolveTwoVersusTwoRoundPlays(currentRound);
+
+    if (plays.length === 0) {
+      return null;
+    }
+
+    const leaders: TwoVersusTwoRoundPlay[] = [];
+
+    for (const play of plays) {
+      if (leaders.length === 0) {
+        leaders.push(play);
+        continue;
+      }
+
+      const comparison = this.compareCardStrength(play.card, leaders[0]!.card, viraRank);
+
+      if (comparison > 0) {
+        leaders.splice(0, leaders.length, play);
+      } else if (comparison === 0) {
+        leaders.push(play);
+      }
+    }
+
+    if (leaders.length !== 1) {
+      return {
+        plays,
+        winningSeatId: null,
+        winningTeamId: null,
+        winningCard: null,
+      };
+    }
+
+    const leader = leaders[0]!;
+    const winningTeamId = TEAM_BY_SEAT[leader.seatId];
+
+    return {
+      plays,
+      winningSeatId: leader.seatId,
+      winningTeamId,
+      winningCard: leader.card,
+    };
+  }
+
+  private resolveTwoVersusTwoRoundPlays(currentRound: BotRoundView): TwoVersusTwoRoundPlay[] {
+    const orderedSeatPlays = (currentRound.orderedPlays ?? []).flatMap((play) => {
+      if (!this.isBotSeatId(play.seatId) || play.card.length === 0) {
+        return [];
+      }
+
+      return [
+        {
+          seatId: play.seatId,
+          playerId: play.playerId,
+          card: play.card,
+        },
+      ];
+    });
+
+    if (orderedSeatPlays.length > 0) {
+      return orderedSeatPlays;
+    }
+
+    const seatPlays = currentRound.seatPlays;
+
+    if (!seatPlays) {
+      return [];
+    }
+
+    return TWO_VERSUS_TWO_SEATS.flatMap((seatId) => {
+      const card = seatPlays[seatId];
+
+      if (!card) {
+        return [];
+      }
+
+      return [
+        {
+          seatId,
+          playerId: PLAYER_BY_TEAM[TEAM_BY_SEAT[seatId]],
+          card,
+        },
+      ];
+    });
+  }
+
+  private isBotSeatId(value: unknown): value is BotSeatId {
+    return typeof value === 'string' && TWO_VERSUS_TWO_SEATS.includes(value as BotSeatId);
+  }
+
+  private pickOpeningCard(hand: string[], profile: BotProfile): BotCardSelection {
     const card = this.pickCardByProfile(hand, profile, {
       aggressive: 'strongest',
       balanced: 'middle',
@@ -811,7 +1252,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     opponentCard: string,
     viraRank: Rank,
     profile: BotProfile,
-  ): { card: string; strategy: BotDecisionStrategy } {
+  ): BotCardSelection {
     const winningCards = hand.filter((candidate) => this.beats(candidate, opponentCard, viraRank));
 
     if (winningCards.length === 0) {
@@ -882,8 +1323,18 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     return 0;
   }
 
-  private buildMetadata(strategy: BotDecisionStrategy, handStrength?: number): BotDecisionMetadata {
-    const rationale = handStrength !== undefined ? { strategy, handStrength } : { strategy };
+  private buildMetadata(
+    strategy: BotDecisionStrategy,
+    handStrength?: number,
+    tactical?: BotDecisionTacticalTelemetry,
+    betAudit?: BotDecisionBetTelemetry,
+  ): BotDecisionMetadata {
+    const rationale = {
+      strategy,
+      ...(handStrength !== undefined ? { handStrength } : {}),
+      ...(tactical ? { tactical } : {}),
+      ...(betAudit ? { betAudit } : {}),
+    };
 
     return {
       source: 'heuristic',

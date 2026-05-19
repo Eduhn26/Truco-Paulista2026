@@ -217,4 +217,51 @@ describe('Hand (Domain)', () => {
     expect(hand.getWinner()).toBe('P2');
     expect(hand.getAwardedPoints()).toBe(1);
   });
+
+  it('keeps a 2v2 round open until the fourth seat plays', () => {
+    const hand = new Hand('4', [], [], {
+      mode: '2v2',
+      seatHands: {
+        T1A: ['3P', '2C', 'AO'],
+        T2A: ['7C', '5O', '6P'],
+        T1B: ['AC', 'KO', 'QC'],
+        T2B: ['4O', '5C', '6C'],
+      },
+    });
+
+    hand.play('P1', Card.from('3P'), { seatId: 'T1A' });
+    hand.play('P2', Card.from('7C'), { seatId: 'T2A' });
+    hand.play('P1', Card.from('AC'), { seatId: 'T1B' });
+
+    const snapshotBeforeFourthPlay = hand.toSnapshot();
+
+    expect(snapshotBeforeFourthPlay.rounds[0]?.finished).toBe(false);
+    expect(snapshotBeforeFourthPlay.rounds[0]?.orderedPlays?.map((play) => play.ownerId)).toEqual([
+      'T1A',
+      'T2A',
+      'T1B',
+    ]);
+    expect(hand.getRoundsCount()).toBe(1);
+    expect(hand.isFinished()).toBe(false);
+
+    hand.play('P2', Card.from('4O'), { seatId: 'T2B' });
+
+    const snapshotAfterFourthPlay = hand.toSnapshot();
+
+    expect(snapshotAfterFourthPlay.rounds[0]?.finished).toBe(true);
+    expect(snapshotAfterFourthPlay.rounds[0]?.orderedPlays?.map((play) => play.ownerId)).toEqual([
+      'T1A',
+      'T2A',
+      'T1B',
+      'T2B',
+    ]);
+    expect(snapshotAfterFourthPlay.rounds[0]?.seatPlays).toEqual({
+      T1A: '3P',
+      T2A: '7C',
+      T1B: 'AC',
+      T2B: '4O',
+    });
+    expect(hand.getRoundsCount()).toBe(2);
+    expect(hand.isFinished()).toBe(false);
+  });
 });

@@ -18,6 +18,10 @@ import {
   type RefObject,
 } from 'react';
 
+import { CardLandingImpact } from './cardLandingImpact';
+import { useCardFlightPhysics, CARD_FLIGHT_BASE_DURATION_MS } from './useCardFlightPhysics';
+import { useCardImpactFx } from './useCardImpactFx';
+
 type FlightCard = {
   rank: string;
   suit: string;
@@ -48,32 +52,28 @@ type OpponentCardFlightProps = {
   landTargetRef?: RefObject<HTMLElement | null>;
 };
 
-const FLIGHT_DURATION_MS = 480;
-const HANDOFF_NOTIFY_MS = FLIGHT_DURATION_MS - 80;
-const HANDOFF_REMOVE_MS = FLIGHT_DURATION_MS + 110;
-// NOTE: Keep the result ribbon behind the landing beat. The card should fly,
-// settle, then receive the WIN/PERDEU/EMPATE stamp. If the round result arrives
-// early in the same socket burst, this delay prevents the badge from appearing
-// while the card is still mid-air.
-const FLIGHT_OUTCOME_BADGE_DELAY_MS = FLIGHT_DURATION_MS + 70;
+// NOTE: The measured flight now adapts its timing to the real distance between
+// the origin and the landing slot. The exported duration remains as a conservative
+// fallback for callers that only need an approximate lock window.
+const FLIGHT_DURATION_MS = CARD_FLIGHT_BASE_DURATION_MS;
 
 function parseSuitSymbol(suit: string): string {
   switch (suit) {
-    case 'C':
-      return '♣';
-    case 'O':
-      return '♦';
     case 'P':
+      return '♣';
+    case 'C':
       return '♥';
     case 'E':
       return '♠';
+    case 'O':
+      return '♦';
     default:
       return '♦';
   }
 }
 
 function isRedSuit(suit: string): boolean {
-  return suit === 'P' || suit === 'O';
+  return suit === 'C' || suit === 'O';
 }
 
 type FlightOutcomeBadge = 'win' | 'loss' | 'tie' | null;
@@ -224,7 +224,10 @@ export function OpponentCardFlight({
   const flightNotifyTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const flightRemoveTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const notifiedFlightKeyRef = useRef<number | null>(null);
+  const scheduledFlightKeyRef = useRef<number | null>(null);
+  const landingTargetForImpactRef = useRef<FlightPoint | null>(null);
   const onFlightDoneRef = useRef(onFlightDone);
+  const { activeImpact, triggerCardImpact } = useCardImpactFx();
 
   useEffect(() => {
     onFlightDoneRef.current = onFlightDone;
@@ -255,6 +258,8 @@ export function OpponentCardFlight({
     setActiveFlight((current) => (current?.key === flightKey ? null : current));
     setLandingTarget(null);
     setSourceTarget(null);
+    landingTargetForImpactRef.current = null;
+    scheduledFlightKeyRef.current = null;
     flightNotifyTimeoutRef.current = null;
     flightRemoveTimeoutRef.current = null;
   }, []);
@@ -272,6 +277,7 @@ export function OpponentCardFlight({
     const slotEl = landTargetRef?.current;
 
     if (!containerEl || !slotEl) {
+      landingTargetForImpactRef.current = null;
       setLandingTarget(null);
       return;
     }
@@ -280,10 +286,13 @@ export function OpponentCardFlight({
     const slotRect = slotEl.getBoundingClientRect();
     const sourceEl = sourceTargetRef?.current ?? null;
 
-    setLandingTarget({
+    const nextLandingTarget = {
       left: slotRect.left - containerRect.left + slotRect.width / 2,
       top: slotRect.top - containerRect.top + slotRect.height / 2,
-    });
+    };
+
+    landingTargetForImpactRef.current = nextLandingTarget;
+    setLandingTarget(nextLandingTarget);
 
     if (!sourceEl) {
       setSourceTarget(null);
@@ -322,46 +331,84 @@ export function OpponentCardFlight({
 
     lastTriggeredKeyRef.current = revealKey;
     notifiedFlightKeyRef.current = null;
+    scheduledFlightKeyRef.current = null;
     clearFlightTimeouts();
     setActiveFlight({ key: revealKey, card });
-
-    // NOTE: The slot is released shortly before the clone is removed. The
-    // controlled overlap prevents a blank frame during the handoff from the
-    // flight layer to the settled table card.
-    flightNotifyTimeoutRef.current = window.setTimeout(() => {
-      notifyFlightDone(revealKey);
-    }, HANDOFF_NOTIFY_MS);
-
-    flightRemoveTimeoutRef.current = window.setTimeout(() => {
-      notifyFlightDone(revealKey);
-      finishFlight(revealKey);
-    }, HANDOFF_REMOVE_MS);
-  }, [card, clearFlightTimeouts, finishFlight, notifyFlightDone, revealKey, suppressed]);
+  }, [card, clearFlightTimeouts, revealKey, suppressed]);
 
   const flightCard = activeFlight?.card ?? null;
   const symbol = flightCard ? parseSuitSymbol(flightCard.suit) : '';
   const textColor = flightCard && isRedSuit(flightCard.suit) ? '#c0392b' : '#1a1a2e';
+  const flightPhysics = useCardFlightPhysics({
+    sourceTarget,
+    landingTarget,
+    profile: 'opponent',
+  });
+  const flightDurationSeconds = flightPhysics.durationMs / 1000;
+
+  useEffect(() => {
+    if (!activeFlight) {
+      return;
+    }
+
+    if (scheduledFlightKeyRef.current === activeFlight.key) {
+      return;
+    }
+
+    if (landTargetRef?.current && !landingTarget) {
+      return;
+    }
+
+    scheduledFlightKeyRef.current = activeFlight.key;
+    const flightKey = activeFlight.key;
+
+    // NOTE: The real slot needs to become visible before the clone is removed.
+    // This overlap prevents the one-frame blank/flicker seen when the resolver
+    // lands while the card is still handing off from the flight layer.
+    flightNotifyTimeoutRef.current = window.setTimeout(() => {
+      triggerCardImpact({
+        key: flightKey,
+        point: landingTargetForImpactRef.current ?? landingTarget,
+        variant: 'opponent',
+      });
+      notifyFlightDone(flightKey);
+    }, flightPhysics.handoffNotifyMs);
+
+    flightRemoveTimeoutRef.current = window.setTimeout(() => {
+      notifyFlightDone(flightKey);
+      finishFlight(flightKey);
+    }, flightPhysics.handoffRemoveMs);
+  }, [
+    activeFlight,
+    finishFlight,
+    flightPhysics.handoffNotifyMs,
+    flightPhysics.handoffRemoveMs,
+    landingTarget,
+    landTargetRef,
+    notifyFlightDone,
+    triggerCardImpact,
+  ]);
 
   const animateTarget = landingTarget
     ? {
         left: landingTarget.left,
         top: landingTarget.top,
         x: '-50%' as const,
-        y: ['-50%', '-66%', '-47%', '-50%'] as [string, string, string, string],
-        opacity: [1, 1, 1, 0.98] as [number, number, number, number],
-        scale: [0.86, 1.055, 1.015, 0.99] as [number, number, number, number],
-        rotateY: [180, 142, 54, 10, 0] as [number, number, number, number, number],
-        rotate: [-8, -12, -4, -5] as [number, number, number, number],
+        y: flightPhysics.motion.y,
+        opacity: flightPhysics.motion.opacity,
+        scale: flightPhysics.motion.scale,
+        rotateY: flightPhysics.motion.rotateY,
+        rotate: flightPhysics.motion.rotate,
       }
     : {
         left: '42.8%' as const,
         top: '50.2%' as const,
         x: '-50%' as const,
-        y: ['-50%', '-66%', '-47%', '-50%'] as [string, string, string, string],
-        opacity: [1, 1, 1, 0.98] as [number, number, number, number],
-        scale: [0.86, 1.055, 1.015, 0.99] as [number, number, number, number],
-        rotateY: [180, 142, 54, 10, 0] as [number, number, number, number, number],
-        rotate: [-8, -12, -4, -5] as [number, number, number, number],
+        y: flightPhysics.motion.y,
+        opacity: flightPhysics.motion.opacity,
+        scale: flightPhysics.motion.scale,
+        rotateY: flightPhysics.motion.rotateY,
+        rotate: flightPhysics.motion.rotate,
       };
 
   return (
@@ -371,6 +418,7 @@ export function OpponentCardFlight({
       aria-hidden
       style={{ perspective: '1400px' }}
     >
+      <CardLandingImpact impact={activeImpact} />
       <AnimatePresence>
         {activeFlight && flightCard ? (
           <motion.div
@@ -389,26 +437,26 @@ export function OpponentCardFlight({
             animate={animateTarget}
             exit={{ opacity: 0, scale: 1.005, transition: { duration: 0.12 } }}
             transition={{
-              duration: FLIGHT_DURATION_MS / 1000,
+              duration: flightDurationSeconds,
               ease: [0.2, 0.8, 0.2, 1],
               y: {
-                duration: FLIGHT_DURATION_MS / 1000,
-                times: [0, 0.5, 0.84, 1],
+                duration: flightDurationSeconds,
+                times: flightPhysics.times.y,
                 ease: 'easeOut',
               },
               scale: {
-                duration: FLIGHT_DURATION_MS / 1000,
-                times: [0, 0.52, 0.86, 1],
+                duration: flightDurationSeconds,
+                times: flightPhysics.times.scale,
                 ease: 'easeOut',
               },
               rotate: {
-                duration: FLIGHT_DURATION_MS / 1000,
-                times: [0, 0.48, 0.84, 1],
+                duration: flightDurationSeconds,
+                times: flightPhysics.times.rotate,
                 ease: 'easeOut',
               },
               rotateY: {
-                duration: FLIGHT_DURATION_MS / 1000,
-                times: [0, 0.22, 0.56, 0.82, 1],
+                duration: flightDurationSeconds,
+                times: flightPhysics.times.rotateY,
                 ease: 'easeInOut',
               },
             }}
@@ -520,7 +568,7 @@ export function OpponentCardFlight({
               <FlightOutcomeBadge
                 outcomeBadge={outcomeBadge}
                 outcomeBadgeLabel={outcomeBadgeLabel}
-                revealDelayMs={FLIGHT_OUTCOME_BADGE_DELAY_MS}
+                revealDelayMs={flightPhysics.outcomeBadgeDelayMs}
               />
 
               <div
@@ -562,9 +610,4 @@ export function OpponentCardFlight({
 }
 
 export const OPPONENT_CARD_FLIGHT_DURATION_MS = FLIGHT_DURATION_MS;
-
-
-
-
-
 

@@ -55,8 +55,8 @@ export class UpdateRatingUseCase {
 
     const profilesToSave: PlayerProfileSnapshot[] = [];
 
-    // NOTE: Bot opponents do not have profile rows, but human-vs-bot matches
-    // are still competitive lobby sessions and must move the human rating.
+    // Human-vs-bot matches still affect lobby rating, even though bot seats do
+    // not have persisted player profiles.
     for (const profile of winners as PlayerProfileSnapshot[]) {
       profilesToSave.push(applyWin(profile));
     }

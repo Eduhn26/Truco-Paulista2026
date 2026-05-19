@@ -201,7 +201,6 @@ describe('UpdateRatingUseCase', () => {
     });
   });
 
-
   it('enforces the current rating floor of 100 for losers', async () => {
     const repo = new FakePlayerProfileRepository();
 

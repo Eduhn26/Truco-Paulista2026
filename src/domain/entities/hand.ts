@@ -1,22 +1,26 @@
-﻿import type { PlayerId } from '../value-objects/player-id';
-import type { RoundResult } from '../value-objects/round-result';
-import type { Rank } from '../value-objects/rank';
+import type { PlayerId } from '../value-objects/player-id';
+import { RANKS, type Rank } from '../value-objects/rank';
+import { SUITS } from '../value-objects/suit';
 import { Card } from '../value-objects/card';
 
-import { Round, type RoundSnapshot } from './round';
+import { Round, type RoundSnapshot, type SeatId } from './round';
 import { InvalidMoveError } from '../exceptions/invalid-move-error';
 import { dealHandsFromViraRank, dealRandomHand } from '../services/deck';
 
 export type HandValue = 1 | 3 | 6 | 9 | 12;
 export type HandBetState = 'idle' | 'awaiting_response';
 export type HandSpecialState = 'normal' | 'mao_de_onze' | 'mao_de_ferro';
+export type HandMode = '1v1' | '2v2';
+export type HandSeatHandsSnapshot = Partial<Record<SeatId, string[]>>;
 
 export type HandSnapshot = {
   viraRank: Rank;
+  mode?: HandMode;
   rounds: RoundSnapshot[];
   finished: boolean;
   playerOneHand: string[];
   playerTwoHand: string[];
+  seatHands?: HandSeatHandsSnapshot;
   currentValue: HandValue;
   betState: HandBetState;
   pendingValue: HandValue | null;
@@ -30,6 +34,8 @@ export type HandSnapshot = {
 };
 
 type HandStateConfig = {
+  mode?: HandMode;
+  seatHands?: HandSeatHandsSnapshot;
   currentValue?: HandValue;
   betState?: HandBetState;
   pendingValue?: HandValue | null;
@@ -43,10 +49,93 @@ type HandStateConfig = {
   finished?: boolean;
 };
 
+type PlayOptions = {
+  seatId?: SeatId;
+};
+
+type TwoVsTwoDeal = {
+  viraRank: Rank;
+  seatHands: Record<SeatId, Card[]>;
+};
+
+const SEAT_IDS = ['T1A', 'T1B', 'T2A', 'T2B'] as const;
+
+function buildDeck(): Card[] {
+  const deck: Card[] = [];
+
+  for (const rank of RANKS) {
+    for (const suit of SUITS) {
+      deck.push(Card.from(`${rank}${suit}`));
+    }
+  }
+
+  return deck;
+}
+
+function shuffle(cards: Card[]): Card[] {
+  const deck = [...cards];
+
+  for (let index = deck.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const current = deck[index]!;
+    deck[index] = deck[swapIndex]!;
+    deck[swapIndex] = current;
+  }
+
+  return deck;
+}
+
+function dealTwoVersusTwoFromDeck(viraRank: Rank, cards: Card[]): TwoVsTwoDeal {
+  const seatHands = {
+    T1A: cards.splice(0, 3),
+    T2A: cards.splice(0, 3),
+    T1B: cards.splice(0, 3),
+    T2B: cards.splice(0, 3),
+  };
+
+  for (const seatId of SEAT_IDS) {
+    if (seatHands[seatId].length !== 3) {
+      throw new Error('Failed to deal three cards to all 2v2 seats.');
+    }
+  }
+
+  return { viraRank, seatHands };
+}
+
+function dealTwoVersusTwoHandsFromViraRank(viraRank: Rank): TwoVsTwoDeal {
+  const shuffledDeck = shuffle(buildDeck());
+  const viraIndex = shuffledDeck.findIndex((card) => card.getRank() === viraRank);
+
+  if (viraIndex < 0) {
+    throw new Error(`Could not find a vira card for rank ${viraRank}.`);
+  }
+
+  shuffledDeck.splice(viraIndex, 1);
+
+  return dealTwoVersusTwoFromDeck(viraRank, shuffledDeck);
+}
+
+function dealRandomTwoVersusTwoHand(): TwoVsTwoDeal {
+  const shuffledDeck = shuffle(buildDeck());
+  const [viraCard] = shuffledDeck.splice(0, 1);
+
+  if (!viraCard) {
+    throw new Error('Failed to draw a random vira card from deck.');
+  }
+
+  return dealTwoVersusTwoFromDeck(viraCard.getRank(), shuffledDeck);
+}
+
+function getTeamFromSeat(seatId: SeatId): PlayerId {
+  return seatId.startsWith('T1') ? 'P1' : 'P2';
+}
+
 export class Hand {
   private readonly rounds: Round[];
   private readonly playerOneHand: Card[];
   private readonly playerTwoHand: Card[];
+  private readonly seatHands = new Map<SeatId, Card[]>();
+  private readonly mode: HandMode;
   private finished = false;
   private currentValue: HandValue;
   private betState: HandBetState;
@@ -65,9 +154,12 @@ export class Hand {
     playerTwoHand: Card[] = [],
     state: HandStateConfig = {},
   ) {
-    this.rounds = [new Round(this.viraRank)];
+    this.mode = state.mode ?? (state.seatHands ? '2v2' : '1v1');
+    this.rounds = [new Round(this.viraRank, this.getExpectedRoundPlayCount())];
     this.playerOneHand = [...playerOneHand];
     this.playerTwoHand = [...playerTwoHand];
+    this.restoreSeatHands(state.seatHands);
+    this.ensurePrimarySeatHands();
     this.finished = state.finished ?? false;
     this.currentValue = state.currentValue ?? 1;
     this.betState = state.betState ?? 'idle';
@@ -80,16 +172,37 @@ export class Hand {
     this.winner = state.winner ?? null;
     this.awardedPoints = state.awardedPoints ?? null;
 
+    this.syncPrimaryHandsFromSeatHands();
     this.assertStateInvariants();
   }
 
-  static start(viraRank: Rank, state: HandStateConfig = {}): Hand {
+  static start(viraRank: Rank, state: HandStateConfig = {}, mode: HandMode = '1v1'): Hand {
+    if (mode === '2v2') {
+      const dealtHands = dealTwoVersusTwoHandsFromViraRank(viraRank);
+
+      return new Hand(viraRank, dealtHands.seatHands.T1A, dealtHands.seatHands.T2A, {
+        ...state,
+        mode,
+        seatHands: Hand.cardSeatHandsToSnapshot(dealtHands.seatHands),
+      });
+    }
+
     const dealtHands = dealHandsFromViraRank(viraRank);
 
     return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, state);
   }
 
-  static startRandom(state: HandStateConfig = {}): Hand {
+  static startRandom(state: HandStateConfig = {}, mode: HandMode = '1v1'): Hand {
+    if (mode === '2v2') {
+      const dealtHands = dealRandomTwoVersusTwoHand();
+
+      return new Hand(dealtHands.viraRank, dealtHands.seatHands.T1A, dealtHands.seatHands.T2A, {
+        ...state,
+        mode,
+        seatHands: Hand.cardSeatHandsToSnapshot(dealtHands.seatHands),
+      });
+    }
+
     const dealtHands = dealRandomHand();
     const viraRank = dealtHands.viraCard.getRank();
 
@@ -97,30 +210,43 @@ export class Hand {
   }
 
   static fromSnapshot(snapshot: HandSnapshot): Hand {
+    const mode = snapshot.mode ?? (snapshot.seatHands ? '2v2' : '1v1');
+    const handState: HandStateConfig = {
+      mode,
+      currentValue: snapshot.currentValue ?? 1,
+      betState: snapshot.betState ?? 'idle',
+      pendingValue: snapshot.pendingValue ?? null,
+      requestedBy: snapshot.requestedBy ?? null,
+      raiseAuthority: snapshot.raiseAuthority ?? null,
+      specialState: snapshot.specialState ?? 'normal',
+      specialDecisionPending: snapshot.specialDecisionPending ?? false,
+      specialDecisionBy: snapshot.specialDecisionBy ?? null,
+      winner: snapshot.winner ?? null,
+      awardedPoints: snapshot.awardedPoints ?? null,
+      finished: snapshot.finished,
+    };
+
+    if (snapshot.seatHands) {
+      handState.seatHands = snapshot.seatHands;
+    }
+
     const hand = new Hand(
       snapshot.viraRank,
       snapshot.playerOneHand.map((card) => Card.from(card)),
       snapshot.playerTwoHand.map((card) => Card.from(card)),
-      {
-        currentValue: snapshot.currentValue ?? 1,
-        betState: snapshot.betState ?? 'idle',
-        pendingValue: snapshot.pendingValue ?? null,
-        requestedBy: snapshot.requestedBy ?? null,
-        raiseAuthority: snapshot.raiseAuthority ?? null,
-        specialState: snapshot.specialState ?? 'normal',
-        specialDecisionPending: snapshot.specialDecisionPending ?? false,
-        specialDecisionBy: snapshot.specialDecisionBy ?? null,
-        winner: snapshot.winner ?? null,
-        awardedPoints: snapshot.awardedPoints ?? null,
-        finished: snapshot.finished,
-      },
+      handState,
     );
 
-    const restoredRounds = snapshot.rounds.map((round) => Round.fromSnapshot(round));
+    const expectedPlayCount = hand.getExpectedRoundPlayCount();
+    const restoredRounds = snapshot.rounds.map((round) =>
+      Round.fromSnapshot(round, expectedPlayCount),
+    );
     hand.rounds.splice(
       0,
       hand.rounds.length,
-      ...(restoredRounds.length > 0 ? restoredRounds : [new Round(snapshot.viraRank)]),
+      ...(restoredRounds.length > 0
+        ? restoredRounds
+        : [new Round(snapshot.viraRank, expectedPlayCount)]),
     );
 
     hand.assertStateInvariants();
@@ -128,7 +254,7 @@ export class Hand {
     return hand;
   }
 
-  play(player: PlayerId, card: Card): void {
+  play(player: PlayerId, card: Card, options: PlayOptions = {}): void {
     if (this.finished) {
       throw new InvalidMoveError('Hand is already finished.');
     }
@@ -141,16 +267,19 @@ export class Hand {
       throw new InvalidMoveError('Cannot play cards while a bet response is pending.');
     }
 
-    this.removeCardFromHand(player, card);
+    this.removeCardFromHand(player, card, options.seatId);
 
     const currentRound = this.getCurrentRound();
-    currentRound.play(player, card);
+    currentRound.play(player, card, {
+      ownerId: options.seatId ?? player,
+      expectedPlayCount: this.getExpectedRoundPlayCount(),
+    });
 
     if (currentRound.isFinished()) {
       this.evaluateFinished();
 
       if (!this.finished && this.rounds.length < 3) {
-        this.rounds.push(new Round(this.viraRank));
+        this.rounds.push(new Round(this.viraRank, this.getExpectedRoundPlayCount()));
       }
     }
   }
@@ -180,10 +309,10 @@ export class Hand {
     }
 
     this.currentValue = this.pendingValue!;
+    this.raiseAuthority = player;
     this.betState = 'idle';
     this.pendingValue = null;
     this.requestedBy = null;
-    this.raiseAuthority = player;
     this.assertStateInvariants();
   }
 
@@ -205,8 +334,7 @@ export class Hand {
       throw new InvalidMoveError('Only the mao de onze team can accept the special hand.');
     }
 
-    // NOTE: Accepted mão de 11 is worth 3 points, but it is not a truco escalation.
-    // We keep the special marker so invariants do not require raise authority.
+    // Accepted mão de 11 scores 3 points without becoming a truco escalation.
     this.currentValue = 3;
     this.betState = 'idle';
     this.pendingValue = null;
@@ -254,6 +382,10 @@ export class Hand {
     return [...this.getCardsByPlayer(player)];
   }
 
+  getSeatHand(seatId: SeatId): Card[] {
+    return [...(this.seatHands.get(seatId) ?? [])];
+  }
+
   getCurrentValue(): HandValue {
     return this.currentValue;
   }
@@ -297,10 +429,12 @@ export class Hand {
   toSnapshot(): HandSnapshot {
     return {
       viraRank: this.viraRank,
+      mode: this.mode,
       rounds: this.rounds.map((round) => round.toSnapshot()),
       finished: this.finished,
       playerOneHand: this.playerOneHand.map((card) => card.toString()),
       playerTwoHand: this.playerTwoHand.map((card) => card.toString()),
+      ...(this.mode === '2v2' ? { seatHands: this.seatHandsToSnapshot() } : {}),
       currentValue: this.currentValue,
       betState: this.betState,
       pendingValue: this.pendingValue,
@@ -314,46 +448,26 @@ export class Hand {
     };
   }
 
-  private requestBet(player: PlayerId, targetValue: HandValue): void {
+  private requestBet(player: PlayerId, requestedValue: HandValue): void {
     this.ensureHandCanChangeBet();
 
-    if (this.specialState === 'mao_de_onze' || this.specialState === 'mao_de_ferro') {
-      throw new InvalidMoveError(`Cannot request truco during ${this.specialState}.`);
+    if (this.specialState === 'mao_de_onze') {
+      throw new InvalidMoveError('Cannot request truco during mao_de_onze.');
+    }
+
+    if (!this.canRequestValue(player, requestedValue)) {
+      throw new InvalidMoveError('Player cannot request this bet value now.');
     }
 
     if (this.betState === 'awaiting_response') {
-      throw new InvalidMoveError('Cannot request a new bet while another response is pending.');
-    }
-
-    if (this.currentValue > 1 && this.raiseAuthority !== player) {
-      throw new InvalidMoveError('Only the current raise authority can escalate the hand.');
-    }
-
-    const expectedNextValue = this.getNextBetValue(this.currentValue);
-
-    if (expectedNextValue === null) {
-      throw new InvalidMoveError('Hand is already at the maximum bet value.');
-    }
-
-    if (targetValue !== expectedNextValue) {
-      throw new InvalidMoveError(
-        `Invalid bet escalation from ${this.currentValue} to ${targetValue}.`,
-      );
+      this.currentValue = this.pendingValue!;
+      this.raiseAuthority = player;
     }
 
     this.betState = 'awaiting_response';
-    this.pendingValue = targetValue;
+    this.pendingValue = requestedValue;
     this.requestedBy = player;
-    this.raiseAuthority = null;
     this.assertStateInvariants();
-  }
-
-  private getNextBetValue(currentValue: HandValue): HandValue | null {
-    if (currentValue === 1) return 3;
-    if (currentValue === 3) return 6;
-    if (currentValue === 6) return 9;
-    if (currentValue === 9) return 12;
-    return null;
   }
 
   private ensureHandCanChangeBet(): void {
@@ -361,28 +475,66 @@ export class Hand {
       throw new InvalidMoveError('Hand is already finished.');
     }
 
-    if (this.specialDecisionPending && this.specialState !== 'mao_de_onze') {
-      throw new InvalidMoveError('Cannot change hand state while special decision is pending.');
+    if (this.specialDecisionPending) {
+      throw new InvalidMoveError('Cannot change bet while special hand decision is pending.');
     }
   }
 
   private ensurePendingBetExists(): void {
-    if (this.betState !== 'awaiting_response' || this.pendingValue === null || !this.requestedBy) {
-      throw new InvalidMoveError('There is no pending bet response.');
+    if (this.betState !== 'awaiting_response' || !this.pendingValue || !this.requestedBy) {
+      throw new InvalidMoveError('No pending bet to respond.');
     }
   }
 
-  private ensurePendingSpecialDecision(expectedState: HandSpecialState): void {
-    if (this.finished) {
-      throw new InvalidMoveError('Hand is already finished.');
+  private canRequestValue(player: PlayerId, requestedValue: HandValue): boolean {
+    if (this.specialState === 'mao_de_onze') return false;
+
+    if (this.betState === 'awaiting_response') {
+      if (!this.pendingValue || this.requestedBy === player) {
+        return false;
+      }
+
+      if (requestedValue === 6) {
+        return this.pendingValue === 3;
+      }
+
+      if (requestedValue === 9) {
+        return this.pendingValue === 6;
+      }
+
+      if (requestedValue === 12) {
+        return this.pendingValue === 9;
+      }
+
+      return false;
     }
 
+    if (requestedValue === 3) {
+      return this.currentValue === 1 && this.raiseAuthority === null;
+    }
+
+    if (requestedValue === 6) {
+      return this.currentValue === 3 && this.raiseAuthority === player;
+    }
+
+    if (requestedValue === 9) {
+      return this.currentValue === 6 && this.raiseAuthority === player;
+    }
+
+    if (requestedValue === 12) {
+      return this.currentValue === 9 && this.raiseAuthority === player;
+    }
+
+    return false;
+  }
+
+  private ensurePendingSpecialDecision(expectedState: HandSpecialState): void {
     if (
       this.specialState !== expectedState ||
       !this.specialDecisionPending ||
-      !this.specialDecisionBy
+      this.specialDecisionBy === null
     ) {
-      throw new InvalidMoveError(`There is no pending ${expectedState} decision.`);
+      throw new InvalidMoveError('No pending special hand decision.');
     }
   }
 
@@ -391,235 +543,208 @@ export class Hand {
   }
 
   private getCurrentRound(): Round {
-    return this.rounds[this.rounds.length - 1]!;
-  }
-
-  private evaluateFinished(): void {
-    const winner = this.resolveWinner();
-
-    if (winner) {
-      this.finishWithWinner(winner, this.currentValue);
-      return;
+    const currentRound = this.rounds[this.rounds.length - 1];
+    if (!currentRound) {
+      throw new InvalidMoveError('No current round available.');
     }
 
-    if (this.rounds.length === 3 && this.getCurrentRound().isFinished()) {
-      this.finished = true;
-      this.winner = null;
-      this.awardedPoints = null;
-      this.betState = 'idle';
-      this.pendingValue = null;
-      this.requestedBy = null;
-      this.raiseAuthority = null;
-      this.specialDecisionPending = false;
-      this.assertStateInvariants();
-    }
-  }
-
-  private finishWithWinner(player: PlayerId, points: HandValue): void {
-    this.finished = true;
-    this.winner = player;
-    this.awardedPoints = points;
-    this.betState = 'idle';
-    this.pendingValue = null;
-    this.requestedBy = null;
-    this.raiseAuthority = null;
-    this.specialDecisionPending = false;
-    this.assertStateInvariants();
-  }
-
-  private resolveWinner(): PlayerId | null {
-    const wins = this.countWins();
-
-    if (wins.P1 >= 2) return 'P1';
-    if (wins.P2 >= 2) return 'P2';
-
-    const r1 = this.getRoundResultAt(0);
-    const r2 = this.getRoundResultAt(1);
-    const r3 = this.getRoundResultAt(2);
-
-    if (!r1 || !r2) {
-      return null;
-    }
-
-    if (r1 === 'TIE') {
-      if (r2 === 'TIE') {
-        if (r3 && r3 !== 'TIE') {
-          return r3;
-        }
-
-        return null;
-      }
-
-      return r2;
-    }
-
-    if (r2 === 'TIE') {
-      return r1;
-    }
-
-    if (r1 === r2) {
-      return r1;
-    }
-
-    if (!r3) {
-      return null;
-    }
-
-    if (r3 === 'TIE') {
-      return r1;
-    }
-
-    return r3;
-  }
-
-  private getRoundResultAt(index: number): RoundResult | null {
-    const round = this.rounds[index];
-
-    if (!round) return null;
-    if (!round.isFinished()) return null;
-
-    return round.getResult();
-  }
-
-  private countWins(): Record<'P1' | 'P2', number> {
-    const wins = { P1: 0, P2: 0 };
-
-    for (const round of this.rounds) {
-      if (!round.isFinished()) {
-        continue;
-      }
-
-      const result: RoundResult = round.getResult();
-
-      if (result === 'P1') wins.P1 += 1;
-      if (result === 'P2') wins.P2 += 1;
-    }
-
-    return wins;
+    return currentRound;
   }
 
   private getCardsByPlayer(player: PlayerId): Card[] {
     return player === 'P1' ? this.playerOneHand : this.playerTwoHand;
   }
 
-  private removeCardFromHand(player: PlayerId, card: Card): void {
-    const hand = this.getCardsByPlayer(player);
-    const cardIndex = hand.findIndex((currentCard) => currentCard.equals(card));
+  private removeCardFromHand(player: PlayerId, card: Card, seatId?: SeatId): void {
+    if (this.mode === '2v2' && seatId) {
+      if (getTeamFromSeat(seatId) !== player) {
+        throw new InvalidMoveError('Seat does not belong to this player team.');
+      }
 
-    if (cardIndex < 0) {
-      throw new InvalidMoveError(`Player ${player} does not have card ${card.toString()}.`);
+      const seatCards = this.seatHands.get(seatId);
+
+      if (!seatCards) {
+        throw new InvalidMoveError(`Seat ${seatId} has no hand.`);
+      }
+
+      this.removeCardFromCards(seatCards, card);
+      this.syncPrimaryHandsFromSeatHands();
+      return;
     }
 
-    hand.splice(cardIndex, 1);
+    const cards = this.getCardsByPlayer(player);
+    this.removeCardFromCards(cards, card);
+  }
+
+  private removeCardFromCards(cards: Card[], card: Card): void {
+    const index = cards.findIndex((candidate) => candidate.equals(card));
+
+    if (index < 0) {
+      throw new InvalidMoveError('Card is not in player hand.');
+    }
+
+    cards.splice(index, 1);
+  }
+
+  private evaluateFinished(): void {
+    const finishedResults = this.rounds
+      .filter((round) => round.isFinished())
+      .map((round) => round.getResult());
+
+    const firstRoundResult = finishedResults[0];
+    const secondRoundResult = finishedResults[1];
+    const thirdRoundResult = finishedResults[2];
+
+    if (firstRoundResult && secondRoundResult) {
+      if (firstRoundResult !== 'TIE' && secondRoundResult === firstRoundResult) {
+        this.finishWithWinner(firstRoundResult, this.currentValue);
+        return;
+      }
+
+      if (firstRoundResult !== 'TIE' && secondRoundResult === 'TIE') {
+        this.finishWithWinner(firstRoundResult, this.currentValue);
+        return;
+      }
+
+      if (firstRoundResult === 'TIE' && secondRoundResult !== 'TIE') {
+        this.finishWithWinner(secondRoundResult, this.currentValue);
+        return;
+      }
+    }
+
+    if (firstRoundResult && secondRoundResult && thirdRoundResult) {
+      if (firstRoundResult !== 'TIE' && secondRoundResult !== firstRoundResult) {
+        this.finishWithWinner(
+          thirdRoundResult === 'TIE' ? firstRoundResult : thirdRoundResult,
+          this.currentValue,
+        );
+        return;
+      }
+
+      if (thirdRoundResult !== 'TIE') {
+        this.finishWithWinner(thirdRoundResult, this.currentValue);
+        return;
+      }
+
+      this.finishWithWinner('P1', this.currentValue);
+    }
+  }
+
+  private finishWithWinner(winner: PlayerId, awardedPoints: HandValue): void {
+    this.finished = true;
+    this.winner = winner;
+    this.awardedPoints = awardedPoints;
+    this.betState = 'idle';
+    this.pendingValue = null;
+    this.requestedBy = null;
+    this.specialDecisionPending = false;
+    this.assertStateInvariants();
   }
 
   private assertStateInvariants(): void {
-    if (this.betState === 'idle') {
-      if (this.pendingValue !== null) {
-        throw new InvalidMoveError('Idle hand cannot have a pending bet value.');
-      }
+    const isMaoDeOnzeBaseValue = this.specialState === 'mao_de_onze' && this.currentValue === 3;
 
-      if (this.requestedBy !== null) {
-        throw new InvalidMoveError('Idle hand cannot have a requesting player.');
-      }
+    if (this.currentValue !== 1 && this.raiseAuthority === null && !isMaoDeOnzeBaseValue) {
+      throw new InvalidMoveError('Raised hand is missing raise authority.');
     }
 
     if (this.betState === 'awaiting_response') {
-      if (this.pendingValue === null) {
-        throw new InvalidMoveError('Pending bet state requires a pending bet value.');
-      }
-
-      if (this.requestedBy === null) {
-        throw new InvalidMoveError('Pending bet state requires a requesting player.');
-      }
-
-      if (this.pendingValue <= this.currentValue) {
-        throw new InvalidMoveError('Pending bet value must be greater than current hand value.');
-      }
-
-      const expectedNextValue = this.getNextBetValue(this.currentValue);
-
-      if (expectedNextValue !== this.pendingValue) {
-        throw new InvalidMoveError('Pending bet value must match the next valid escalation step.');
+      if (!this.pendingValue || !this.requestedBy) {
+        throw new InvalidMoveError('Pending bet state is incomplete.');
       }
     }
 
-    if (this.betState === 'awaiting_response' && this.raiseAuthority !== null) {
-      throw new InvalidMoveError('Pending bet state cannot keep a raise authority owner.');
-    }
-
-    if (this.betState === 'idle' && this.currentValue === 1 && this.raiseAuthority !== null) {
-      throw new InvalidMoveError('Initial hand value cannot define raise authority.');
-    }
-
-    if (
-      this.betState === 'idle' &&
-      this.currentValue > 1 &&
-      this.specialState === 'normal' &&
-      !this.finished &&
-      this.raiseAuthority === null
-    ) {
-      throw new InvalidMoveError('Accepted raised hand must define raise authority.');
-    }
-
-    if (this.specialState === 'normal' || this.specialState === 'mao_de_ferro') {
-      if (this.specialDecisionPending) {
-        throw new InvalidMoveError('Only mao de onze can keep a pending special decision.');
-      }
-
-      if (this.specialDecisionBy !== null) {
-        throw new InvalidMoveError('Only mao de onze can define a special decision owner.');
+    if (this.finished) {
+      if (!this.winner || !this.awardedPoints) {
+        throw new InvalidMoveError('Finished hand is missing result data.');
       }
     }
+  }
 
-    if (this.specialState === 'mao_de_onze') {
-      if (this.specialDecisionBy === null) {
-        throw new InvalidMoveError('Mao de onze requires a deciding team.');
+  private getExpectedRoundPlayCount(): number {
+    return this.mode === '2v2' ? 4 : 2;
+  }
+
+  private restoreSeatHands(seatHands?: HandSeatHandsSnapshot): void {
+    if (!seatHands) {
+      return;
+    }
+
+    for (const seatId of SEAT_IDS) {
+      const cards = seatHands[seatId];
+
+      if (Array.isArray(cards)) {
+        this.seatHands.set(
+          seatId,
+          cards.map((card) => Card.from(card)),
+        );
       }
+    }
+  }
 
-      if (this.specialDecisionPending) {
-        if (this.currentValue !== 1) {
-          throw new InvalidMoveError('Pending mao de onze must still be worth 1 point.');
-        }
+  private ensurePrimarySeatHands(): void {
+    if (this.mode !== '2v2') {
+      return;
+    }
 
-        if (this.betState !== 'idle') {
-          throw new InvalidMoveError(
-            'Mao de onze pending decision cannot have an active bet state.',
-          );
-        }
-      }
+    if (!this.seatHands.has('T1A')) {
+      this.seatHands.set('T1A', [...this.playerOneHand]);
+    }
 
-      if (!this.specialDecisionPending && this.currentValue !== 3 && !this.finished) {
-        throw new InvalidMoveError('Accepted mao de onze must be worth 3 points.');
+    if (!this.seatHands.has('T2A')) {
+      this.seatHands.set('T2A', [...this.playerTwoHand]);
+    }
+
+    if (!this.seatHands.has('T1B')) {
+      this.seatHands.set('T1B', []);
+    }
+
+    if (!this.seatHands.has('T2B')) {
+      this.seatHands.set('T2B', []);
+    }
+  }
+
+  private syncPrimaryHandsFromSeatHands(): void {
+    if (this.mode !== '2v2') {
+      return;
+    }
+
+    const t1aCards = this.seatHands.get('T1A');
+    const t2aCards = this.seatHands.get('T2A');
+
+    if (t1aCards) {
+      this.replaceCards(this.playerOneHand, t1aCards);
+    }
+
+    if (t2aCards) {
+      this.replaceCards(this.playerTwoHand, t2aCards);
+    }
+  }
+
+  private replaceCards(target: Card[], source: Card[]): void {
+    target.splice(0, target.length, ...source);
+  }
+
+  private seatHandsToSnapshot(): HandSeatHandsSnapshot {
+    const seatHands: HandSeatHandsSnapshot = {};
+
+    for (const seatId of SEAT_IDS) {
+      const cards = this.seatHands.get(seatId);
+
+      if (cards) {
+        seatHands[seatId] = cards.map((card) => card.toString());
       }
     }
 
-    if (this.specialState === 'mao_de_ferro') {
-      if (this.currentValue !== 1 && !this.finished) {
-        throw new InvalidMoveError('Mao de ferro must keep the hand value at 1 point.');
-      }
+    return seatHands;
+  }
 
-      if (this.betState !== 'idle') {
-        throw new InvalidMoveError('Mao de ferro cannot have an active bet state.');
-      }
-    }
-
-    if (!this.finished) {
-      if (this.winner !== null) {
-        throw new InvalidMoveError('Unfinished hand cannot have a winner.');
-      }
-
-      if (this.awardedPoints !== null) {
-        throw new InvalidMoveError('Unfinished hand cannot have awarded points.');
-      }
-    }
-
-    if (this.finished && this.winner === null && this.awardedPoints !== null) {
-      throw new InvalidMoveError('Finished tied hand cannot have awarded points.');
-    }
-
-    if (this.finished && this.winner !== null && this.awardedPoints === null) {
-      throw new InvalidMoveError('Finished hand with a winner must have awarded points.');
-    }
+  private static cardSeatHandsToSnapshot(seatHands: Record<SeatId, Card[]>): HandSeatHandsSnapshot {
+    return {
+      T1A: seatHands.T1A.map((card) => card.toString()),
+      T1B: seatHands.T1B.map((card) => card.toString()),
+      T2A: seatHands.T2A.map((card) => card.toString()),
+      T2B: seatHands.T2B.map((card) => card.toString()),
+    };
   }
 }

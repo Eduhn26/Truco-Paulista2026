@@ -4,6 +4,8 @@ export const BOT_DECISION_PORT = 'BOT_DECISION_PORT';
 
 export type BotProfile = 'balanced' | 'aggressive' | 'cautious';
 
+export type BotMode = '1v1' | '2v2';
+export type BotTeamId = 'T1' | 'T2';
 export type BotSeatId = 'T1A' | 'T2A' | 'T1B' | 'T2B';
 
 export const DEFAULT_BOT_PROFILE_BY_SEAT: Record<BotSeatId, BotProfile> = {
@@ -18,11 +20,21 @@ export type BotPlayerView = {
   hand: string[];
 };
 
+export type BotRoundPlayView = {
+  ownerId: string;
+  seatId: BotSeatId | null;
+  playerId: 'P1' | 'P2';
+  card: string;
+};
+
 export type BotRoundView = {
   playerOneCard: string | null;
   playerTwoCard: string | null;
   finished: boolean;
   result: 'P1' | 'P2' | 'TIE' | null;
+  seatPlays?: Partial<Record<BotSeatId, string | null>>;
+  orderedPlays?: BotRoundPlayView[];
+  winningSeatId?: BotSeatId | null;
 };
 
 export type BotAvailableActionsView = {
@@ -47,28 +59,29 @@ export type BotBetView = {
   availableActions: BotAvailableActionsView;
 };
 
-// Match-level context for bets. Optional so legacy callers and the python adapter
-// contract keep working without modification; the heuristic adapter treats missing
-// values as "neutral" and falls back to the pre-existing thresholds.
+// Optional score context lets adapters evaluate match pressure without breaking
+// callers that still provide only card-play context.
 export type BotMatchScoreView = {
   playerOne: number;
   playerTwo: number;
   pointsToWin: number;
 };
 
-// Rounds already resolved in the current hand. Derived from the view DTO in the gateway.
-// Used by the heuristic adapter to weigh truco initiative (e.g. winning R1 strongly
-// favours calling truco; losing R1 favours bluffing only when hand strength supports it).
+// Round progress lets adapters weigh Truco initiative without reading Domain entities.
 export type BotHandProgressView = {
   roundsWonByMe: number;
   roundsWonByOpponent: number;
   roundsTied: number;
-  currentRoundIndex: number; // 0-based
+  currentRoundIndex: number;
 };
 
 export type BotDecisionContext = {
   matchId: string;
   profile: BotProfile;
+  mode?: BotMode;
+  actorSeatId?: BotSeatId;
+  actorTeamId?: BotTeamId;
+  partnerSeatId?: BotSeatId | null;
   viraRank: Rank;
   currentRound: BotRoundView | null;
   player: BotPlayerView;
@@ -77,19 +90,12 @@ export type BotDecisionContext = {
   handProgress?: BotHandProgressView;
 };
 
-// Provenance of the decision from the consumer's perspective.
-// - 'heuristic'         : decision computed by the local heuristic adapter when it is the wired implementation.
-// - 'python-remote'     : decision computed by the remote python bot service (successful round-trip).
-// - 'heuristic-fallback': python bot adapter was invoked but served the decision via the local heuristic,
-//                         either because the remote path was disabled/failed or because the sync entry-point
-//                         delegates straight to the heuristic. This distinguishes a direct heuristic wiring
-//                         from a degraded python wiring.
+// Decision source separates normal heuristic wiring from remote decisions and
+// degraded Python-adapter fallbacks.
 export type BotDecisionSource = 'heuristic' | 'python-remote' | 'heuristic-fallback';
 
-// Closed set of strategy labels the adapters may emit. Kept as a union rather than a free-form string so
-// TypeScript strict mode can catch drift and downstream telemetry does not accumulate arbitrary values.
-// Labels mirror the branches already present in the heuristic adapter; python-remote payloads carrying an
-// unknown strategy must be rejected at the adapter boundary (not normalized here).
+// Strategy labels are a closed set so telemetry and remote adapter payloads
+// cannot drift into arbitrary strings.
 export type BotDecisionStrategy =
   | 'opening-weakest'
   | 'opening-middle'
@@ -99,6 +105,10 @@ export type BotDecisionStrategy =
   | 'response-losing-weakest'
   | 'response-losing-middle'
   | 'response-losing-strongest'
+  | 'two-versus-two-partner-winning-save-weakest'
+  | 'two-versus-two-response-losing-save-weakest'
+  | 'two-versus-two-opening-after-first-win-pressure'
+  | 'two-versus-two-opening-after-first-win-save-weakest'
   | 'bet-accept'
   | 'bet-decline'
   | 'bet-raise'
@@ -118,12 +128,60 @@ export type BotDecisionStrategy =
   | 'missing-round'
   | 'unsupported-state';
 
+export type BotDecisionBetTelemetry = {
+  currentValue?: number;
+  pendingValue?: number | null;
+  betState?: BotBetView['betState'];
+  requestedBy?: 'P1' | 'P2' | null;
+  specialState?: BotBetView['specialState'];
+  selectedBetAction?:
+    | 'accept-bet'
+    | 'decline-bet'
+    | 'request-truco'
+    | 'raise-to-six'
+    | 'raise-to-nine'
+    | 'raise-to-twelve';
+  handStrength?: number;
+  progressBoost?: number;
+  scoreBoost?: number;
+  effectiveStrength?: number;
+  acceptThreshold?: number;
+  raiseThreshold?: number;
+  initiativeThreshold?: number;
+  bluffProbability?: number;
+  declineFloor?: number;
+  myPointsToWin?: number;
+  opponentPointsToWin?: number;
+  declineLosesMatch?: boolean;
+  acceptRisksMatch?: boolean;
+  roundsWonByMe?: number;
+  roundsWonByOpponent?: number;
+  roundsTied?: number;
+  currentRoundIndex?: number;
+};
+
+export type BotDecisionTacticalTelemetry = {
+  mode?: BotMode;
+  actorSeatId?: BotSeatId;
+  actorTeamId?: BotTeamId;
+  partnerSeatId?: BotSeatId | null;
+  winningSeatIdBeforeDecision?: BotSeatId | null;
+  winningTeamIdBeforeDecision?: BotTeamId | null;
+  winningCardBeforeDecision?: string | null;
+  partnerWasWinning?: boolean;
+  actorHandBefore?: string[];
+  selectedCard?: string;
+  seatPlays?: Partial<Record<BotSeatId, string | null>>;
+  orderedPlays?: BotRoundPlayView[];
+};
+
 export type BotDecisionRationale = {
-  // Hand strength in [0, 1] as computed by the heuristic. Optional because:
-  //  - we do not compute it on card-play paths (cost control),
-  //  - python-remote payloads may omit it.
+  // Optional normalized strength score. Card-play paths and remote payloads may
+  // omit it when the decision did not require hand evaluation.
   handStrength?: number;
   strategy?: BotDecisionStrategy;
+  tactical?: BotDecisionTacticalTelemetry;
+  betAudit?: BotDecisionBetTelemetry;
 };
 
 export type BotDecisionMetadata = {

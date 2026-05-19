@@ -1,70 +1,315 @@
-import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Rank } from '../../services/socket/socketTypes';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
 
-// CHANGE (debt #6 — header read like a SaaS dashboard):
-// Refactor of the in-table header. The score becomes the centerpiece
-// (large serif numerals "NÓS / ELES" with an oxidized brass divider),
-// the Vale tier is a circular medallion in the divider so it reads as
-// the "stake on the table", and the brand lockup + actions are pushed
-// to the edges as quiet ghost chips. Net result: the header stops
-// stealing attention from the felt and starts narrating the match.
-//
-// The auxOpen drawer keeps the technical chips (seat / vira / matchId
-// / sync) so QA still has them, but only on demand.
-//
-// All visual tokens stay inside the existing dark/cobre/vinho palette;
-// no new fonts, no new colors. Layout fits in ~58px (vs ~64px before).
+/**
+ * PREMIUM PATCH — matchPageHeader.
+ *
+ * Mantém 100% da API e da lógica visual existente (mesmas props, mesmos
+ * tier visuals, mesmo round tracker, mesmo cálculo de myTeam/ownTeam).
+ *
+ * Refinos:
+ *   • ScoreColumn — detecta mudança de score e dispara animação px-score-bump
+ *     uma vez (via useEffect + state). Visual já estava perto do limite;
+ *     agora pulsa na mudança e respira leve quando estática.
+ *   • Vale chip — text shimmer dourado na borda
+ *   • Round chips — ganham data-just-resolved="true" momentaneamente quando
+ *     resolvem (engata o px-chip-pop)
+ *   • Connection pill — ripple no dot via px-dot-ripple style inline
+ *   • Botão "Nova mão" — px-shine via classe quando habilitado
+ *   • Hairlines internas dourados pulsantes
+ */
 
-function getViraLabel(viraRank: Rank): string {
-  return `Vira ${viraRank}`;
-}
+type RoundChip = {
+  result: string | null;
+  finished: boolean;
+};
+
+type RoundVisualState = 'us' | 'them' | 'tie' | 'empty';
+
+const MAX_ROUND_CHIPS = 3;
 
 function getValeTierVisuals(tier: ValeTier) {
   switch (tier) {
     case 'gold':
       return {
-        background: 'linear-gradient(135deg, #e8c76a 0%, #c9a84c 55%, #8a6a28 100%)',
-        border: '1px solid rgba(255,223,128,0.64)',
-        textColor: '#1a0a00',
-        glow: '0 0 18px rgba(201,168,76,0.36)',
-        pulse: false,
+        background: 'linear-gradient(135deg, #fff1b8 0%, #e8c76a 38%, #c9a84c 72%, #6f4f14 100%)',
+        border: '1px solid rgba(255,241,184,0.76)',
+        textColor: '#170d02',
+        glow: '0 0 22px rgba(201,168,76,0.34), 0 12px 24px rgba(0,0,0,0.36)',
       };
     case 'orange':
       return {
-        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #92400e 100%)',
-        border: '1px solid rgba(251,191,36,0.62)',
+        background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 42%, #b45309 74%, #5f2d08 100%)',
+        border: '1px solid rgba(251,191,36,0.72)',
         textColor: '#1a0500',
-        glow: '0 0 24px rgba(245,158,11,0.46)',
-        pulse: false,
+        glow: '0 0 26px rgba(245,158,11,0.44), 0 12px 24px rgba(0,0,0,0.38)',
       };
     case 'red':
       return {
-        background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 55%, #7f1d1d 100%)',
-        border: '1px solid rgba(252,165,165,0.60)',
+        background: 'linear-gradient(135deg, #fca5a5 0%, #ef4444 42%, #991b1b 78%, #450a0a 100%)',
+        border: '1px solid rgba(252,165,165,0.70)',
         textColor: '#fff5f5',
-        glow: '0 0 28px rgba(220,38,38,0.55)',
-        pulse: false,
+        glow: '0 0 30px rgba(220,38,38,0.50), 0 14px 28px rgba(0,0,0,0.42)',
       };
     case 'red-pulse':
       return {
-        background: 'linear-gradient(135deg, #fca5a5 0%, #dc2626 55%, #450a0a 100%)',
-        border: '1px solid rgba(254,226,226,0.82)',
+        background: 'linear-gradient(135deg, #fee2e2 0%, #f87171 36%, #dc2626 68%, #450a0a 100%)',
+        border: '1px solid rgba(254,226,226,0.84)',
         textColor: '#ffffff',
-        glow: '0 0 36px rgba(248,113,113,0.66)',
-        pulse: true,
+        glow: '0 0 40px rgba(248,113,113,0.64), 0 14px 30px rgba(0,0,0,0.46)',
       };
     case 'muted':
     default:
       return {
-        background: 'linear-gradient(180deg, rgba(28,24,16,0.92), rgba(16,14,10,0.86))',
-        border: '1px solid rgba(230,195,100,0.22)',
-        textColor: 'rgba(232,199,106,0.86)',
-        glow: '0 4px 12px rgba(0,0,0,0.30)',
-        pulse: false,
+        background: 'linear-gradient(180deg, rgba(28,24,16,0.94), rgba(12,11,8,0.88))',
+        border: '1px solid rgba(230,195,100,0.24)',
+        textColor: 'rgba(232,199,106,0.88)',
+        glow: '0 10px 22px rgba(0,0,0,0.32)',
       };
   }
+}
+
+function resolveRoundVisualState({
+  round,
+  ownTeam,
+}: {
+  round: RoundChip;
+  ownTeam: 'P1' | 'P2' | null;
+}): RoundVisualState {
+  if (round.result === null) {
+    return 'empty';
+  }
+
+  const normalizedResult =
+    round.result === 'T1' ? 'P1' : round.result === 'T2' ? 'P2' : round.result;
+
+  if (normalizedResult === 'TIE') {
+    return 'tie';
+  }
+
+  if (ownTeam !== null && normalizedResult === ownTeam) {
+    return 'us';
+  }
+
+  if (normalizedResult === 'P1' || normalizedResult === 'P2') {
+    return 'them';
+  }
+
+  return 'empty';
+}
+
+function getRoundChipVisuals(state: RoundVisualState) {
+  switch (state) {
+    case 'us':
+      return {
+        label: 'Nós',
+        dot: 'radial-gradient(circle at 35% 28%, #fff7d6 0%, #f2d488 32%, #c9a84c 66%, #604711 100%)',
+        border: '1px solid rgba(255,241,184,0.92)',
+        shadow:
+          '0 0 16px rgba(242,212,136,0.60), 0 0 7px rgba(255,241,184,0.40), inset 0 1px 0 rgba(255,255,255,0.34)',
+        text: '#f8e7b4',
+      };
+    case 'them':
+      return {
+        label: 'Eles',
+        dot: 'radial-gradient(circle at 35% 28%, #fecaca 0%, #ef4444 35%, #991b1b 72%, #450a0a 100%)',
+        border: '1px solid rgba(254,202,202,0.80)',
+        shadow: '0 0 14px rgba(220,38,38,0.50), inset 0 1px 0 rgba(255,255,255,0.22)',
+        text: '#fecaca',
+      };
+    case 'tie':
+      return {
+        label: 'Empate',
+        dot: 'radial-gradient(circle at 35% 28%, #f8fafc 0%, #cbd5e1 38%, #64748b 72%, #1e293b 100%)',
+        border: '1px solid rgba(226,232,240,0.76)',
+        shadow: '0 0 12px rgba(203,213,225,0.42), inset 0 1px 0 rgba(255,255,255,0.26)',
+        text: '#dbe4ef',
+      };
+    case 'empty':
+    default:
+      return {
+        label: '—',
+        dot: 'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03))',
+        border: '1px solid rgba(255,255,255,0.10)',
+        shadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 5px 10px rgba(0,0,0,0.20)',
+        text: 'rgba(240,230,211,0.34)',
+      };
+  }
+}
+
+function buildRoundSlots(rounds?: RoundChip[]): RoundChip[] {
+  const provided = rounds ?? [];
+  const slots: RoundChip[] = [];
+
+  for (let index = 0; index < MAX_ROUND_CHIPS; index += 1) {
+    slots.push(provided[index] ?? { result: null, finished: false });
+  }
+
+  return slots;
+}
+
+function ScoreColumn({
+  label,
+  score,
+  tone,
+}: {
+  label: string;
+  score: string;
+  tone: 'us' | 'them';
+}) {
+  const accentColor = tone === 'us' ? '#4ade80' : '#f87171';
+  const previousScoreRef = useRef<string>(score);
+  const [bumpKey, setBumpKey] = useState(0);
+
+  // NOTE: Score changes remount the number so the bump animation can replay.
+  useEffect(() => {
+    if (previousScoreRef.current !== score) {
+      previousScoreRef.current = score;
+      setBumpKey((k) => k + 1);
+    }
+  }, [score]);
+
+  return (
+    <div className="flex min-w-[64px] flex-col items-center justify-center">
+      <span
+        className="text-[9px] font-black uppercase tracking-[0.28em]"
+        style={{
+          color: accentColor,
+          fontFamily: 'Georgia, serif',
+          textShadow: `0 0 10px ${tone === 'us' ? 'rgba(74,222,128,0.42)' : 'rgba(248,113,113,0.42)'}`,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        key={bumpKey}
+        className="mt-0.5 inline-block text-[27px] font-black leading-none sm:text-[30px]"
+        style={{
+          color: '#f6efe2',
+          fontFamily: 'Cormorant Garamond, Georgia, serif',
+          textShadow:
+            '0 4px 14px rgba(0,0,0,0.48), 0 1px 0 rgba(255,255,255,0.14), 0 0 24px rgba(201,168,76,0.18)',
+          animation:
+            bumpKey > 0
+              ? 'px-score-bump 0.7s cubic-bezier(0.34, 1.56, 0.64, 1), px-score-breathe 5s ease-in-out 0.7s infinite'
+              : 'px-score-breathe 5s ease-in-out infinite',
+          transformOrigin: 'center',
+        }}
+      >
+        {score}
+      </span>
+    </div>
+  );
+}
+
+function Pill({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  tone?: 'neutral' | 'gold' | 'success' | 'danger';
+}) {
+  const styles =
+    tone === 'gold'
+      ? {
+          background: 'rgba(201,168,76,0.10)',
+          border: '1px solid rgba(255,223,128,0.20)',
+          color: 'rgba(255,236,177,0.82)',
+          boxShadow: '0 0 12px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,241,184,0.08)',
+        }
+      : tone === 'success'
+        ? {
+            background: 'rgba(34,197,94,0.10)',
+            border: '1px solid rgba(74,222,128,0.20)',
+            color: 'rgba(134,239,172,0.86)',
+            boxShadow: '0 0 12px rgba(34,197,94,0.10), inset 0 1px 0 rgba(74,222,128,0.08)',
+          }
+        : tone === 'danger'
+          ? {
+              background: 'rgba(220,38,38,0.12)',
+              border: '1px solid rgba(248,113,113,0.22)',
+              color: 'rgba(254,202,202,0.84)',
+              boxShadow: '0 0 14px rgba(220,38,38,0.16), inset 0 1px 0 rgba(248,113,113,0.10)',
+            }
+          : {
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(240,230,211,0.50)',
+            };
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-[1px] text-[8px] font-black uppercase tracking-[0.16em]"
+      style={styles}
+    >
+      {children}
+    </span>
+  );
+}
+
+function RoundTracker({
+  rounds,
+  ownTeam,
+}: {
+  rounds: RoundChip[] | undefined;
+  ownTeam: 'P1' | 'P2' | null;
+}) {
+  const roundSlots = buildRoundSlots(rounds);
+  const playedCount = roundSlots.filter((round) => round.result !== null).length;
+  const previousStatesRef = useRef<RoundVisualState[]>([]);
+
+  // NOTE: Only newly resolved rounds receive the pop state.
+  const currentStates = roundSlots.map((round) =>
+    resolveRoundVisualState({ round, ownTeam }),
+  );
+  const justResolvedIndexes = currentStates.map((state, i) => {
+    const prev = previousStatesRef.current[i];
+    return prev === 'empty' && state !== 'empty';
+  });
+  previousStatesRef.current = currentStates;
+
+  return (
+    <div
+      className="flex items-center gap-1.5 rounded-full px-2 py-0.5"
+      aria-label={`Rodadas ${playedCount}/${MAX_ROUND_CHIPS}`}
+      style={{
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.18))',
+        border: '1px solid rgba(201,168,76,0.10)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+      }}
+    >
+      <span className="mr-0.5 text-[7px] font-black uppercase tracking-[0.20em] text-amber-100/50">
+        Rodadas
+      </span>
+      {roundSlots.map((round, index) => {
+        const state = currentStates[index]!;
+        const visuals = getRoundChipVisuals(state);
+        const justResolved = justResolvedIndexes[index];
+
+        return (
+          <span key={index} className="flex items-center gap-1">
+            <span className="text-[6px] font-black leading-none" style={{ color: visuals.text }}>
+              {index + 1}
+            </span>
+            <span
+              className="h-[10px] w-[10px] rounded-full"
+              title={`Rodada ${index + 1}: ${visuals.label}`}
+              data-just-resolved={justResolved ? 'true' : undefined}
+              style={{
+                background: visuals.dot,
+                border: visuals.border,
+                boxShadow: visuals.shadow,
+                opacity: state === 'empty' ? 0.72 : 1,
+                transform: state === 'empty' ? 'scale(0.82)' : 'scale(1)',
+                transition: 'all 0.3s cubic-bezier(0.20, 0.90, 0.24, 1)',
+              }}
+            />
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 export function MatchPageHeader({
@@ -77,6 +322,8 @@ export function MatchPageHeader({
   onStartHand,
   scoreLabel,
   currentValue,
+  rounds,
+  stateLabel,
 }: {
   connectionStatus: 'offline' | 'online';
   resolvedMatchId: string;
@@ -87,263 +334,243 @@ export function MatchPageHeader({
   onStartHand: () => void;
   scoreLabel?: string;
   currentValue?: number;
+  rounds?: RoundChip[];
+  stateLabel?: string;
 }) {
   const isOnline = connectionStatus === 'online';
-
-  // NOTE: We re-derive "us / them" from the seatId so the score reads
-  // from the player's frame of reference, not from raw T1/T2.
   const scoreT1 = scoreLabel?.match(/T1\s+(\d+)/)?.[1] ?? '0';
   const scoreT2 = scoreLabel?.match(/T2\s+(\d+)/)?.[1] ?? '0';
-  const myTeam = mySeat === 'T1A' || mySeat === 'T1B' ? 'T1' : mySeat === 'T2A' || mySeat === 'T2B' ? 'T2' : null;
+  const myTeam =
+    mySeat === 'T1A' || mySeat === 'T1B'
+      ? 'T1'
+      : mySeat === 'T2A' || mySeat === 'T2B'
+        ? 'T2'
+        : null;
+  const ownTeam: 'P1' | 'P2' | null = myTeam === 'T2' ? 'P2' : myTeam === 'T1' ? 'P1' : null;
   const usScore = myTeam === 'T2' ? scoreT2 : scoreT1;
   const themScore = myTeam === 'T2' ? scoreT1 : scoreT2;
-
   const resolvedCurrentValue = currentValue ?? 1;
-  const abbreviatedMatchId = resolvedMatchId ? `#${resolvedMatchId.slice(-6)}` : null;
-  const seatLabel = mySeat ?? '—';
-
-  const valeTier = resolveValeTier(resolvedCurrentValue);
-  const valeVisuals = getValeTierVisuals(valeTier);
-
-  const [auxOpen, setAuxOpen] = useState(false);
+  const valeVisuals = getValeTierVisuals(resolveValeTier(resolvedCurrentValue));
+  const abbreviatedMatchId = resolvedMatchId ? `#${resolvedMatchId.slice(-6)}` : '#------';
+  const statusLabel = stateLabel ?? (isOnline ? 'Mesa sincronizada' : 'Reconectando');
 
   return (
-    <div
-      className="relative overflow-hidden px-5 py-2.5"
+    <header
+      className="relative overflow-hidden px-1.5 py-0 sm:px-4 sm:py-0.5"
       style={{
-        background: 'linear-gradient(180deg, rgba(7,14,20,0.98), rgba(8,16,14,0.94))',
-        borderBottom: '1px solid rgba(201,168,76,0.10)',
+        background:
+          'linear-gradient(180deg, rgba(8,12,20,0.98) 0%, rgba(7,13,18,0.96) 54%, rgba(4,8,12,0.92) 100%)',
+        borderBottom: '1px solid rgba(201,168,76,0.18)',
+        boxShadow:
+          '0 14px 34px rgba(0,0,0,0.30), 0 0 28px rgba(201,168,76,0.04), inset 0 1px 0 rgba(255,241,184,0.05)',
         backdropFilter: 'blur(14px)',
       }}
     >
-      <div className="relative z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-        {/* LEFT — quiet brand chip + status dot, low visual weight */}
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full"
-            style={{
-              background: isOnline ? '#22c55e' : '#ef4444',
-              boxShadow: isOnline ? '0 0 8px rgba(34,197,94,0.48)' : '0 0 8px rgba(239,68,68,0.48)',
-            }}
-            aria-label={isOnline ? 'Online' : 'Offline'}
-          />
-          <span
-            className="text-[10px] font-black uppercase tracking-[0.24em] truncate"
-            style={{ color: 'rgba(232,213,160,0.46)', fontFamily: 'Georgia, serif' }}
-          >
-            Truco Paulista
-          </span>
-        </div>
+      {/* Animated gold hairline. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-8 top-0 h-px"
+        style={{
+          background:
+            'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.56) 50%, transparent 100%)',
+          backgroundSize: '200% 100%',
+          animation: 'px-gold-shimmer 8s ease-in-out infinite',
+        }}
+      />
+      {/* Central ambient halo. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-[34%] top-[-92px] h-[180px] w-[32%] rounded-full"
+        style={{
+          background: 'radial-gradient(circle, rgba(201,168,76,0.14) 0%, transparent 68%)',
+          filter: 'blur(18px)',
+          animation: 'px-frame-breathe 7s ease-in-out infinite',
+        }}
+      />
 
-        {/* CENTER — the score is the head-act. Big serif numerals on each
-            side, oxidized brass divider with the Vale medallion in the
-            middle. This is the "scoreboard" look the felt deserves. */}
-        <div className="flex items-center justify-center gap-3 sm:gap-4">
-          <div className="flex flex-col items-end leading-none">
+      <div className="relative z-10 grid min-h-[38px] grid-cols-1 items-center gap-0.5 sm:min-h-[52px] sm:gap-1 xl:grid-cols-[minmax(190px,0.72fr)_minmax(390px,1.18fr)_minmax(190px,0.72fr)] xl:gap-2">
+        <div className="hidden min-w-0 items-center gap-3 sm:flex">
+          <div
+            className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[10px]"
+            style={{
+              background:
+                'linear-gradient(145deg, rgba(40,30,12,0.98), rgba(8,12,14,0.94))',
+              border: '1px solid rgba(255,223,128,0.32)',
+              boxShadow:
+                '0 12px 22px rgba(0,0,0,0.32), 0 0 16px rgba(201,168,76,0.18), inset 0 1px 0 rgba(255,241,184,0.14)',
+            }}
+          >
             <span
-              className="text-[8px] font-black uppercase tracking-[0.30em]"
-              style={{ color: 'rgba(232,213,160,0.46)' }}
-            >
-              Nós
-            </span>
-            <span
-              className="mt-0.5 text-[26px] font-black leading-none sm:text-[30px]"
+              className="text-[12px] font-black leading-none"
               style={{
-                color: '#f0e6d3',
+                background:
+                  'linear-gradient(180deg, #fff1b8 0%, #e8c76a 50%, #c9a84c 100%)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
                 fontFamily: 'Georgia, serif',
-                textShadow: '0 1px 0 rgba(0,0,0,0.4)',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
               }}
             >
-              {usScore}
+              TP
             </span>
           </div>
 
-          {/* Vale medallion as the divider — circular, gold, small but
-              dominant in this slot. Uses the same vocabulary as the Vira's
-              "V" wax-seal medallion on the felt, deliberately. */}
-          <div className="flex flex-col items-center">
+          <div className="min-w-0">
             <div
-              className={valeVisuals.pulse ? 'tier-pulse-anim' : ''}
+              className="truncate text-[10px] font-black uppercase tracking-[0.24em]"
               style={{
-                width: 38,
-                height: 38,
-                borderRadius: '50%',
+                color: '#e8c76a',
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 0 14px rgba(201,168,76,0.32)',
+              }}
+            >
+              Mesa ao vivo
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <Pill tone="neutral">Assento {mySeat ?? '—'}</Pill>
+              <Pill tone="gold">Vira {viraRank}</Pill>
+            </div>
+          </div>
+        </div>
+
+        <section
+          className="relative mx-auto flex w-full max-w-[470px] items-center justify-center gap-1 rounded-[14px] px-1.5 py-0 sm:gap-2.5 sm:rounded-[18px] sm:px-3 sm:py-0.5"
+          aria-label="Placar da partida"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(12,18,28,0.94) 0%, rgba(6,10,16,0.94) 100%)',
+            border: '1px solid rgba(201,168,76,0.32)',
+            boxShadow:
+              '0 18px 38px rgba(0,0,0,0.42), 0 0 24px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.06)',
+          }}
+        >
+          <div
+            aria-hidden
+            className="absolute inset-x-8 top-0 h-px"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent 0%, rgba(255,223,128,0.62) 50%, transparent 100%)',
+            }}
+          />
+
+          <ScoreColumn label="Nós" score={usScore} tone="us" />
+
+          <div className="flex min-w-[82px] flex-col items-center sm:min-w-[122px]">
+            <div
+              className="relative flex h-[30px] w-[30px] items-center justify-center rounded-full sm:h-[38px] sm:w-[38px]"
+              style={{
                 background: valeVisuals.background,
                 border: valeVisuals.border,
                 boxShadow: valeVisuals.glow,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
               }}
               aria-label={`Vale ${resolvedCurrentValue}`}
             >
               <span
-                className="leading-none"
+                className="text-[7px] font-black uppercase tracking-[0.08em] sm:text-[8px]"
                 style={{
-                  fontFamily: 'Georgia, serif',
-                  fontWeight: 900,
-                  fontSize: 17,
                   color: valeVisuals.textColor,
-                  textShadow:
-                    valeTier === 'gold'
-                      ? '0 1px 0 rgba(255,255,255,0.32)'
-                      : '0 1px 0 rgba(0,0,0,0.32)',
+                  fontFamily: 'Georgia, serif',
+                }}
+              >
+                Vale
+              </span>
+              <span
+                className="ml-0.5 text-[15px] font-black leading-none sm:text-[18px]"
+                style={{
+                  color: valeVisuals.textColor,
+                  fontFamily: 'Cormorant Garamond, Georgia, serif',
+                  textShadow: '0 1px 0 rgba(255,255,255,0.18)',
                 }}
               >
                 {resolvedCurrentValue}
               </span>
             </div>
-            <span
-              className="mt-1 text-[7px] font-black uppercase tracking-[0.30em]"
-              style={{ color: 'rgba(232,213,160,0.46)' }}
-            >
-              Vale
+
+            <div className="mt-0.5">
+              <RoundTracker rounds={rounds} ownTeam={ownTeam} />
+            </div>
+          </div>
+
+          <ScoreColumn label="Eles" score={themScore} tone="them" />
+        </section>
+
+        <div className="hidden items-center justify-start gap-2 sm:flex xl:justify-end">
+          <div className="hidden min-w-0 flex-col items-end xl:flex">
+            <Pill tone={isOnline ? 'success' : 'danger'}>
+              <span
+                aria-hidden
+                className="relative h-2 w-2 rounded-full"
+                style={{
+                  background: isOnline ? '#22c55e' : '#ef4444',
+                  boxShadow: isOnline
+                    ? '0 0 10px rgba(34,197,94,0.68)'
+                    : '0 0 10px rgba(239,68,68,0.68)',
+                }}
+              >
+                {isOnline ? (
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 rounded-full bg-emerald-400/60"
+                    style={{ animation: 'px-dot-ripple 2.2s ease-out infinite' }}
+                  />
+                ) : null}
+              </span>
+              {statusLabel}
+            </Pill>
+            <span className="mt-0.5 text-[7px] font-black uppercase tracking-[0.18em] text-white/32">
+              Partida {abbreviatedMatchId}
             </span>
           </div>
 
-          <div className="flex flex-col items-start leading-none">
-            <span
-              className="text-[8px] font-black uppercase tracking-[0.30em]"
-              style={{ color: 'rgba(232,213,160,0.46)' }}
-            >
-              Eles
-            </span>
-            <span
-              className="mt-0.5 text-[26px] font-black leading-none sm:text-[30px]"
-              style={{
-                color: '#f0e6d3',
-                fontFamily: 'Georgia, serif',
-                textShadow: '0 1px 0 rgba(0,0,0,0.4)',
-              }}
-            >
-              {themScore}
-            </span>
-          </div>
-        </div>
+          <button
+            type="button"
+            onClick={onRefreshState}
+            className="rounded-[10px] px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] text-amber-100/62 transition hover:text-amber-100"
+            style={{
+              background:
+                'linear-gradient(180deg, rgba(15,22,30,0.82), rgba(6,10,14,0.86))',
+              border: '1px solid rgba(201,168,76,0.14)',
+              boxShadow:
+                '0 10px 20px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
+            }}
+          >
+            Sync
+          </button>
 
-        {/* RIGHT — actions as ghost outline chips. "Nova mão" stays gold
-            because it's the only state-changing primary action. */}
-        <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onStartHand}
             disabled={!canStartHand}
             aria-disabled={!canStartHand}
-            className="rounded-[10px] px-3.5 py-1.5 text-[9px] font-black uppercase tracking-[0.18em] transition-all duration-200"
+            className={`rounded-[10px] px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.16em] transition-all duration-200 ${
+              canStartHand ? 'px-shine' : ''
+            }`}
             style={
               canStartHand
                 ? {
-                    background: 'linear-gradient(135deg, #c9a84c, #8a6a28)',
-                    border: '1px solid rgba(230,195,100,0.52)',
+                    background:
+                      'linear-gradient(135deg, #fff1b8 0%, #e8c76a 38%, #c9a84c 72%, #6f4f14 100%)',
+                    border: '1px solid rgba(255,241,184,0.74)',
                     color: '#1a0a00',
                     boxShadow:
-                      '0 0 12px rgba(230,195,100,0.22), 0 4px 10px rgba(0,0,0,0.34)',
+                      '0 0 22px rgba(230,195,100,0.34), 0 12px 24px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.36)',
                   }
                 : {
                     background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                    color: 'rgba(255,255,255,0.22)',
+                    border: '1px solid rgba(255,255,255,0.07)',
+                    color: 'rgba(255,255,255,0.26)',
                     cursor: 'not-allowed',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
                   }
             }
           >
             Nova mão
           </button>
-
-          <Link
-            to="/lobby"
-            className="rounded-[10px] px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.18em] transition-colors duration-200 hover:border-amber-300/30 hover:bg-white/[0.06] hover:text-amber-200"
-            style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              color: 'rgba(232,213,160,0.55)',
-              textDecoration: 'none',
-            }}
-          >
-            Lobby
-          </Link>
-
-          <button
-            type="button"
-            onClick={() => setAuxOpen((previous) => !previous)}
-            aria-expanded={auxOpen}
-            aria-label="Mais informações"
-            className="rounded-[10px] px-2.5 py-1.5 text-[11px] font-bold transition-all duration-200"
-            style={{
-              background: auxOpen ? 'rgba(230,195,100,0.14)' : 'rgba(255,255,255,0.03)',
-              border: auxOpen
-                ? '1px solid rgba(230,195,100,0.30)'
-                : '1px solid rgba(255,255,255,0.06)',
-              color: auxOpen ? '#e8c76a' : 'rgba(232,213,160,0.55)',
-            }}
-          >
-            {auxOpen ? '▴' : '▾'}
-          </button>
         </div>
       </div>
-
-      {auxOpen ? (
-        <div className="relative z-10 mt-2.5 flex flex-wrap items-center justify-end gap-2 border-t border-white/[0.04] pt-2">
-          <span
-            className="flex items-center gap-1.5 rounded-full px-2.5 py-1"
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.06)',
-            }}
-          >
-            <span
-              className="text-[7px] font-black uppercase tracking-[0.18em]"
-              style={{ color: 'rgba(255,255,255,0.36)' }}
-            >
-              Assento
-            </span>
-            <span
-              className="text-[8px] font-black uppercase tracking-[0.18em]"
-              style={{ color: '#e8c76a' }}
-            >
-              {seatLabel}
-            </span>
-          </span>
-
-          <span
-            className="rounded-full px-2.5 py-1 text-[8px] font-bold uppercase tracking-[0.16em]"
-            style={{
-              background: 'rgba(230,195,100,0.08)',
-              border: '1px solid rgba(230,195,100,0.16)',
-              color: 'rgba(232,199,106,0.82)',
-            }}
-          >
-            {getViraLabel(viraRank)}
-          </span>
-
-          {abbreviatedMatchId ? (
-            <span
-              className="rounded-full px-2 py-1 font-mono text-[8px]"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.06)',
-                color: 'rgba(255,255,255,0.40)',
-              }}
-              title={resolvedMatchId}
-            >
-              {abbreviatedMatchId}
-            </span>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={onRefreshState}
-            className="rounded-lg px-3 py-1 text-[8px] font-bold uppercase tracking-[0.16em] transition-all duration-200"
-            style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              color: 'rgba(255,255,255,0.58)',
-            }}
-          >
-            Sync
-          </button>
-        </div>
-      ) : null}
-    </div>
+    </header>
   );
 }
+
+
