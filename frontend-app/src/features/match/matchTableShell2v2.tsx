@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
+import { BotSpeechBubble } from './botSpeechBubble';
 import { MatchActionSurface } from './matchActionSurface';
 import type { MatchAction } from './matchActionTypes';
 import { MatchPlayerHandDock } from './matchPlayerHandDock';
@@ -21,6 +22,11 @@ import {
 } from './roundClashEffects';
 import { MaoDeOnzeDecisionStage } from './maoDeOnzeStage';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
+import {
+  useBotDialogueDirector,
+  type BotDialogueActiveSpeech,
+  type BotDialogueSignal,
+} from './useBotDialogueDirector';
 import {
   useRoundResolutionPhase,
   isRevealPhase,
@@ -827,6 +833,7 @@ function SeatNamePlate2v2({
         ) : null}
       </div>
 
+
       <div
         className="relative z-10 mt-[2px] flex h-[76px] items-start justify-center sm:mt-[4px] sm:h-[108px]"
         style={{ width: size.deckWidth }}
@@ -1276,6 +1283,7 @@ function TwoVersusTwoQuadrant({
   seatPlayedCards,
   seatsCoveredByFlight,
   cardsRemainingBySeat,
+  botDialogues,
   onSeatSourceElementChange,
   onPartnerSlotRef,
   onLeftRivalSlotRef,
@@ -1290,6 +1298,7 @@ function TwoVersusTwoQuadrant({
   seatLayout: TwoVersusTwoSeatLayout | null;
   seatPlayedCards: Record<string, string | null>;
   cardsRemainingBySeat: Record<string, number>;
+  botDialogues: Record<string, BotDialogueActiveSpeech | undefined>;
   seatsCoveredByFlight: Record<string, boolean>;
   onSeatSourceElementChange: (seatId: string, element: HTMLDivElement | null) => void;
   onPartnerSlotRef: (element: HTMLDivElement | null) => void;
@@ -1413,6 +1422,35 @@ function TwoVersusTwoQuadrant({
         anchors={roundClashAnchors}
       />
 
+      <div className="pointer-events-none absolute inset-0 z-[46]">
+        <div className="absolute left-1/2 top-[24px] translate-x-[118px] sm:translate-x-[132px] xl:translate-x-[146px]">
+          <BotSpeechBubble
+            text={botDialogues[seatLayout.partner.seatId]?.text ?? null}
+            relationship="partner"
+            placement="partner-right"
+            event={botDialogues[seatLayout.partner.seatId]?.event ?? null}
+          />
+        </div>
+
+        <div className="absolute left-[22%] top-[37%] -translate-x-1/2">
+          <BotSpeechBubble
+            text={botDialogues[seatLayout.leftRival.seatId]?.text ?? null}
+            relationship="rival"
+            placement="card-above"
+            event={botDialogues[seatLayout.leftRival.seatId]?.event ?? null}
+          />
+        </div>
+
+        <div className="absolute right-[22%] top-[37%] translate-x-1/2">
+          <BotSpeechBubble
+            text={botDialogues[seatLayout.rightRival.seatId]?.text ?? null}
+            relationship="rival"
+            placement="card-above"
+            event={botDialogues[seatLayout.rightRival.seatId]?.event ?? null}
+          />
+        </div>
+      </div>
+
       <div className="relative z-[12] -mb-7 flex w-full -translate-y-4 scale-[0.78] justify-center sm:-mb-4 sm:-translate-y-5 sm:scale-100 xl:-translate-y-6">
         <SeatNamePlate2v2
           seat={seatLayout.partner}
@@ -1427,12 +1465,14 @@ function TwoVersusTwoQuadrant({
         ref={onPartnerSlotRef}
         className="relative mb-0 mt-0 flex h-[54px] w-[64px] items-center justify-center sm:mb-2 sm:mt-6 sm:h-[88px] sm:w-[104px]"
       >
-        <RadialPlayedCard
-          card={partnerCard}
-          position="top"
-          isCoveredByFlight={isPartnerCovered}
-          outcome={partnerOutcome}
-        />
+        <div className="relative flex h-[82px] w-[58px] items-center justify-center sm:h-[128px] sm:w-[90px]">
+          <RadialPlayedCard
+            card={partnerCard}
+            position="top"
+            isCoveredByFlight={isPartnerCovered}
+            outcome={partnerOutcome}
+          />
+        </div>
       </div>
 
       <div className="grid w-full max-w-full grid-cols-[minmax(0,1fr)_42px_minmax(0,1fr)] items-center gap-x-0 gap-y-0 lg:max-w-[1280px] lg:grid-cols-[1fr_auto_1fr] lg:gap-x-4 lg:gap-y-2 2xl:gap-x-8">
@@ -1448,12 +1488,14 @@ function TwoVersusTwoQuadrant({
             ref={onLeftRivalSlotRef}
             className="relative flex h-[72px] w-[56px] shrink-0 translate-x-0 items-center justify-center sm:h-[96px] sm:w-[72px] lg:h-[138px] lg:w-[108px] lg:translate-x-16 xl:translate-x-24"
           >
-            <RadialPlayedCard
-              card={leftRivalCard}
-              position="left"
-              isCoveredByFlight={isLeftRivalCovered}
-              outcome={leftRivalOutcome}
-            />
+            <div className="relative flex h-[82px] w-[58px] items-center justify-center sm:h-[128px] sm:w-[90px]">
+              <RadialPlayedCard
+                card={leftRivalCard}
+                position="left"
+                isCoveredByFlight={isLeftRivalCovered}
+                outcome={leftRivalOutcome}
+              />
+            </div>
           </div>
         </div>
 
@@ -1481,12 +1523,14 @@ function TwoVersusTwoQuadrant({
             ref={onRightRivalSlotRef}
             className="relative flex h-[72px] w-[56px] shrink-0 translate-x-0 items-center justify-center sm:h-[96px] sm:w-[72px] lg:h-[138px] lg:w-[108px] lg:-translate-x-16 xl:-translate-x-24"
           >
-            <RadialPlayedCard
-              card={rightRivalCard}
-              position="right"
-              isCoveredByFlight={isRightRivalCovered}
-              outcome={rightRivalOutcome}
-            />
+            <div className="relative flex h-[82px] w-[58px] items-center justify-center sm:h-[128px] sm:w-[90px]">
+              <RadialPlayedCard
+                card={rightRivalCard}
+                position="right"
+                isCoveredByFlight={isRightRivalCovered}
+                outcome={rightRivalOutcome}
+              />
+            </div>
           </div>
           <SeatNamePlate2v2
             seat={seatLayout.rightRival}
@@ -6440,6 +6484,191 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
   const visibleBotPresenceQuote = shouldMuteBotPresenceForDrama
     ? null
     : (botPresenceQuote ?? heldBotPresence?.quote ?? null);
+
+  const botDialogueSeats = useMemo(
+    () =>
+      twoVersusTwoSeatLayout
+        ? [
+            {
+              seatId: twoVersusTwoSeatLayout.partner.seatId,
+              isBot: twoVersusTwoSeatLayout.partner.isBot,
+              relationship: 'partner' as const,
+              profile: twoVersusTwoSeatLayout.partner.botIdentity?.profile ?? null,
+            },
+            {
+              seatId: twoVersusTwoSeatLayout.leftRival.seatId,
+              isBot: twoVersusTwoSeatLayout.leftRival.isBot,
+              relationship: 'rival' as const,
+              profile: twoVersusTwoSeatLayout.leftRival.botIdentity?.profile ?? null,
+            },
+            {
+              seatId: twoVersusTwoSeatLayout.rightRival.seatId,
+              isBot: twoVersusTwoSeatLayout.rightRival.isBot,
+              relationship: 'rival' as const,
+              profile: twoVersusTwoSeatLayout.rightRival.botIdentity?.profile ?? null,
+            },
+          ]
+        : [],
+    [twoVersusTwoSeatLayout],
+  );
+
+  const botDialogueSignals = useMemo<BotDialogueSignal[]>(() => {
+    if (props.isOneVsOne || !twoVersusTwoSeatLayout) {
+      return [];
+    }
+
+    const signals: BotDialogueSignal[] = [];
+    const trackedSeats = [
+      twoVersusTwoSeatLayout.partner,
+      twoVersusTwoSeatLayout.leftRival,
+      twoVersusTwoSeatLayout.rightRival,
+    ];
+
+    const pushSignal = ({
+      seat,
+      event,
+      priority,
+      suffix,
+    }: {
+      seat: TableSeatView | null;
+      event: BotDialogueSignal['event'];
+      priority: number;
+      suffix: string;
+    }) => {
+      if (!seat?.isBot) {
+        return;
+      }
+
+      signals.push({
+        seatId: seat.seatId,
+        event,
+        priority,
+        key: `${seat.seatId}:${event}:${suffix}`,
+      });
+    };
+
+    if (
+      latestPlayedSeat?.isBot &&
+      !latestPlayedSeat.isMine &&
+      tablePhase === 'playing' &&
+      !isRoundResolutionVisualHoldActive &&
+      isVisibleSeatCard(seatPlayedCards[latestPlayedSeat.seatId])
+    ) {
+      pushSignal({
+        seat: latestPlayedSeat,
+        event: 'bot-played-card',
+        priority: 42,
+        suffix: `${roundIntroKey}:${playedRoundsCount}:${
+          seatPlayedCards[latestPlayedSeat.seatId] ?? 'card'
+        }`,
+      });
+    }
+
+    if (isMaoDeFerroTensionOpen) {
+      trackedSeats.forEach((seat) => {
+        pushSignal({
+          seat,
+          event: 'mao-de-ferro-pressure',
+          priority: 72,
+          suffix: `${roundIntroKey}:ferro:${scoreT1}-${scoreT2}`,
+        });
+      });
+    } else if (isMaoDeOnzeTensionOpen) {
+      trackedSeats.forEach((seat) => {
+        pushSignal({
+          seat,
+          event: 'mao-de-onze-pressure',
+          priority: 66,
+          suffix: `${roundIntroKey}:onze:${scoreT1}-${scoreT2}`,
+        });
+      });
+    }
+
+    if (isAwaitingBet && props.requestedBy !== null) {
+      const requesterSeat =
+        trackedSeats.find((seat) => mapSeatToPlayerId(seat.seatId) === props.requestedBy) ?? null;
+      const event =
+        pendingValue !== null && pendingValue > currentValue
+          ? 'bot-raised-bet'
+          : 'bot-requested-truco';
+
+      pushSignal({
+        seat: requesterSeat,
+        event,
+        priority: 80,
+        suffix: `${roundIntroKey}:${playedRoundsCount}:${props.requestedBy}:${pendingValue ?? currentValue}`,
+      });
+    }
+
+    if (canShowTwoVersusTwoResolutionBadges) {
+      trackedSeats.forEach((seat) => {
+        const outcome = twoVersusTwoSeatOutcomes[seat.seatId] ?? null;
+        const seatTeamId = resolveSeatTeamId(seat.seatId);
+        const viewerTeam = resolveSeatTeamId(twoVersusTwoSeatLayout.self.seatId);
+        const isPartnerTeam = seatTeamId !== null && viewerTeam !== null && seatTeamId === viewerTeam;
+
+        if (outcome === 'win' || outcome === 'team-win') {
+          pushSignal({
+            seat,
+            event: isPartnerTeam ? 'partner-won-round' : 'bot-won-round',
+            priority: 58,
+            suffix: `${roundIntroKey}:${playedRoundsCount}:${twoVersusTwoRoundResult ?? 'round'}`,
+          });
+          return;
+        }
+
+        if (outcome === 'loss') {
+          pushSignal({
+            seat,
+            event: isPartnerTeam ? 'partner-lost-round' : 'bot-lost-round',
+            priority: 52,
+            suffix: `${roundIntroKey}:${playedRoundsCount}:${twoVersusTwoRoundResult ?? 'round'}`,
+          });
+        }
+      });
+    }
+
+    return signals;
+  }, [
+    canShowTwoVersusTwoResolutionBadges,
+    currentValue,
+    isAwaitingBet,
+    isMaoDeFerroTensionOpen,
+    isMaoDeOnzeTensionOpen,
+    isRoundResolutionVisualHoldActive,
+    latestPlayedSeat,
+    pendingValue,
+    playedRoundsCount,
+    props.isOneVsOne,
+    props.requestedBy,
+    roundIntroKey,
+    scoreT1,
+    scoreT2,
+    seatPlayedCards,
+    tablePhase,
+    twoVersusTwoRoundResult,
+    twoVersusTwoSeatLayout,
+    twoVersusTwoSeatOutcomes,
+  ]);
+
+  const botDialoguesBySeat = useBotDialogueDirector({
+    seats: botDialogueSeats,
+    signals: botDialogueSignals,
+    currentValue: activeValueForTier,
+    isMuted:
+      props.isOneVsOne ||
+      shouldShowTrucoDrama ||
+      isNewHandOpeningLocked ||
+      isMaoDeFerroOpeningOpen,
+  });
+
+  const hasActiveTwoVersusTwoBotDialogue = Object.values(botDialoguesBySeat).some(Boolean);
+  const shouldHoldHandClimaxForBotDialogue = Boolean(
+    !props.isOneVsOne &&
+      (isHandFinished || isMatchFinished) &&
+      hasActiveTwoVersusTwoBotDialogue,
+  );
+
   const shouldHideCenterActionBar =
     isNewHandOpeningLocked || isMaoDeOnzeAcceptedState || isViewerMaoDeOnzeDecision;
 
@@ -6554,6 +6783,10 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
       return null;
     }
 
+    if (shouldHoldHandClimaxForBotDialogue) {
+      return null;
+    }
+
     if ((isHandFinished || isMatchFinished) && winner !== null && awardedPoints !== null) {
       return {
         isMyHand: viewerWonHandOrMatch,
@@ -6573,6 +6806,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
       shouldSuppressCenterTableCards: false,
       suppressHandOutcomeModal: props.suppressHandOutcomeModal ?? false,
       shouldShowHandClimax: Boolean(climax),
+      shouldHoldHandClimaxForBotDialogue,
       shouldFlyPlayer: myCardLaunching,
       shouldFlyOpponent: shouldHideOpponentSlotForFlight,
       hasExplicitOpponentFlight: shouldHideOpponentSlotForFlight,
@@ -6654,6 +6888,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     shouldFadeOpponentCard,
     shouldHideMySlotForFlight,
     shouldHideOpponentSlotForFlight,
+    shouldHoldHandClimaxForBotDialogue,
     canShowPlayerTurnCue,
     settledOwnFlightKey,
     settledOpponentFlightKey,
@@ -7037,6 +7272,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
                 seatPlayedCards={isNewHandOpeningLocked ? {} : seatPlayedCards}
                 seatsCoveredByFlight={seatsCoveredByFlight}
                 cardsRemainingBySeat={displayedTwoVersusTwoCardsRemainingBySeat}
+                botDialogues={botDialoguesBySeat}
                 onSeatSourceElementChange={handleTwoVersusTwoSeatSourceElementChange}
                 onPartnerSlotRef={(el) => {
                   partnerPlayedSlotRef.current = el;
@@ -7317,3 +7553,4 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     </div>
   );
 }
+

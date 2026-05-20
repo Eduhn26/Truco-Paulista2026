@@ -1046,6 +1046,14 @@ function OpponentCluster({
   const shouldShowPresenceLine = presenceLine !== null;
   const shouldShowPresenceQuote = presenceQuote !== null;
   const shouldPulsePresence = presenceTone !== 'idle';
+  const isSpokenTaunt = shouldShowPresenceQuote;
+  const presencePlaqueBackground = isSpokenTaunt
+    ? presenceVisuals.quoteBackground
+    : presenceVisuals.background;
+  const presencePlaqueBorder = isSpokenTaunt ? presenceVisuals.quoteBorder : presenceVisuals.border;
+  const presencePlaqueShadow = isSpokenTaunt
+    ? '0 16px 28px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.06)'
+    : '0 8px 18px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)';
 
   // NOTE: Dynamic speech can still replace the profile label, but the current
   // 1v1 layout passes null while we keep the table compact.
@@ -1352,50 +1360,98 @@ function OpponentCluster({
               '-' +
               String(presenceQuote ?? 'no-quote')
             }
-            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            initial={{ opacity: 0, y: 5, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.96 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className={`pointer-events-none max-w-[270px] rounded-[16px] border text-center ${
-              shouldShowPresenceQuote ? 'px-3.5 py-2' : 'px-3 py-1.5'
-            }`}
-            style={{
-              background: shouldShowPresenceQuote
-                ? presenceVisuals.quoteBackground
-                : shouldShowPresenceLine
-                  ? presenceVisuals.quoteBackground
-                  : 'rgba(0,0,0,0.16)',
-              borderColor: shouldShowPresenceQuote
-                ? presenceVisuals.quoteBorder
-                : shouldShowPresenceLine
-                  ? presenceVisuals.quoteBorder
-                  : 'rgba(255,223,128,0.12)',
-              boxShadow: shouldPulsePresence
-                ? '0 16px 28px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.06)'
-                : '0 10px 20px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
-              backdropFilter: 'blur(12px)',
-            }}
+            className="pointer-events-none relative z-30 -mt-0.5 max-w-[238px]"
           >
-            {statusLabel ? (
-              <div
-                className="text-[9px] font-black uppercase leading-none tracking-[0.20em]"
+            <div
+              className={`relative overflow-visible rounded-[15px] border text-center backdrop-blur-md ${
+                shouldShowPresenceQuote ? 'px-3.5 py-2' : 'px-3 py-1.5'
+              }`}
+              style={{
+                background: presencePlaqueBackground,
+                borderColor: presencePlaqueBorder,
+                boxShadow: presencePlaqueShadow,
+              }}
+            >
+              <span
+                aria-hidden
+                className="absolute bottom-[-5px] left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-b border-r"
                 style={{
-                  color: shouldShowPresenceLine ? presenceVisuals.text : 'rgba(232,213,160,0.52)',
-                  fontFamily: 'Georgia, serif',
+                  background: presencePlaqueBackground,
+                  borderColor: presencePlaqueBorder,
                 }}
-              >
-                {statusLabel}
-              </div>
-            ) : null}
+              />
 
-            {shouldShowPresenceQuote ? (
-              <div
-                className={`${statusLabel ? 'mt-1.5' : ''} text-[10px] font-black uppercase leading-tight tracking-[0.14em]`}
-                style={{ color: presenceVisuals.text, fontFamily: 'Georgia, serif' }}
-              >
-                “{presenceQuote}”
-              </div>
-            ) : null}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-5 top-0 h-px"
+                style={{
+                  background:
+                    'linear-gradient(90deg, transparent 0%, rgba(255,241,184,0.52) 50%, transparent 100%)',
+                }}
+              />
+
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -right-7 -top-8 h-16 w-16 rounded-full"
+                style={{
+                  background:
+                    'radial-gradient(circle, rgba(255,241,184,0.12) 0%, transparent 68%)',
+                  filter: 'blur(5px)',
+                }}
+              />
+
+              {statusLabel ? (
+                <div className="flex items-center justify-center gap-1.5">
+                  <motion.span
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    animate={
+                      shouldPulsePresence
+                        ? { opacity: [0.62, 1, 0.62], scale: [1, 1.18, 1] }
+                        : {}
+                    }
+                    transition={{
+                      duration: 1.05,
+                      repeat: shouldPulsePresence ? Infinity : 0,
+                      ease: 'easeInOut',
+                    }}
+                    style={{
+                      background: presenceVisuals.dot,
+                      boxShadow: presenceVisuals.dotGlow,
+                    }}
+                  />
+
+                  <div
+                    className="truncate text-[8px] font-black uppercase leading-none tracking-[0.22em]"
+                    style={{
+                      color: shouldShowPresenceLine
+                        ? presenceVisuals.text
+                        : 'rgba(232,213,160,0.52)',
+                      fontFamily: 'Georgia, serif',
+                    }}
+                  >
+                    {statusLabel}
+                  </div>
+                </div>
+              ) : null}
+
+              {shouldShowPresenceQuote ? (
+                <div
+                  className={`${statusLabel ? 'mt-1.5' : ''} text-[9.5px] font-black uppercase leading-tight tracking-[0.13em]`}
+                  style={{
+                    color: presenceVisuals.text,
+                    fontFamily: 'Georgia, serif',
+                    textShadow: '0 2px 6px rgba(0,0,0,0.44)',
+                  }}
+                >
+                  “{presenceQuote}”
+                </div>
+              ) : null}
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -4408,12 +4464,13 @@ export function MatchTableShell(props: MatchTableShellProps) {
     tone: botPresenceTone,
     currentValue: activeValueForTier,
   });
+  // NOTE: In 1v1, thinking is only a compact rival status. Spoken taunts are
+  // reserved for pressure, special hands and round outcomes.
   const shouldShowBotPresenceQuote =
     isOpponentBotPressureSource ||
     isMaoDeOnzeTensionOpen ||
     isOpponentBotWinningRound ||
-    isOpponentBotLosingRound ||
-    isOpponentBotThinking;
+    isOpponentBotLosingRound;
   const botPresenceQuote = shouldShowBotPresenceQuote
     ? resolveBotPresenceQuote({
         seat: opponentSeatView,
@@ -4425,7 +4482,12 @@ export function MatchTableShell(props: MatchTableShellProps) {
   const botPresenceHoldTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (shouldMuteBotPresenceForDrama || !botPresenceLine || botPresenceTone === 'idle') {
+    if (
+      shouldMuteBotPresenceForDrama ||
+      !botPresenceLine ||
+      botPresenceTone === 'idle' ||
+      botPresenceTone === 'thinking'
+    ) {
       return;
     }
 
@@ -4433,11 +4495,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
     const duration =
       botPresenceTone === 'wonRound' || botPresenceTone === 'lostRound'
         ? 2300
-        : botPresenceTone === 'thinking'
-          ? 3200
-          : botPresenceTone === 'pressure'
-            ? 3000
-            : 2800;
+        : botPresenceTone === 'pressure'
+          ? 3000
+          : 2800;
 
     if (botPresenceHoldTimeoutRef.current !== null) {
       window.clearTimeout(botPresenceHoldTimeoutRef.current);
@@ -4929,9 +4989,9 @@ export function MatchTableShell(props: MatchTableShellProps) {
                   seat={opponentSeatView}
                   cardsRemaining={displayedOpponentCardsRemaining}
                   isOpponent
-                  presenceLine={null}
-                  presenceQuote={null}
-                  presenceTone="idle"
+                  presenceLine={visibleBotPresenceLine}
+                  presenceQuote={visibleBotPresenceQuote}
+                  presenceTone={visibleBotPresenceTone}
                   suppressNeutralProfile
                 />
               </div>
@@ -5186,6 +5246,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
     </div>
   );
 }
+
 
 
 

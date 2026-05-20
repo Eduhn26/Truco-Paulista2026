@@ -83,7 +83,7 @@ export function AuthCallbackPage() {
               marginBottom: 10,
             }}
           >
-            Erro no Callback
+            Entrada interrompida
           </div>
 
           <h1
@@ -95,7 +95,7 @@ export function AuthCallbackPage() {
               marginBottom: 12,
             }}
           >
-            Falha na Autenticação
+            Não conseguimos confirmar seu login
           </h1>
 
           <p
@@ -106,46 +106,8 @@ export function AuthCallbackPage() {
               marginBottom: 24,
             }}
           >
-            O frontend esperava{' '}
-            <code
-              style={{
-                background: 'rgba(239,68,68,0.12)',
-                border: '1px solid rgba(239,68,68,0.2)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                color: '#fca5a5',
-                fontSize: 12,
-              }}
-            >
-              authToken
-            </code>
-            ,{' '}
-            <code
-              style={{
-                background: 'rgba(239,68,68,0.12)',
-                border: '1px solid rgba(239,68,68,0.2)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                color: '#fca5a5',
-                fontSize: 12,
-              }}
-            >
-              provider
-            </code>{' '}
-            e{' '}
-            <code
-              style={{
-                background: 'rgba(239,68,68,0.12)',
-                border: '1px solid rgba(239,68,68,0.2)',
-                padding: '1px 6px',
-                borderRadius: 4,
-                color: '#fca5a5',
-                fontSize: 12,
-              }}
-            >
-              userId
-            </code>{' '}
-            na URL.
+            A entrada no jogo não foi concluída. Volte para a home e tente entrar novamente com
+            Google ou GitHub.
           </p>
 
           <Link
@@ -169,10 +131,10 @@ export function AuthCallbackPage() {
   const userName = payload.user.displayName ?? payload.user.email ?? 'Jogador';
 
   const steps: { status: 'success' | 'loading' | 'pending'; label: string }[] = [
-    { status: 'success', label: 'Token OAuth verificado' },
-    { status: 'success', label: `Provedor: ${payload.user.provider}` },
-    { status: 'loading', label: 'Persistindo sessão...' },
-    { status: 'pending', label: 'Redirecionando ao lobby' },
+    { status: 'success', label: 'Entrada confirmada' },
+    { status: 'success', label: 'Perfil carregado' },
+    { status: 'loading', label: 'Preparando sua sessão...' },
+    { status: 'pending', label: 'Levando você ao lobby' },
   ];
 
   return (
@@ -252,7 +214,7 @@ export function AuthCallbackPage() {
             marginBottom: 10,
           }}
         >
-          AUTENTICAÇÃO
+          ENTRANDO NO JOGO
         </p>
         <h1
           style={{
@@ -283,7 +245,7 @@ export function AuthCallbackPage() {
             lineHeight: 1.55,
           }}
         >
-          Finalizando seu login. Em segundos você estará no lobby.
+          Seu login foi confirmado. Em segundos você estará no lobby.
         </p>
         <p className="mb-8 text-sm font-bold" style={{ color: 'rgba(201,168,76,0.75)' }}>
           {userName}

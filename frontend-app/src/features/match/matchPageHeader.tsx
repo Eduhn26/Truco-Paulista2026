@@ -1,24 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+
 import type { Rank } from '../../services/socket/socketTypes';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
-
-/**
- * PREMIUM PATCH — matchPageHeader.
- *
- * Mantém 100% da API e da lógica visual existente (mesmas props, mesmos
- * tier visuals, mesmo round tracker, mesmo cálculo de myTeam/ownTeam).
- *
- * Refinos:
- *   • ScoreColumn — detecta mudança de score e dispara animação px-score-bump
- *     uma vez (via useEffect + state). Visual já estava perto do limite;
- *     agora pulsa na mudança e respira leve quando estática.
- *   • Vale chip — text shimmer dourado na borda
- *   • Round chips — ganham data-just-resolved="true" momentaneamente quando
- *     resolvem (engata o px-chip-pop)
- *   • Connection pill — ripple no dot via px-dot-ripple style inline
- *   • Botão "Nova mão" — px-shine via classe quando habilitado
- *   • Hairlines internas dourados pulsantes
- */
 
 type RoundChip = {
   result: string | null;
@@ -28,6 +11,20 @@ type RoundChip = {
 type RoundVisualState = 'us' | 'them' | 'tie' | 'empty';
 
 const MAX_ROUND_CHIPS = 3;
+
+function shouldShowMatchHeaderDebug(): boolean {
+  if (!import.meta.env.DEV) {
+    return false;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return params.get('debugMatch') === '1' || params.get('debugTruco') === '1';
+}
 
 function getValeTierVisuals(tier: ValeTier) {
   switch (tier) {
@@ -162,11 +159,10 @@ function ScoreColumn({
   const previousScoreRef = useRef<string>(score);
   const [bumpKey, setBumpKey] = useState(0);
 
-  // NOTE: Score changes remount the number so the bump animation can replay.
   useEffect(() => {
     if (previousScoreRef.current !== score) {
       previousScoreRef.current = score;
-      setBumpKey((k) => k + 1);
+      setBumpKey((key) => key + 1);
     }
   }, [score]);
 
@@ -177,11 +173,14 @@ function ScoreColumn({
         style={{
           color: accentColor,
           fontFamily: 'Georgia, serif',
-          textShadow: `0 0 10px ${tone === 'us' ? 'rgba(74,222,128,0.42)' : 'rgba(248,113,113,0.42)'}`,
+          textShadow: `0 0 10px ${
+            tone === 'us' ? 'rgba(74,222,128,0.42)' : 'rgba(248,113,113,0.42)'
+          }`,
         }}
       >
         {label}
       </span>
+
       <span
         key={bumpKey}
         className="mt-0.5 inline-block text-[27px] font-black leading-none sm:text-[30px]"
@@ -230,7 +229,8 @@ function Pill({
               background: 'rgba(220,38,38,0.12)',
               border: '1px solid rgba(248,113,113,0.22)',
               color: 'rgba(254,202,202,0.84)',
-              boxShadow: '0 0 14px rgba(220,38,38,0.16), inset 0 1px 0 rgba(248,113,113,0.10)',
+              boxShadow:
+                '0 0 14px rgba(220,38,38,0.16), inset 0 1px 0 rgba(248,113,113,0.10)',
             }
           : {
               background: 'rgba(255,255,255,0.04)',
@@ -258,15 +258,13 @@ function RoundTracker({
   const roundSlots = buildRoundSlots(rounds);
   const playedCount = roundSlots.filter((round) => round.result !== null).length;
   const previousStatesRef = useRef<RoundVisualState[]>([]);
+  const currentStates = roundSlots.map((round) => resolveRoundVisualState({ round, ownTeam }));
+  const justResolvedIndexes = currentStates.map((state, index) => {
+    const previousState = previousStatesRef.current[index];
 
-  // NOTE: Only newly resolved rounds receive the pop state.
-  const currentStates = roundSlots.map((round) =>
-    resolveRoundVisualState({ round, ownTeam }),
-  );
-  const justResolvedIndexes = currentStates.map((state, i) => {
-    const prev = previousStatesRef.current[i];
-    return prev === 'empty' && state !== 'empty';
+    return previousState === 'empty' && state !== 'empty';
   });
+
   previousStatesRef.current = currentStates;
 
   return (
@@ -282,6 +280,7 @@ function RoundTracker({
       <span className="mr-0.5 text-[7px] font-black uppercase tracking-[0.20em] text-amber-100/50">
         Rodadas
       </span>
+
       {roundSlots.map((round, index) => {
         const state = currentStates[index]!;
         const visuals = getRoundChipVisuals(state);
@@ -292,6 +291,7 @@ function RoundTracker({
             <span className="text-[6px] font-black leading-none" style={{ color: visuals.text }}>
               {index + 1}
             </span>
+
             <span
               className="h-[10px] w-[10px] rounded-full"
               title={`Rodada ${index + 1}: ${visuals.label}`}
@@ -338,6 +338,7 @@ export function MatchPageHeader({
   stateLabel?: string;
 }) {
   const isOnline = connectionStatus === 'online';
+  const showDebugMeta = shouldShowMatchHeaderDebug();
   const scoreT1 = scoreLabel?.match(/T1\s+(\d+)/)?.[1] ?? '0';
   const scoreT2 = scoreLabel?.match(/T2\s+(\d+)/)?.[1] ?? '0';
   const myTeam =
@@ -366,7 +367,6 @@ export function MatchPageHeader({
         backdropFilter: 'blur(14px)',
       }}
     >
-      {/* Animated gold hairline. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-8 top-0 h-px"
@@ -377,7 +377,7 @@ export function MatchPageHeader({
           animation: 'px-gold-shimmer 8s ease-in-out infinite',
         }}
       />
-      {/* Central ambient halo. */}
+
       <div
         aria-hidden
         className="pointer-events-none absolute left-[34%] top-[-92px] h-[180px] w-[32%] rounded-full"
@@ -427,8 +427,12 @@ export function MatchPageHeader({
             >
               Mesa ao vivo
             </div>
+
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-              <Pill tone="neutral">Assento {mySeat ?? '—'}</Pill>
+              <Pill tone={mySeat ? 'success' : 'neutral'}>{mySeat ? 'Você' : 'Entrando'}</Pill>
+
+              {showDebugMeta ? <Pill tone="neutral">Seat {mySeat ?? '—'}</Pill> : null}
+
               <Pill tone="gold">Vira {viraRank}</Pill>
             </div>
           </div>
@@ -475,6 +479,7 @@ export function MatchPageHeader({
               >
                 Vale
               </span>
+
               <span
                 className="ml-0.5 text-[15px] font-black leading-none sm:text-[18px]"
                 style={{
@@ -518,9 +523,12 @@ export function MatchPageHeader({
               </span>
               {statusLabel}
             </Pill>
-            <span className="mt-0.5 text-[7px] font-black uppercase tracking-[0.18em] text-white/32">
-              Partida {abbreviatedMatchId}
-            </span>
+
+            {showDebugMeta ? (
+              <span className="mt-0.5 text-[7px] font-black uppercase tracking-[0.18em] text-white/32">
+                Partida {abbreviatedMatchId}
+              </span>
+            ) : null}
           </div>
 
           <button
@@ -535,7 +543,7 @@ export function MatchPageHeader({
                 '0 10px 20px rgba(0,0,0,0.24), inset 0 1px 0 rgba(255,255,255,0.04)',
             }}
           >
-            Sync
+            Atualizar
           </button>
 
           <button
@@ -572,5 +580,3 @@ export function MatchPageHeader({
     </header>
   );
 }
-
-

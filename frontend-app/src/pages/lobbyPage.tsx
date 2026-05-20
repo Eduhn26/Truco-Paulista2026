@@ -1,11 +1,10 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
-import { useAuth } from "../features/auth/authStore";
+import { useAuth } from '../features/auth/authStore';
 import {
   useLobbyRealtimeSession,
   type MatchHistoryListItemPayload,
-} from "../features/lobby/useLobbyRealtimeSession";
+} from '../features/lobby/useLobbyRealtimeSession';
 
 type HeroAction = {
   ctaLabel: string;
@@ -13,19 +12,19 @@ type HeroAction = {
   onClick: () => void;
 };
 
-type QuickMatchMode = "1v1" | "2v2";
+type QuickMatchMode = '1v1' | '2v2';
 
 type ContinuationState =
-  | "reconnect"
-  | "active-room-waiting-ready"
-  | "active-room-ready"
-  | "recent-session"
-  | "first-session";
+  | 'reconnect'
+  | 'active-room-waiting-ready'
+  | 'active-room-ready'
+  | 'recent-session'
+  | 'first-session';
 
 type ContinuationDescriptor = {
   state: ContinuationState;
   badge: string;
-  badgeTone: "gold" | "green" | "neutral";
+  badgeTone: 'gold' | 'green' | 'neutral';
   title: string;
   summary: string;
   action: HeroAction;
@@ -70,7 +69,7 @@ type RecentMatchViewModel = {
   didCurrentUserWin: boolean | null;
 };
 
-type LobbySeatId = "T1A" | "T2A" | "T1B" | "T2B";
+type LobbySeatId = 'T1A' | 'T2A' | 'T1B' | 'T2B';
 
 type LobbyRoomPlayer = {
   seatId: string;
@@ -121,7 +120,7 @@ function LobbySeatPreviewCard({
   viewerDisplayName: string;
   roleLabel: string;
   teamLabel: string;
-  tone: "ally" | "opponent";
+  tone: 'ally' | 'opponent';
   canSelect?: boolean;
   selectHint?: string | null;
   onSelect?: () => void;
@@ -130,45 +129,36 @@ function LobbySeatPreviewCard({
   const isBot = player?.isBot === true;
   const isOccupied = Boolean(player);
   const ready = player?.ready ?? false;
-  const displayRole = isMe ? "Você" : isOccupied ? roleLabel : "Aguardando";
+  const displayRole = isMe ? 'Você' : isOccupied ? roleLabel : 'Aguardando';
   const displayName = isBot
-    ? (player?.botIdentity?.displayName ?? "Bot")
+    ? (player?.botIdentity?.displayName ?? 'Bot')
     : isOccupied
-      ? resolveLobbySeatDisplayName(
-          player,
-          isMe ? viewerDisplayName : roleLabel,
-        )
-      : "Assento livre";
-  const occupantKind = isBot ? "Bot" : isOccupied ? "Humano" : "Livre";
+      ? resolveLobbySeatDisplayName(player, isMe ? viewerDisplayName : roleLabel)
+      : 'Assento livre';
+  const occupantKind = isBot ? 'Bot' : isOccupied ? 'Humano' : 'Livre';
   const initialName = isOccupied ? displayName : roleLabel;
-  const initial =
-    isBot || !isOccupied
-      ? undefined
-      : initialName.charAt(0).toUpperCase() || "H";
+  const initial = isBot || !isOccupied ? undefined : initialName.charAt(0).toUpperCase() || 'H';
   const toneStyle =
-    tone === "ally"
+    tone === 'ally'
       ? {
           shell: isMe
-            ? "linear-gradient(180deg, rgba(201,168,76,0.22), rgba(8,14,18,0.92))"
-            : "linear-gradient(180deg, rgba(34,197,94,0.14), rgba(8,14,18,0.90))",
+            ? 'linear-gradient(180deg, rgba(201,168,76,0.22), rgba(8,14,18,0.92))'
+            : 'linear-gradient(180deg, rgba(34,197,94,0.14), rgba(8,14,18,0.90))',
           border: isMe
-            ? "1px solid rgba(201,168,76,0.42)"
-            : "1px solid rgba(74,222,128,0.26)",
-          glow: isMe
-            ? "0 0 32px rgba(201,168,76,0.18)"
-            : "0 0 24px rgba(34,197,94,0.10)",
-          accent: isMe ? "#e8c76a" : "#4ade80",
-          accentSoft: isMe ? "rgba(201,168,76,0.14)" : "rgba(74,222,128,0.12)",
-          rail: isMe ? "rgba(201,168,76,0.44)" : "rgba(74,222,128,0.26)",
+            ? '1px solid rgba(201,168,76,0.42)'
+            : '1px solid rgba(74,222,128,0.26)',
+          glow: isMe ? '0 0 32px rgba(201,168,76,0.18)' : '0 0 24px rgba(34,197,94,0.10)',
+          accent: isMe ? '#e8c76a' : '#4ade80',
+          accentSoft: isMe ? 'rgba(201,168,76,0.14)' : 'rgba(74,222,128,0.12)',
+          rail: isMe ? 'rgba(201,168,76,0.44)' : 'rgba(74,222,128,0.26)',
         }
       : {
-          shell:
-            "linear-gradient(180deg, rgba(22,28,44,0.92), rgba(8,13,20,0.94))",
-          border: "1px solid rgba(248,113,113,0.22)",
-          glow: "0 0 24px rgba(239,68,68,0.08)",
-          accent: "#fca5a5",
-          accentSoft: "rgba(248,113,113,0.10)",
-          rail: "rgba(248,113,113,0.24)",
+          shell: 'linear-gradient(180deg, rgba(22,28,44,0.92), rgba(8,13,20,0.94))',
+          border: '1px solid rgba(248,113,113,0.22)',
+          glow: '0 0 24px rgba(239,68,68,0.08)',
+          accent: '#fca5a5',
+          accentSoft: 'rgba(248,113,113,0.10)',
+          rail: 'rgba(248,113,113,0.24)',
         };
 
   return (
@@ -177,7 +167,7 @@ function LobbySeatPreviewCard({
       onClick={canSelect ? onSelect : undefined}
       disabled={!canSelect}
       className={`group relative min-h-[96px] w-full overflow-hidden rounded-[24px] px-3.5 py-3 text-left transition ${
-        canSelect ? "cursor-pointer hover:scale-[1.015]" : "cursor-default"
+        canSelect ? 'cursor-pointer hover:scale-[1.015]' : 'cursor-default'
       }`}
       style={{
         background: toneStyle.shell,
@@ -188,7 +178,7 @@ function LobbySeatPreviewCard({
     >
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-px"
-        style={{ background: "rgba(255,255,255,0.06)" }}
+        style={{ background: 'rgba(255,255,255,0.06)' }}
       />
       <div
         className="pointer-events-none absolute bottom-0 left-0 top-0 w-1"
@@ -215,8 +205,8 @@ function LobbySeatPreviewCard({
                   color: toneStyle.accent,
                   fontSize: 8,
                   fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
                 }}
               >
                 {displayRole}
@@ -224,13 +214,13 @@ function LobbySeatPreviewCard({
               <span
                 className="rounded-full px-2 py-0.5"
                 style={{
-                  background: "rgba(0,0,0,0.22)",
-                  border: "1px solid rgba(255,255,255,0.07)",
-                  color: "rgba(240,230,211,0.56)",
+                  background: 'rgba(0,0,0,0.22)',
+                  border: '1px solid rgba(255,255,255,0.07)',
+                  color: 'rgba(240,230,211,0.56)',
                   fontSize: 8,
                   fontWeight: 800,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
                 }}
               >
                 {seatId}
@@ -241,22 +231,20 @@ function LobbySeatPreviewCard({
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
-                  background: ready
-                    ? toneStyle.accent
-                    : "rgba(255,255,255,0.16)",
-                  boxShadow: ready ? `0 0 10px ${toneStyle.accent}` : "none",
+                  background: ready ? toneStyle.accent : 'rgba(255,255,255,0.16)',
+                  boxShadow: ready ? `0 0 10px ${toneStyle.accent}` : 'none',
                 }}
               />
               <span
                 style={{
                   fontSize: 8,
                   fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  color: ready ? toneStyle.accent : "rgba(240,230,211,0.42)",
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
+                  color: ready ? toneStyle.accent : 'rgba(240,230,211,0.42)',
                 }}
               >
-                {ready ? "Pronto" : isOccupied ? "Na mesa" : "Esperando"}
+                {ready ? 'Pronto' : isOccupied ? 'Na mesa' : 'Esperando'}
               </span>
             </div>
           </div>
@@ -264,10 +252,10 @@ function LobbySeatPreviewCard({
           <p
             className="truncate"
             style={{
-              fontFamily: "Georgia, serif",
+              fontFamily: 'Georgia, serif',
               fontSize: 15,
               fontWeight: 900,
-              color: isOccupied ? "#f0e6d3" : "rgba(240,230,211,0.36)",
+              color: isOccupied ? '#f0e6d3' : 'rgba(240,230,211,0.36)',
               lineHeight: 1.1,
             }}
           >
@@ -280,9 +268,9 @@ function LobbySeatPreviewCard({
               style={{
                 fontSize: 10,
                 fontWeight: 800,
-                color: isOccupied ? toneStyle.accent : "rgba(255,255,255,0.24)",
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
+                color: isOccupied ? toneStyle.accent : 'rgba(255,255,255,0.24)',
+                letterSpacing: '0.18em',
+                textTransform: 'uppercase',
               }}
             >
               {teamLabel}
@@ -291,13 +279,13 @@ function LobbySeatPreviewCard({
             <span
               className="rounded-full px-2 py-0.5"
               style={{
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid rgba(255,255,255,0.06)",
-                color: "rgba(240,230,211,0.52)",
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: 'rgba(240,230,211,0.52)',
                 fontSize: 8,
                 fontWeight: 800,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
               }}
             >
               {occupantKind}
@@ -308,11 +296,11 @@ function LobbySeatPreviewCard({
             <p
               className="mt-2 truncate"
               style={{
-                color: canSelect ? toneStyle.accent : "rgba(240,230,211,0.30)",
+                color: canSelect ? toneStyle.accent : 'rgba(240,230,211,0.30)',
                 fontSize: 8.5,
                 fontWeight: 900,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase',
               }}
             >
               {selectHint}
@@ -324,34 +312,31 @@ function LobbySeatPreviewCard({
   );
 }
 
-const GOLD_GRAD = "linear-gradient(135deg, #d9b85f, #9c7429)";
-const CARD_BG =
-  "linear-gradient(180deg, rgba(11,20,21,0.92), rgba(7,12,18,0.82))";
-const CARD_BORDER = "1px solid rgba(201,168,76,0.18)";
+const GOLD_GRAD = 'linear-gradient(135deg, #d9b85f, #9c7429)';
+const CARD_BG = 'linear-gradient(180deg, rgba(11,20,21,0.92), rgba(7,12,18,0.82))';
+const CARD_BORDER = '1px solid rgba(201,168,76,0.18)';
 
 function readInitialInviteMatchId(): string {
-  if (typeof window === "undefined") {
-    return "";
+  if (typeof window === 'undefined') {
+    return '';
   }
 
   try {
-    return (
-      new URLSearchParams(window.location.search).get("matchId")?.trim() ?? ""
-    );
+    return new URLSearchParams(window.location.search).get('matchId')?.trim() ?? '';
   } catch {
-    return "";
+    return '';
   }
 }
 
 function buildInviteShareValue(matchId: string): string {
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return matchId;
   }
 
   try {
     const inviteUrl = new URL(window.location.href);
-    inviteUrl.pathname = "/lobby";
-    inviteUrl.searchParams.set("matchId", matchId);
+    inviteUrl.pathname = '/lobby';
+    inviteUrl.searchParams.set('matchId', matchId);
 
     return inviteUrl.toString();
   } catch {
@@ -376,49 +361,39 @@ function SeatAvatar({
         className="relative flex h-9 w-9 items-center justify-center rounded-full"
         style={{
           background: ready
-            ? "linear-gradient(135deg, rgba(201,168,76,0.2), rgba(201,168,76,0.08))"
-            : "rgba(255,255,255,0.04)",
-          border: ready
-            ? "2px solid rgba(201,168,76,0.6)"
-            : "2px solid rgba(255,255,255,0.1)",
-          boxShadow: ready ? "0 0 22px rgba(201,168,76,0.25)" : "none",
-          transition: "all 0.3s ease",
+            ? 'linear-gradient(135deg, rgba(201,168,76,0.2), rgba(201,168,76,0.08))'
+            : 'rgba(255,255,255,0.04)',
+          border: ready ? '2px solid rgba(201,168,76,0.6)' : '2px solid rgba(255,255,255,0.1)',
+          boxShadow: ready ? '0 0 22px rgba(201,168,76,0.25)' : 'none',
+          transition: 'all 0.3s ease',
         }}
       >
         {isMe ? (
           <div
-            className="absolute -top-2 -right-2 rounded-full px-1.5 py-0.5 text-[8px] font-black text-black shadow"
-            style={{ background: GOLD_GRAD, letterSpacing: "0.08em" }}
+            className="absolute -right-2 -top-2 rounded-full px-1.5 py-0.5 text-[8px] font-black text-black shadow"
+            style={{ background: GOLD_GRAD, letterSpacing: '0.08em' }}
           >
             VOCÊ
           </div>
         ) : null}
 
         {isBot ? (
-          <svg
-            className="h-5 w-5"
-            fill="rgba(255,255,255,0.35)"
-            viewBox="0 0 24 24"
-          >
+          <svg className="h-5 w-5" fill="rgba(255,255,255,0.35)" viewBox="0 0 24 24">
             <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2m-3 10a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3" />
           </svg>
         ) : initial ? (
           <span
             style={{
-              fontFamily: "Georgia, serif",
+              fontFamily: 'Georgia, serif',
               fontSize: 15,
               fontWeight: 900,
-              color: ready ? "#e8c76a" : "rgba(255,255,255,0.5)",
+              color: ready ? '#e8c76a' : 'rgba(255,255,255,0.5)',
             }}
           >
             {initial}
           </span>
         ) : (
-          <svg
-            className="h-5 w-5"
-            fill="rgba(255,255,255,0.3)"
-            viewBox="0 0 24 24"
-          >
+          <svg className="h-5 w-5" fill="rgba(255,255,255,0.3)" viewBox="0 0 24 24">
             <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
           </svg>
         )}
@@ -426,7 +401,7 @@ function SeatAvatar({
         {ready ? (
           <div
             className="pointer-events-none absolute inset-0 animate-ping rounded-full opacity-20"
-            style={{ border: "2px solid rgba(201,168,76,0.6)" }}
+            style={{ border: '2px solid rgba(201,168,76,0.6)' }}
           />
         ) : null}
       </div>
@@ -438,10 +413,7 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
 
   return (
-    <div
-      className="h-1.5 w-full overflow-hidden rounded-full"
-      style={{ background: "rgba(255,255,255,0.07)" }}
-    >
+    <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,0.07)' }}>
       <div
         className="h-full rounded-full transition-all duration-500"
         style={{ width: `${pct}%`, background: GOLD_GRAD }}
@@ -454,46 +426,45 @@ function GoldButton({
   children,
   onClick,
   disabled,
-  variant = "solid",
-  size = "md",
-  className = "",
+  variant = 'solid',
+  size = 'md',
+  className = '',
 }: {
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "solid" | "outline" | "ghost";
-  size?: "sm" | "md" | "lg";
+  variant?: 'solid' | 'outline' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
   className?: string;
 }) {
-  const paddingMap = { sm: "6px 14px", md: "8px 18px", lg: "9px 20px" };
+  const paddingMap = { sm: '6px 14px', md: '8px 18px', lg: '9px 20px' };
   const fontSizeMap = { sm: 8.5, md: 9.5, lg: 10 };
 
   const solidStyle = {
     background: disabled
-      ? "rgba(255,255,255,0.05)"
-      : "linear-gradient(135deg, #f2d488 0%, #d9b85f 48%, #9c7429 100%)",
-    border: `1.5px solid ${disabled ? "rgba(255,255,255,0.06)" : "rgba(255,223,128,0.58)"}`,
-    color: disabled ? "rgba(255,255,255,0.2)" : "#1a0800",
+      ? 'rgba(255,255,255,0.05)'
+      : 'linear-gradient(135deg, #f2d488 0%, #d9b85f 48%, #9c7429 100%)',
+    border: `1.5px solid ${disabled ? 'rgba(255,255,255,0.06)' : 'rgba(255,223,128,0.58)'}`,
+    color: disabled ? 'rgba(255,255,255,0.2)' : '#1a0800',
     boxShadow: disabled
-      ? "none"
-      : "0 0 28px rgba(201,168,76,0.34), 0 10px 24px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.34)",
+      ? 'none'
+      : '0 0 28px rgba(201,168,76,0.34), 0 10px 24px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.34)',
   };
 
   const outlineStyle = {
     background: disabled
-      ? "transparent"
-      : "linear-gradient(180deg, rgba(201,168,76,0.08), rgba(5,9,14,0.20))",
-    border: `1.5px solid ${disabled ? "rgba(255,255,255,0.08)" : "rgba(201,168,76,0.42)"}`,
-    color: disabled ? "rgba(255,255,255,0.2)" : "rgba(232,199,106,0.95)",
-    boxShadow: disabled ? "none" : "inset 0 1px 0 rgba(255,255,255,0.05)",
+      ? 'transparent'
+      : 'linear-gradient(180deg, rgba(201,168,76,0.08), rgba(5,9,14,0.20))',
+    border: `1.5px solid ${disabled ? 'rgba(255,255,255,0.08)' : 'rgba(201,168,76,0.42)'}`,
+    color: disabled ? 'rgba(255,255,255,0.2)' : 'rgba(232,199,106,0.95)',
+    boxShadow: disabled ? 'none' : 'inset 0 1px 0 rgba(255,255,255,0.05)',
   };
 
   const ghostStyle = {
-    background:
-      "linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))",
-    border: "1px solid rgba(255,255,255,0.08)",
-    color: disabled ? "rgba(255,255,255,0.15)" : "rgba(240,230,211,0.68)",
-    boxShadow: "none",
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025))',
+    border: '1px solid rgba(255,255,255,0.08)',
+    color: disabled ? 'rgba(255,255,255,0.15)' : 'rgba(240,230,211,0.68)',
+    boxShadow: 'none',
   };
 
   const styleMap = {
@@ -509,13 +480,13 @@ function GoldButton({
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       className={`inline-flex items-center justify-center gap-2 rounded-xl font-black uppercase tracking-wider transition-all duration-200 ${
-        !disabled ? "hover:scale-[1.02]" : "cursor-not-allowed"
+        !disabled ? 'hover:scale-[1.02]' : 'cursor-not-allowed'
       } ${className}`}
       style={{
         ...chosen,
         padding: paddingMap[size],
         fontSize: fontSizeMap[size],
-        letterSpacing: "0.12em",
+        letterSpacing: '0.12em',
       }}
     >
       {children}
@@ -523,7 +494,7 @@ function GoldButton({
   );
 }
 
-type ModeActionTone = "gold" | "green" | "blue" | "red" | "neutral";
+type ModeActionTone = 'gold' | 'green' | 'blue' | 'red' | 'neutral';
 
 function ModeActionCard({
   eyebrow,
@@ -533,9 +504,12 @@ function ModeActionCard({
   icon,
   disabled,
   onClick,
-  tone = "neutral",
+  tone = 'neutral',
   featured = false,
-  ctaLabel = "Abrir",
+  active = false,
+  ctaLabel = 'Abrir',
+  activeLabel = 'Ativo',
+  disabledCtaLabel = 'Bloqueado',
 }: {
   eyebrow: string;
   title: string;
@@ -546,60 +520,85 @@ function ModeActionCard({
   onClick: () => void;
   tone?: ModeActionTone;
   featured?: boolean;
+  active?: boolean;
   ctaLabel?: string;
+  activeLabel?: string;
+  disabledCtaLabel?: string;
 }) {
   const toneStyles: Record<
     ModeActionTone,
     {
       accent: string;
+      accentSoft: string;
       background: string;
       border: string;
       glow: string;
+      iconBackground: string;
     }
   > = {
     gold: {
-      accent: "#e8c76a",
+      accent: '#e8c76a',
+      accentSoft: 'rgba(201,168,76,0.16)',
       background:
-        "linear-gradient(145deg, rgba(20,28,22,0.96), rgba(8,12,18,0.90))",
-      border: "1px solid rgba(201,168,76,0.32)",
-      glow: "0 18px 42px rgba(201,168,76,0.14)",
+        'linear-gradient(145deg, rgba(30,25,13,0.98), rgba(8,12,18,0.92) 66%)',
+      border: '1px solid rgba(201,168,76,0.36)',
+      glow: '0 22px 48px rgba(201,168,76,0.18)',
+      iconBackground:
+        'radial-gradient(circle at 32% 24%, rgba(255,241,184,0.20), rgba(15,18,18,0.92))',
     },
     green: {
-      accent: "#4ade80",
+      accent: '#4ade80',
+      accentSoft: 'rgba(74,222,128,0.14)',
       background:
-        "linear-gradient(145deg, rgba(14,29,23,0.96), rgba(8,12,18,0.90))",
-      border: "1px solid rgba(74,222,128,0.22)",
-      glow: "0 18px 42px rgba(34,197,94,0.10)",
+        'linear-gradient(145deg, rgba(11,34,24,0.98), rgba(8,12,18,0.92) 66%)',
+      border: '1px solid rgba(74,222,128,0.26)',
+      glow: '0 22px 48px rgba(34,197,94,0.13)',
+      iconBackground:
+        'radial-gradient(circle at 32% 24%, rgba(134,239,172,0.18), rgba(15,18,18,0.92))',
     },
     blue: {
-      accent: "#93c5fd",
+      accent: '#93c5fd',
+      accentSoft: 'rgba(147,197,253,0.13)',
       background:
-        "linear-gradient(145deg, rgba(13,23,36,0.96), rgba(8,12,18,0.90))",
-      border: "1px solid rgba(147,197,253,0.20)",
-      glow: "0 18px 42px rgba(59,130,246,0.10)",
+        'linear-gradient(145deg, rgba(12,25,42,0.98), rgba(8,12,18,0.92) 66%)',
+      border: '1px solid rgba(147,197,253,0.23)',
+      glow: '0 22px 48px rgba(59,130,246,0.12)',
+      iconBackground:
+        'radial-gradient(circle at 32% 24%, rgba(147,197,253,0.18), rgba(15,18,18,0.92))',
     },
     red: {
-      accent: "#f87171",
+      accent: '#f87171',
+      accentSoft: 'rgba(248,113,113,0.13)',
       background:
-        "linear-gradient(145deg, rgba(36,18,18,0.96), rgba(8,12,18,0.90))",
-      border: "1px solid rgba(248,113,113,0.22)",
-      glow: "0 18px 42px rgba(185,28,28,0.12)",
+        'linear-gradient(145deg, rgba(40,16,16,0.98), rgba(8,12,18,0.92) 66%)',
+      border: '1px solid rgba(248,113,113,0.24)',
+      glow: '0 22px 48px rgba(185,28,28,0.13)',
+      iconBackground:
+        'radial-gradient(circle at 32% 24%, rgba(248,113,113,0.18), rgba(15,18,18,0.92))',
     },
     neutral: {
-      accent: "rgba(240,230,211,0.72)",
+      accent: 'rgba(240,230,211,0.72)',
+      accentSoft: 'rgba(240,230,211,0.08)',
       background:
-        "linear-gradient(145deg, rgba(255,255,255,0.055), rgba(8,13,18,0.84))",
-      border: "1px solid rgba(255,255,255,0.09)",
-      glow: "0 18px 42px rgba(0,0,0,0.16)",
+        'linear-gradient(145deg, rgba(255,255,255,0.060), rgba(8,13,18,0.88) 66%)',
+      border: '1px solid rgba(255,255,255,0.10)',
+      glow: '0 22px 48px rgba(0,0,0,0.16)',
+      iconBackground:
+        'radial-gradient(circle at 32% 24%, rgba(240,230,211,0.10), rgba(15,18,18,0.92))',
     },
   };
 
   const style = toneStyles[tone];
+  const isMuted = disabled && !active;
+  const ctaCopy = disabled ? disabledCtaLabel : active ? activeLabel : ctaLabel;
+  const ctaTone = active ? '#4ade80' : style.accent;
+  const ctaBorder = active ? 'rgba(74,222,128,0.26)' : style.border.split(' solid ')[1];
+
   const className =
-    "group relative min-h-[74px] overflow-hidden rounded-2xl p-2.5 text-left transition-all duration-200 " +
+    'group relative min-h-[116px] overflow-hidden rounded-[22px] p-3.5 text-left transition-all duration-200 ' +
     (disabled
-      ? "cursor-not-allowed opacity-45"
-      : "hover:-translate-y-0.5 hover:scale-[1.01]");
+      ? 'cursor-not-allowed opacity-55'
+      : 'hover:-translate-y-0.5 hover:scale-[1.012] active:scale-[0.995]');
 
   return (
     <button
@@ -609,32 +608,61 @@ function ModeActionCard({
       className={className}
       style={{
         background: style.background,
-        border: style.border,
+        border: active ? '1px solid rgba(74,222,128,0.34)' : style.border,
         boxShadow:
-          featured && !disabled ? style.glow : "0 12px 30px rgba(0,0,0,0.18)",
+          featured || active
+            ? `${style.glow}, inset 0 1px 0 rgba(255,255,255,0.06)`
+            : '0 14px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.035)',
       }}
     >
       <div
-        className="pointer-events-none absolute -right-8 -top-10 rounded-full opacity-70 transition-opacity duration-200 group-hover:opacity-100"
+        className="pointer-events-none absolute inset-x-5 top-0 h-px opacity-80"
         style={{
-          width: 78,
-          height: 78,
-          background: style.accent,
-          filter: "blur(56px)",
+          background: `linear-gradient(90deg, transparent, ${style.accent}, transparent)`,
         }}
       />
+      <div
+        className="pointer-events-none absolute bottom-0 left-0 top-0 w-[3px]"
+        style={{
+          background: `linear-gradient(180deg, ${style.accent}, transparent 82%)`,
+          opacity: active || featured ? 0.9 : 0.45,
+        }}
+      />
+      <div
+        className="pointer-events-none absolute -right-8 -top-12 rounded-full opacity-70 transition-opacity duration-200 group-hover:opacity-100"
+        style={{
+          width: 104,
+          height: 104,
+          background: style.accent,
+          filter: 'blur(64px)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute -bottom-14 left-8 h-20 w-36 rounded-full opacity-0 blur-2xl transition-opacity duration-200 group-hover:opacity-60"
+        style={{ background: style.accentSoft }}
+      />
 
-      <div className="relative z-10 flex h-full flex-col justify-between gap-2">
+      {active ? (
+        <span
+          className="absolute right-3 top-3 h-2 w-2 rounded-full"
+          style={{
+            background: '#4ade80',
+            boxShadow: '0 0 12px rgba(74,222,128,0.74)',
+          }}
+        />
+      ) : null}
+
+      <div className="relative z-10 flex h-full flex-col justify-between gap-3">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p
               style={{
                 fontSize: 8.5,
                 fontWeight: 900,
-                letterSpacing: "0.20em",
-                color: style.accent,
-                textTransform: "uppercase",
-                marginBottom: 3,
+                letterSpacing: '0.22em',
+                color: isMuted ? 'rgba(240,230,211,0.32)' : style.accent,
+                textTransform: 'uppercase',
+                marginBottom: 4,
               }}
             >
               {eyebrow}
@@ -642,11 +670,11 @@ function ModeActionCard({
 
             <h3
               style={{
-                fontFamily: "Georgia, serif",
-                fontSize: 13.5,
-                lineHeight: 1.05,
+                fontFamily: 'Georgia, serif',
+                fontSize: 16,
+                lineHeight: 1.02,
                 fontWeight: 900,
-                color: "#f0e6d3",
+                color: isMuted ? 'rgba(240,230,211,0.42)' : '#f0e6d3',
               }}
             >
               {title}
@@ -654,12 +682,13 @@ function ModeActionCard({
           </div>
 
           <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl"
             style={{
-              background: "rgba(0,0,0,0.22)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: style.accent,
-              fontSize: 15,
+              background: style.iconBackground,
+              border: `1px solid ${style.accentSoft}`,
+              color: isMuted ? 'rgba(240,230,211,0.28)' : style.accent,
+              fontSize: 16,
+              boxShadow: `0 0 18px ${style.accentSoft}`,
             }}
           >
             {icon}
@@ -668,9 +697,9 @@ function ModeActionCard({
 
         <p
           style={{
-            fontSize: 9.4,
-            lineHeight: 1.25,
-            color: "rgba(240,230,211,0.50)",
+            fontSize: 10.3,
+            lineHeight: 1.35,
+            color: isMuted ? 'rgba(240,230,211,0.32)' : 'rgba(240,230,211,0.56)',
           }}
         >
           {description}
@@ -678,81 +707,44 @@ function ModeActionCard({
 
         <div className="flex items-center justify-between gap-3">
           <span
-            className="rounded-full px-2.5 py-1"
+            className="min-w-0 truncate rounded-full px-2.5 py-1"
             style={{
-              background: "rgba(0,0,0,0.20)",
-              border: "1px solid rgba(255,255,255,0.06)",
-              color: "rgba(240,230,211,0.42)",
+              background: 'rgba(0,0,0,0.22)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              color: isMuted ? 'rgba(240,230,211,0.26)' : 'rgba(240,230,211,0.48)',
               fontSize: 8.5,
               fontWeight: 800,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
             }}
           >
             {meta}
           </span>
 
           <span
-            className="rounded-full px-2.5 py-1"
+            className="shrink-0 rounded-full px-2.5 py-1"
             style={{
-              background: disabled
-                ? "rgba(255,255,255,0.035)"
-                : "rgba(0,0,0,0.22)",
-              border: `1px solid ${disabled ? "rgba(255,255,255,0.05)" : (style.border.split(" solid ")[1] ?? "rgba(255,255,255,0.08)")}`,
-              color: disabled ? "rgba(255,255,255,0.22)" : style.accent,
+              background: active
+                ? 'rgba(74,222,128,0.10)'
+                : disabled
+                  ? 'rgba(255,255,255,0.035)'
+                  : 'rgba(0,0,0,0.24)',
+              border: `1px solid ${
+                disabled && !active ? 'rgba(255,255,255,0.05)' : (ctaBorder ?? 'rgba(255,255,255,0.08)')
+              }`,
+              color: disabled && !active ? 'rgba(255,255,255,0.24)' : ctaTone,
               fontSize: 8.5,
               fontWeight: 900,
-              letterSpacing: "0.13em",
-              textTransform: "uppercase",
-              whiteSpace: "nowrap",
+              letterSpacing: '0.13em',
+              textTransform: 'uppercase',
+              whiteSpace: 'nowrap',
             }}
           >
-            {disabled ? "Bloqueado" : ctaLabel}
+            {ctaCopy}
           </span>
         </div>
       </div>
     </button>
-  );
-}
-
-function SidebarStat({
-  label,
-  value,
-  tone = "#f0e6d3",
-}: {
-  label: string;
-  value: string | number;
-  tone?: string;
-}) {
-  return (
-    <div
-      className="rounded-xl px-2.5 py-1.5"
-      style={{
-        background: "rgba(0,0,0,0.18)",
-        border: "1px solid rgba(255,255,255,0.05)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 8,
-          color: "rgba(255,255,255,0.36)",
-          marginBottom: 3,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          fontWeight: 800,
-          color: tone,
-        }}
-      >
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -761,15 +753,11 @@ function resolveRecentMatchViewModel(
   currentUserId: string | undefined,
 ): RecentMatchViewModel {
   const myParticipant =
-    historyItem.participants.find(
-      (participant) => participant.userId === currentUserId,
-    ) ?? null;
+    historyItem.participants.find((participant) => participant.userId === currentUserId) ?? null;
 
   const didCurrentUserWin =
-    (historyItem.winnerPlayerId === "P1" &&
-      myParticipant?.seatId.startsWith("T1")) ||
-    (historyItem.winnerPlayerId === "P2" &&
-      myParticipant?.seatId.startsWith("T2"));
+    (historyItem.winnerPlayerId === 'P1' && myParticipant?.seatId.startsWith('T1')) ||
+    (historyItem.winnerPlayerId === 'P2' && myParticipant?.seatId.startsWith('T2'));
 
   const opponentParticipant =
     historyItem.participants.find((participant) => {
@@ -781,34 +769,27 @@ function resolveRecentMatchViewModel(
     }) ?? null;
 
   const finishedAtLabel = historyItem.finishedAt
-    ? new Date(historyItem.finishedAt).toLocaleString("pt-BR", {
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
+    ? new Date(historyItem.finishedAt).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
       })
-    : "Agora";
+    : 'Agora';
 
   return {
     resultLabel:
-      historyItem.status !== "completed"
-        ? "Encerrada"
-        : didCurrentUserWin
-          ? "Vitória"
-          : "Derrota",
+      historyItem.status !== 'completed' ? 'Encerrada' : didCurrentUserWin ? 'Vitória' : 'Derrota',
     resultTone:
-      historyItem.status !== "completed"
-        ? "rgba(255,255,255,0.65)"
+      historyItem.status !== 'completed'
+        ? 'rgba(255,255,255,0.65)'
         : didCurrentUserWin
-          ? "#4ade80"
-          : "#f87171",
-    opponentLabel:
-      opponentParticipant?.displayName ??
-      (opponentParticipant?.isBot ? "Bot" : "—"),
+          ? '#4ade80'
+          : '#f87171',
+    opponentLabel: opponentParticipant?.displayName ?? (opponentParticipant?.isBot ? 'Bot' : '—'),
     scoreLabel: `${historyItem.finalScore.playerOne} × ${historyItem.finalScore.playerTwo}`,
     finishedAtLabel,
-    didCurrentUserWin:
-      historyItem.status === "completed" ? (didCurrentUserWin ?? null) : null,
+    didCurrentUserWin: historyItem.status === 'completed' ? (didCurrentUserWin ?? null) : null,
   };
 }
 
@@ -839,14 +820,13 @@ function resolveContinuationDescriptor(params: {
 
   if (!isSocketOnline) {
     return {
-      state: "reconnect",
-      badge: "Reconexão",
-      badgeTone: "neutral",
-      title: "Reconecte para retomar sua sessão",
-      summary:
-        "Abra a sessão em tempo real para recuperar sala ativa, histórico recente e ranking semanal.",
+      state: 'reconnect',
+      badge: 'Reconexão',
+      badgeTone: 'neutral',
+      title: 'Reconecte para retomar sua sessão',
+      summary: 'Abra a sessão em tempo real para recuperar sala ativa, histórico recente e ranking semanal.',
       action: {
-        ctaLabel: "Conectar Socket",
+        ctaLabel: 'Conectar Socket',
         disabled: !canConnect,
         onClick: handleConnect,
       },
@@ -856,14 +836,14 @@ function resolveContinuationDescriptor(params: {
   if (derivedMatchId) {
     if (!currentReady) {
       return {
-        state: "active-room-waiting-ready",
-        badge: "Sala Atual",
-        badgeTone: "gold",
-        title: "Sua sala atual ainda está aberta",
+        state: 'active-room-waiting-ready',
+        badge: 'Sala Atual',
+        badgeTone: 'gold',
+        title: 'Sua sala atual ainda está aberta',
         summary:
-          "Você já tem uma mesa em andamento. O próximo passo é confirmar presença para destravar a continuidade da sessão.",
+          'Você já tem uma mesa em andamento. O próximo passo é confirmar presença para destravar a continuidade da sessão.',
         action: {
-          ctaLabel: "Marcar como Pronto",
+          ctaLabel: 'Marcar como Pronto',
           disabled: !canToggleReady,
           onClick: handleReady,
         },
@@ -871,14 +851,13 @@ function resolveContinuationDescriptor(params: {
     }
 
     return {
-      state: "active-room-ready",
-      badge: "Mesa Pronta",
-      badgeTone: "green",
-      title: "Tudo pronto para voltar ao jogo",
-      summary:
-        "Sua sala já está preparada. O caminho principal agora é retornar direto para a mesa e continuar a partida.",
+      state: 'active-room-ready',
+      badge: 'Mesa Pronta',
+      badgeTone: 'green',
+      title: 'Tudo pronto para voltar ao jogo',
+      summary: 'Sua sala já está preparada. O caminho principal agora é retornar direto para a mesa e continuar a partida.',
       action: {
-        ctaLabel: "Ir para Mesa →",
+        ctaLabel: 'Ir para Mesa →',
         disabled: false,
         onClick: () => {
           window.location.assign(`/match/${derivedMatchId}`);
@@ -889,14 +868,13 @@ function resolveContinuationDescriptor(params: {
 
   if (latestHistoryItem) {
     return {
-      state: "recent-session",
-      badge: "Sessão Recente",
-      badgeTone: "gold",
-      title: "Sua última partida já está registrada",
-      summary:
-        "O lobby já reconhece sua sessão anterior. Entre rápido em uma nova mesa e mantenha o ritmo da progressão.",
+      state: 'recent-session',
+      badge: 'Sessão Recente',
+      badgeTone: 'gold',
+      title: 'Sua última partida já está registrada',
+      summary: 'O lobby já reconhece sua sessão anterior. Entre rápido em uma nova mesa e mantenha o ritmo da progressão.',
       action: {
-        ctaLabel: "Jogar Novamente",
+        ctaLabel: 'Jogar Novamente',
         disabled: !canCreateMatch,
         onClick: handleCreateMatch,
       },
@@ -904,41 +882,41 @@ function resolveContinuationDescriptor(params: {
   }
 
   return {
-    state: "first-session",
-    badge: "Primeira Partida",
-    badgeTone: "gold",
-    title: "Tudo pronto para abrir sua próxima mesa",
+    state: 'first-session',
+    badge: 'Primeira Partida',
+    badgeTone: 'gold',
+    title: 'Tudo pronto para abrir sua próxima mesa',
     summary:
-      "Você já está autenticado e conectado. O próximo passo natural é criar uma nova partida e entrar no fluxo principal do jogo.",
+      'Você já está autenticado e conectado. O próximo passo natural é criar uma nova partida e entrar no fluxo principal do jogo.',
     action: {
-      ctaLabel: "Criar Partida",
+      ctaLabel: 'Criar Partida',
       disabled: !canCreateMatch,
       onClick: handleCreateMatch,
     },
   };
 }
 
-function toneToStyles(tone: ContinuationDescriptor["badgeTone"]) {
-  if (tone === "green") {
+function toneToStyles(tone: ContinuationDescriptor['badgeTone']) {
+  if (tone === 'green') {
     return {
-      background: "rgba(34,197,94,0.1)",
-      border: "1px solid rgba(34,197,94,0.24)",
-      color: "#4ade80",
+      background: 'rgba(34,197,94,0.1)',
+      border: '1px solid rgba(34,197,94,0.24)',
+      color: '#4ade80',
     };
   }
 
-  if (tone === "neutral") {
+  if (tone === 'neutral') {
     return {
-      background: "rgba(255,255,255,0.04)",
-      border: "1px solid rgba(255,255,255,0.10)",
-      color: "rgba(255,255,255,0.62)",
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.10)',
+      color: 'rgba(255,255,255,0.62)',
     };
   }
 
   return {
-    background: "rgba(201,168,76,0.08)",
-    border: "1px solid rgba(201,168,76,0.14)",
-    color: "rgba(201,168,76,0.85)",
+    background: 'rgba(201,168,76,0.08)',
+    border: '1px solid rgba(201,168,76,0.14)',
+    color: 'rgba(201,168,76,0.85)',
   };
 }
 
@@ -952,7 +930,7 @@ function resolveHistoryProgressStats(
 
   return matchHistory.reduce<HistoryProgressStats>(
     (accumulator, historyItem) => {
-      if (historyItem.status !== "completed") {
+      if (historyItem.status !== 'completed') {
         return accumulator;
       }
 
@@ -964,10 +942,10 @@ function resolveHistoryProgressStats(
         return accumulator;
       }
 
-      const myTeamPlayerId = myParticipant.seatId.startsWith("T1")
-        ? "P1"
-        : myParticipant.seatId.startsWith("T2")
-          ? "P2"
+      const myTeamPlayerId = myParticipant.seatId.startsWith('T1')
+        ? 'P1'
+        : myParticipant.seatId.startsWith('T2')
+          ? 'P2'
           : null;
 
       if (!myTeamPlayerId || !historyItem.winnerPlayerId) {
@@ -994,23 +972,17 @@ function resolveProgressSnapshot(params: {
   recentMatchViewModel: RecentMatchViewModel | null;
 }): ProgressSnapshot {
   const currentUserRankingEntry =
-    params.ranking.find((entry) => entry.userId === params.currentUserId) ??
-    null;
+    params.ranking.find((entry) => entry.userId === params.currentUserId) ?? null;
 
   const rankingPosition = currentUserRankingEntry
-    ? params.ranking.findIndex(
-        (entry) => entry.userId === params.currentUserId,
-      ) + 1
+    ? params.ranking.findIndex((entry) => entry.userId === params.currentUserId) + 1
     : null;
 
   const rankingMatchesPlayed = currentUserRankingEntry?.matchesPlayed ?? 0;
   const rankingWins = currentUserRankingEntry?.wins ?? 0;
   const rankingLosses = currentUserRankingEntry?.losses ?? 0;
   const rating = currentUserRankingEntry?.rating ?? null;
-  const historyProgressStats = resolveHistoryProgressStats(
-    params.matchHistory,
-    params.currentUserId,
-  );
+  const historyProgressStats = resolveHistoryProgressStats(params.matchHistory, params.currentUserId);
 
   const hasRecentMatch = params.latestHistoryItem !== null;
 
@@ -1021,41 +993,38 @@ function resolveProgressSnapshot(params: {
   );
   const wins = Math.max(rankingWins, historyProgressStats.wins);
   const losses = Math.max(rankingLosses, historyProgressStats.losses);
-  const winRate =
-    matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
+  const winRate = matchesPlayed > 0 ? Math.round((wins / matchesPlayed) * 100) : 0;
 
-  let momentumLabel = "Começo de jornada";
-  let momentumTone = "rgba(201,168,76,0.85)";
-  let summary =
-    "Conecte-se e jogue suas primeiras partidas para montar seu momento competitivo.";
+  let momentumLabel = 'Começo de jornada';
+  let momentumTone = 'rgba(201,168,76,0.85)';
+  let summary = 'Conecte-se e jogue suas primeiras partidas para montar seu momento competitivo.';
 
   if (hasRecentMatch && params.recentMatchViewModel) {
     if (params.recentMatchViewModel.didCurrentUserWin === true) {
-      momentumLabel = "Vitória recente";
-      momentumTone = "#4ade80";
+      momentumLabel = 'Vitória recente';
+      momentumTone = '#4ade80';
       summary = `Vitória recente contra ${params.recentMatchViewModel.opponentLabel}.`;
     } else if (params.recentMatchViewModel.didCurrentUserWin === false) {
-      momentumLabel = "Derrota recente";
-      momentumTone = "#f87171";
+      momentumLabel = 'Derrota recente';
+      momentumTone = '#f87171';
       summary = `Derrota recente contra ${params.recentMatchViewModel.opponentLabel}.`;
     } else {
-      momentumLabel = "Sessão recente";
-      momentumTone = "#93c5fd";
-      summary =
-        "Seu histórico recente já começou a preencher a camada de progresso.";
+      momentumLabel = 'Sessão recente';
+      momentumTone = '#93c5fd';
+      summary = 'Seu histórico recente já começou a preencher a camada de progresso.';
     }
   } else if (matchesPlayed >= 10 && winRate >= 60) {
-    momentumLabel = "Boa fase";
-    momentumTone = "#4ade80";
+    momentumLabel = 'Boa fase';
+    momentumTone = '#4ade80';
     summary = `Você já jogou ${matchesPlayed} partidas e mantém um ritmo forte.`;
   } else if (matchesPlayed >= 5 && winRate < 40) {
-    momentumLabel = "Hora da reação";
-    momentumTone = "#f87171";
+    momentumLabel = 'Hora da reação';
+    momentumTone = '#f87171';
     summary = `Você já acumulou ${matchesPlayed} partidas. Vale buscar recuperação.`;
   } else if (matchesPlayed > 0) {
-    momentumLabel = "Em evolução";
-    momentumTone = "#93c5fd";
-    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? "s" : ""}.`;
+    momentumLabel = 'Em evolução';
+    momentumTone = '#93c5fd';
+    summary = `Você já jogou ${matchesPlayed} partida${matchesPlayed > 1 ? 's' : ''}.`;
   }
 
   return {
@@ -1064,7 +1033,7 @@ function resolveProgressSnapshot(params: {
     losses,
     winRateLabel: `${winRate}%`,
     rankingPosition,
-    ratingLabel: rating !== null ? rating.toLocaleString("pt-BR") : null,
+    ratingLabel: rating !== null ? rating.toLocaleString('pt-BR') : null,
     momentumLabel,
     momentumTone,
     summary,
@@ -1075,7 +1044,7 @@ export function LobbyPage() {
   const { session } = useAuth();
   const [matchId, setMatchId] = useState(() => readInitialInviteMatchId());
   const [showCreateRoomPanel, setShowCreateRoomPanel] = useState(false);
-  const [copyRoomCodeLabel, setCopyRoomCodeLabel] = useState("Copiar link");
+  const [copyRoomCodeLabel, setCopyRoomCodeLabel] = useState('Copiar link');
 
   const {
     connectionStatus,
@@ -1110,60 +1079,51 @@ export function LobbyPage() {
     handleLeavePublicQueue,
     handleReady,
     handleSelectSeat,
-    handleRefreshHistory,
   } = useLobbyRealtimeSession(session, matchId);
 
   const hasMinimumSession = Boolean(session?.backendUrl && session?.authToken);
-  const roomModeLabel = roomState?.mode === "2v2" ? "2v2" : "1v1";
-  const roomCapacity = roomState?.mode === "2v2" ? 4 : 2;
+  const roomModeLabel = roomState?.mode === '2v2' ? '2v2' : '1v1';
+  const roomCapacity = roomState?.mode === '2v2' ? 4 : 2;
   const readyCount = roomPlayers.filter((player) => player.ready).length;
   const playerCount = roomPlayers.length;
-  const isOnline = connectionStatus === "online";
+  const isOnline = connectionStatus === 'online';
   const isPublicQueueWaiting = isInPublicQueue && !derivedMatchId;
   const canSwitchActiveRoomToQueue = Boolean(
-    hasMinimumSession &&
-    isSocketOnline &&
-    derivedMatchId &&
-    !isPublicQueueWaiting,
+    hasMinimumSession && isSocketOnline && derivedMatchId && !isPublicQueueWaiting,
   );
-  const queueWaitingCount =
-    publicQueueSnapshot?.size ?? (isPublicQueueWaiting ? 1 : 0);
+  const queueWaitingCount = publicQueueSnapshot?.size ?? (isPublicQueueWaiting ? 1 : 0);
   const activeQueueLabel =
-    activeQueueMode === "2v2"
-      ? "Fila pública 2v2"
-      : activeQueueMode === "1v1"
-        ? "Pareamento 1v1"
-        : "Fila pública";
-  const displayName =
-    session?.user?.displayName?.trim() ||
-    session?.user?.email?.trim() ||
-    "Jogador";
+    activeQueueMode === '2v2'
+      ? 'Fila pública 2v2'
+      : activeQueueMode === '1v1'
+        ? 'Pareamento 1v1'
+        : 'Fila pública';
+  const displayName = session?.user?.displayName?.trim() || session?.user?.email?.trim() || 'Jogador';
   const currentUserId = session?.user?.id;
   const isHumanOneVsOneRoomWaiting = Boolean(
     derivedMatchId &&
-    roomState?.mode === "1v1" &&
-    playerCount === 1 &&
-    !roomState.canStart &&
-    playerAssigned?.seatId === "T1A",
+      roomState?.mode === '1v1' &&
+      playerCount === 1 &&
+      !roomState.canStart &&
+      playerAssigned?.seatId === 'T1A',
   );
   const isPrivateFriendRoomWaiting = Boolean(
     derivedMatchId &&
-    roomState?.mode === "2v2" &&
-    playerCount === 1 &&
-    !roomState.canStart &&
-    playerAssigned?.seatId === "T1A",
+      roomState?.mode === '2v2' &&
+      playerCount === 1 &&
+      !roomState.canStart &&
+      playerAssigned?.seatId === 'T1A',
   );
-  const isInviteRoomWaiting =
-    isHumanOneVsOneRoomWaiting || isPrivateFriendRoomWaiting;
+  const isInviteRoomWaiting = isHumanOneVsOneRoomWaiting || isPrivateFriendRoomWaiting;
   const roomStageLabel = isPublicQueueWaiting
-    ? "Na fila pública"
+    ? 'Na fila pública'
     : isHumanOneVsOneRoomWaiting
-      ? "Aguardando adversário"
+      ? 'Aguardando adversário'
       : isPrivateFriendRoomWaiting
-        ? "Aguardando amigo"
+        ? 'Aguardando amigo'
         : derivedMatchId
-          ? "Sala pronta"
-          : "Aguardando sala";
+          ? 'Sala pronta'
+          : 'Aguardando sala';
 
   const rankingEntries = useMemo(() => {
     return ranking.slice(0, 5).map((entry, index) => {
@@ -1172,15 +1132,14 @@ export function LobbyPage() {
       const normalizedName =
         currentUserId !== undefined && entry.userId === currentUserId
           ? entryPublicName || displayName
-          : entryPublicName || entryDisplayName || "Jogador";
-      const ratingValue = typeof entry.rating === "number" ? entry.rating : 0;
-      const isCurrentUser =
-        currentUserId !== undefined && entry.userId === currentUserId;
+          : entryPublicName || entryDisplayName || 'Jogador';
+      const ratingValue = typeof entry.rating === 'number' ? entry.rating : 0;
+      const isCurrentUser = currentUserId !== undefined && entry.userId === currentUserId;
 
       return {
         position: index + 1,
         name: normalizedName,
-        ratingLabel: ratingValue.toLocaleString("pt-BR"),
+        ratingLabel: ratingValue.toLocaleString('pt-BR'),
         isCurrentUser,
       };
     });
@@ -1204,7 +1163,7 @@ export function LobbyPage() {
       currentReady,
       latestHistoryItem,
       handleConnect,
-      handleCreateMatch: () => handleCreateMatch("1v1"),
+      handleCreateMatch: () => handleCreateMatch('1v1'),
       handleReady,
     });
   }, [
@@ -1220,39 +1179,36 @@ export function LobbyPage() {
     latestHistoryItem,
   ]);
 
-  const badgeStyles = useMemo(
-    () => toneToStyles(continuation.badgeTone),
-    [continuation.badgeTone],
-  );
+  const badgeStyles = useMemo(() => toneToStyles(continuation.badgeTone), [continuation.badgeTone]);
   const displayedBadgeStyles = isInviteRoomWaiting
     ? {
-        background: "rgba(201,168,76,0.08)",
-        border: "1px solid rgba(201,168,76,0.22)",
-        color: "rgba(201,168,76,0.92)",
+        background: 'rgba(201,168,76,0.08)',
+        border: '1px solid rgba(201,168,76,0.22)',
+        color: 'rgba(201,168,76,0.92)',
       }
     : badgeStyles;
   const heroBadgeLabel = isPublicQueueWaiting
-    ? "Fila pública"
+    ? 'Fila pública'
     : isHumanOneVsOneRoomWaiting
-      ? "Duelo privado"
+      ? 'Duelo privado'
       : isPrivateFriendRoomWaiting
-        ? "Mesa privada"
+        ? 'Mesa privada'
         : continuation.badge;
   const heroTitle = isPublicQueueWaiting
-    ? "Desafiando outro jogador"
+    ? 'Desafiando outro jogador'
     : isHumanOneVsOneRoomWaiting
-      ? "Duelo com amigo ativo"
+      ? 'Duelo com amigo ativo'
       : isPrivateFriendRoomWaiting
-        ? "Mesa com amigo ativa"
+        ? 'Mesa com amigo ativa'
         : continuation.title;
   const heroSummary = isPublicQueueWaiting
-    ? activeQueueMode === "1v1"
-      ? "Você está aguardando outro jogador real. Quando ele entrar, os dois caem em uma sala 1v1 humana e podem marcar pronto para iniciar."
-      : "Você está aguardando outro jogador real. Quando ele entrar, a mesa 2v2 abre com dois humanos em lados opostos e bots completando as duplas."
+    ? activeQueueMode === '1v1'
+      ? 'Você está aguardando outro jogador real. Quando ele entrar, os dois caem em uma sala 1v1 humana e podem marcar pronto para iniciar.'
+      : 'Você está aguardando outro jogador real. Quando ele entrar, a mesa 2v2 abre com dois humanos em lados opostos e bots completando as duplas.'
     : isHumanOneVsOneRoomWaiting
-      ? "Envie o convite para seu adversário entrar. Esta sala não completa bot automaticamente; ela fica aguardando o segundo humano."
+      ? 'Envie o convite para seu adversário entrar. Esta sala não completa bot automaticamente; ela fica aguardando o segundo humano.'
       : isPrivateFriendRoomWaiting
-        ? "Envie o convite para seu amigo entrar. Quando ele conectar, os bots completam os assentos restantes e a mesa libera o ready."
+        ? 'Envie o convite para seu amigo entrar. Quando ele conectar, os bots completam os assentos restantes e a mesa libera o ready.'
         : continuation.summary;
 
   const handleCopyRoomCode = useCallback((): void => {
@@ -1260,15 +1216,15 @@ export function LobbyPage() {
       return;
     }
 
-    if (typeof navigator === "undefined" || !navigator.clipboard) {
-      setCopyRoomCodeLabel("Copie manualmente");
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setCopyRoomCodeLabel('Copie manualmente');
       return;
     }
 
     void navigator.clipboard
       .writeText(buildInviteShareValue(derivedMatchId))
-      .then(() => setCopyRoomCodeLabel("Link copiado"))
-      .catch(() => setCopyRoomCodeLabel("Copie manualmente"));
+      .then(() => setCopyRoomCodeLabel('Link copiado'))
+      .catch(() => setCopyRoomCodeLabel('Copie manualmente'));
   }, [derivedMatchId]);
 
   const heroAction = continuation.action;
@@ -1281,22 +1237,12 @@ export function LobbyPage() {
       latestHistoryItem,
       recentMatchViewModel,
     });
-  }, [
-    currentUserId,
-    latestHistoryItem,
-    matchHistory,
-    ranking,
-    recentMatchViewModel,
-  ]);
-  const canReturnToModeSelection = Boolean(
-    derivedMatchId && !displayedMatchState?.currentHand,
-  );
-  const isTwoVersusTwoPreview = roomState?.mode === "2v2";
+  }, [currentUserId, latestHistoryItem, matchHistory, ranking, recentMatchViewModel]);
+
+  const isTwoVersusTwoPreview = roomState?.mode === '2v2';
   const getRoomPlayer = useCallback(
     (seatId: LobbySeatId): LobbyRoomPlayer | undefined => {
-      const player = roomPlayers.find(
-        (candidate) => candidate.seatId === seatId,
-      );
+      const player = roomPlayers.find((candidate) => candidate.seatId === seatId);
 
       if (!player || player.seatId !== playerAssigned?.seatId) {
         return player;
@@ -1314,11 +1260,7 @@ export function LobbyPage() {
   );
   const isFlexibleRoom = roomState?.fillBotsOnStart === true;
   const canChangeFlexibleSeat = Boolean(
-    isFlexibleRoom &&
-      derivedMatchId &&
-      roomState &&
-      !displayedMatchState?.currentHand &&
-      canToggleReady,
+    isFlexibleRoom && derivedMatchId && roomState && !displayedMatchState?.currentHand && canToggleReady,
   );
 
   function resolveSeatSelectionProps(seatId: LobbySeatId): {
@@ -1329,52 +1271,59 @@ export function LobbyPage() {
     const player = getRoomPlayer(seatId);
     const isCurrentSeat = playerAssigned?.seatId === seatId;
     const isOccupiedByOtherHuman = Boolean(player && !player.isBot && !isCurrentSeat);
-    const canSelect =
-      canChangeFlexibleSeat && !isCurrentSeat && !isOccupiedByOtherHuman;
+    const canSelect = canChangeFlexibleSeat && !isCurrentSeat && !isOccupiedByOtherHuman;
 
     return {
       canSelect,
       selectHint: isCurrentSeat
-        ? "Seu assento"
+        ? 'Seu assento'
         : isOccupiedByOtherHuman
-          ? "Ocupado"
+          ? 'Ocupado'
           : canSelect
-            ? "Sentar aqui"
+            ? 'Sentar aqui'
             : isFlexibleRoom
-              ? "Bloqueado"
+              ? 'Bloqueado'
               : null,
       onSelect: () => handleSelectSeat(seatId),
     };
   }
 
   const hasActiveLobbyFocus = Boolean(derivedMatchId || isPublicQueueWaiting);
+  // NOTE: A room can be changed from the lobby until a real hand has started.
+  // Keeping mode cards unlocked prevents the user from getting trapped in the
+  // first mode they clicked during lobby setup.
+  const canSwitchLobbyMode = Boolean(derivedMatchId && !displayedMatchState?.currentHand);
+  const modeCardsLockedByActiveRoom = Boolean(derivedMatchId && displayedMatchState?.currentHand);
+  const canUseQuickModeAction = canCreateMatch || canSwitchLobbyMode;
+  const canUsePrivateModeAction = canCreatePrivateMatch || canSwitchLobbyMode;
   const priorityTitle = isPublicQueueWaiting
-    ? "Desafio em andamento"
+    ? 'Desafio em andamento'
     : isInviteRoomWaiting
-      ? "Convite pronto para enviar"
+      ? 'Convite pronto para enviar'
       : derivedMatchId
-        ? "Mesa atual aberta"
-        : "Escolha sua mesa";
+        ? 'Mesa atual aberta'
+        : 'Escolha sua mesa';
   const prioritySubtitle = isPublicQueueWaiting
-    ? `${activeQueueLabel} · ${queueWaitingCount} jogador${queueWaitingCount === 1 ? "" : "es"} aguardando`
+    ? `${activeQueueLabel} · ${queueWaitingCount} jogador${queueWaitingCount === 1 ? '' : 'es'} aguardando`
     : isInviteRoomWaiting
       ? `${roomModeLabel.toUpperCase()} · ${playerCount}/${roomCapacity} jogadores · copie o link e chame seu amigo`
       : derivedMatchId
-        ? `${roomModeLabel.toUpperCase()} · ${playerCount}/${roomCapacity} jogadores · ${readyCount}/${Math.max(playerCount, 1)} prontos`
-        : "Sem mesa ativa";
-  const inviteCodeLabel = derivedMatchId
-    ? derivedMatchId.slice(-8).toUpperCase()
-    : "SEM MESA";
+        ? `${roomModeLabel.toUpperCase()} · ${playerCount}/${roomCapacity} jogadores · ${readyCount}/${Math.max(
+            playerCount,
+            1,
+          )} prontos`
+        : 'Sem mesa ativa';
+  const inviteCodeLabel = derivedMatchId ? derivedMatchId.slice(-8).toUpperCase() : 'SEM MESA';
   const inviteLinkPreview = derivedMatchId
     ? buildInviteShareValue(derivedMatchId)
-    : "Crie ou entre em uma mesa para liberar o link.";
+    : 'Crie ou entre em uma mesa para liberar o link.';
 
   return (
     <div
       className="relative min-h-screen overflow-hidden"
       style={{
         background:
-          "radial-gradient(circle at 50% -12%, rgba(55,89,52,0.52) 0%, rgba(10,19,20,0.94) 34%, #04070d 78%), linear-gradient(180deg, #071017 0%, #03060b 100%)",
+          'radial-gradient(circle at 50% -12%, rgba(55,89,52,0.52) 0%, rgba(10,19,20,0.94) 34%, #04070d 78%), linear-gradient(180deg, #071017 0%, #03060b 100%)',
       }}
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -1382,23 +1331,23 @@ export function LobbyPage() {
           className="absolute left-1/2 top-[-260px] h-[520px] w-[920px] -translate-x-1/2 rounded-full"
           style={{
             background:
-              "radial-gradient(circle, rgba(201,168,76,0.20) 0%, rgba(201,168,76,0.05) 44%, transparent 72%)",
-            filter: "blur(24px)",
+              'radial-gradient(circle, rgba(201,168,76,0.20) 0%, rgba(201,168,76,0.05) 44%, transparent 72%)',
+            filter: 'blur(24px)',
           }}
         />
         <div
           className="absolute left-[-180px] top-[22%] h-[520px] w-[520px] rounded-full"
-          style={{ background: "rgba(45,106,79,0.20)", filter: "blur(90px)" }}
+          style={{ background: 'rgba(45,106,79,0.20)', filter: 'blur(90px)' }}
         />
         <div
           className="absolute bottom-[-220px] right-[-140px] h-[560px] w-[560px] rounded-full"
-          style={{ background: "rgba(201,168,76,0.10)", filter: "blur(96px)" }}
+          style={{ background: 'rgba(201,168,76,0.10)', filter: 'blur(96px)' }}
         />
         <div
           className="absolute inset-0 opacity-[0.045]"
           style={{
             backgroundImage:
-              "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.55'/%3E%3C/svg%3E\")",
+              'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.72\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\' opacity=\'0.55\'/%3E%3C/svg%3E")',
           }}
         />
       </div>
@@ -1408,24 +1357,23 @@ export function LobbyPage() {
           className="relative mb-3 overflow-hidden rounded-[30px] p-3 sm:p-4"
           style={{
             background:
-              "linear-gradient(135deg, rgba(18,25,22,0.96), rgba(5,9,14,0.94) 54%, rgba(21,17,10,0.95))",
-            border: "1px solid rgba(201,168,76,0.28)",
+              'linear-gradient(135deg, rgba(18,25,22,0.96), rgba(5,9,14,0.94) 54%, rgba(21,17,10,0.95))',
+            border: '1px solid rgba(201,168,76,0.28)',
             boxShadow:
-              "0 34px 90px rgba(0,0,0,0.50), 0 0 42px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.045), inset 0 0 0 1px rgba(255,255,255,0.025)",
+              '0 34px 90px rgba(0,0,0,0.50), 0 0 42px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.045), inset 0 0 0 1px rgba(255,255,255,0.025)',
           }}
         >
           <div
             className="pointer-events-none absolute inset-x-5 top-0 h-px"
             style={{
-              background:
-                "linear-gradient(90deg, transparent, rgba(232,199,106,0.72), transparent)",
+              background: 'linear-gradient(90deg, transparent, rgba(232,199,106,0.72), transparent)',
             }}
           />
           <div
             className="pointer-events-none absolute -right-28 -top-28 h-72 w-72 rounded-full"
             style={{
-              background: "rgba(201,168,76,0.12)",
-              filter: "blur(58px)",
+              background: 'rgba(201,168,76,0.12)',
+              filter: 'blur(58px)',
             }}
           />
 
@@ -1434,20 +1382,20 @@ export function LobbyPage() {
               <span
                 className="inline-flex items-center gap-2 rounded-full px-3 py-1.5"
                 style={{
-                  background: "rgba(201,168,76,0.08)",
-                  border: "1px solid rgba(201,168,76,0.26)",
-                  color: "rgba(232,199,106,0.92)",
+                  background: 'rgba(201,168,76,0.08)',
+                  border: '1px solid rgba(201,168,76,0.26)',
+                  color: 'rgba(232,199,106,0.92)',
                   fontSize: 9,
                   fontWeight: 900,
-                  letterSpacing: "0.22em",
-                  textTransform: "uppercase",
+                  letterSpacing: '0.22em',
+                  textTransform: 'uppercase',
                 }}
               >
                 <span
                   className="h-1.5 w-1.5 rounded-full"
                   style={{
-                    background: "#e8c76a",
-                    boxShadow: "0 0 14px rgba(232,199,106,0.85)",
+                    background: '#e8c76a',
+                    boxShadow: '0 0 14px rgba(232,199,106,0.85)',
                   }}
                 />
                 Salão de mesas
@@ -1459,8 +1407,8 @@ export function LobbyPage() {
                   ...displayedBadgeStyles,
                   fontSize: 9,
                   fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
                 }}
               >
                 {heroBadgeLabel}
@@ -1469,17 +1417,13 @@ export function LobbyPage() {
               <span
                 className="rounded-full px-3 py-1.5"
                 style={{
-                  background: isOnline
-                    ? "rgba(34,197,94,0.11)"
-                    : "rgba(239,68,68,0.11)",
-                  border: isOnline
-                    ? "1px solid rgba(34,197,94,0.24)"
-                    : "1px solid rgba(239,68,68,0.24)",
-                  color: isOnline ? "#4ade80" : "#f87171",
+                  background: isOnline ? 'rgba(34,197,94,0.11)' : 'rgba(239,68,68,0.11)',
+                  border: isOnline ? '1px solid rgba(34,197,94,0.24)' : '1px solid rgba(239,68,68,0.24)',
+                  color: isOnline ? '#4ade80' : '#f87171',
                   fontSize: 9,
                   fontWeight: 900,
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
                 }}
               >
                 {connectionStatus}
@@ -1497,24 +1441,10 @@ export function LobbyPage() {
                   Entrar na mesa
                 </GoldButton>
               ) : (
-                <GoldButton
-                  size="md"
-                  onClick={heroAction.onClick}
-                  disabled={heroAction.disabled}
-                >
+                <GoldButton size="md" onClick={heroAction.onClick} disabled={heroAction.disabled}>
                   {heroAction.ctaLabel}
                 </GoldButton>
               )}
-
-              {isInviteRoomWaiting ? (
-                <GoldButton
-                  size="md"
-                  variant="outline"
-                  onClick={handleCopyRoomCode}
-                >
-                  {copyRoomCodeLabel}
-                </GoldButton>
-              ) : null}
 
               {isPublicQueueWaiting ? (
                 <GoldButton
@@ -1536,9 +1466,9 @@ export function LobbyPage() {
                   style={{
                     fontSize: 10,
                     fontWeight: 900,
-                    color: "rgba(201,168,76,0.78)",
-                    letterSpacing: "0.32em",
-                    textTransform: "uppercase",
+                    color: 'rgba(201,168,76,0.78)',
+                    letterSpacing: '0.32em',
+                    textTransform: 'uppercase',
                     marginBottom: 12,
                   }}
                 >
@@ -1547,20 +1477,16 @@ export function LobbyPage() {
 
                 <h1
                   style={{
-                    fontFamily: "Georgia, serif",
-                    fontSize: "clamp(30px, 3.4vw, 52px)",
+                    fontFamily: 'Georgia, serif',
+                    fontSize: 'clamp(30px, 3.4vw, 52px)',
                     fontWeight: 900,
-                    color: "#f0e6d3",
+                    color: '#f0e6d3',
                     lineHeight: 0.94,
-                    letterSpacing: "-0.045em",
+                    letterSpacing: '-0.045em',
                     maxWidth: 640,
                   }}
                 >
-                  {derivedMatchId
-                    ? "Sua mesa está servida."
-                    : isPublicQueueWaiting
-                      ? "Procurando mesa humana."
-                      : "Escolha onde vai sentar."}
+                  {derivedMatchId ? 'Sua mesa está servida.' : isPublicQueueWaiting ? 'Procurando mesa humana.' : 'Escolha onde vai sentar.'}
                 </h1>
 
                 <p
@@ -1568,28 +1494,28 @@ export function LobbyPage() {
                   style={{
                     fontSize: 14,
                     lineHeight: 1.6,
-                    color: "rgba(240,230,211,0.60)",
+                    color: 'rgba(240,230,211,0.60)',
                   }}
                 >
                   {derivedMatchId || isPublicQueueWaiting
                     ? prioritySubtitle
-                    : "O lobby agora funciona como um salão: abra uma mesa adaptável, escolha um assento e deixe os lugares vazios virarem bots ao iniciar."}
+                    : 'O lobby agora funciona como um salão: abra uma mesa adaptável, escolha um assento e deixe os lugares vazios virarem bots ao iniciar.'}
                 </p>
 
                 <div className="mt-5 grid max-w-[560px] gap-2.5 sm:grid-cols-2">
                   <div
                     className="rounded-2xl px-3.5 py-3"
                     style={{
-                      background: "rgba(0,0,0,0.24)",
-                      border: "1px solid rgba(201,168,76,0.12)",
+                      background: 'rgba(0,0,0,0.24)',
+                      border: '1px solid rgba(201,168,76,0.12)',
                     }}
                   >
                     <p
                       style={{
                         fontSize: 9,
-                        color: "rgba(240,230,211,0.38)",
-                        letterSpacing: "0.14em",
-                        textTransform: "uppercase",
+                        color: 'rgba(240,230,211,0.38)',
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
                       }}
                     >
                       Momento
@@ -1608,7 +1534,7 @@ export function LobbyPage() {
                       className="mt-1 truncate"
                       style={{
                         fontSize: 10.5,
-                        color: "rgba(240,230,211,0.42)",
+                        color: 'rgba(240,230,211,0.42)',
                       }}
                     >
                       {progressSnapshot.summary}
@@ -1618,16 +1544,16 @@ export function LobbyPage() {
                   <div
                     className="rounded-2xl px-3.5 py-3"
                     style={{
-                      background: "rgba(0,0,0,0.24)",
-                      border: "1px solid rgba(201,168,76,0.12)",
+                      background: 'rgba(0,0,0,0.24)',
+                      border: '1px solid rgba(201,168,76,0.12)',
                     }}
                   >
                     <p
                       style={{
                         fontSize: 9,
-                        color: "rgba(240,230,211,0.38)",
-                        letterSpacing: "0.14em",
-                        textTransform: "uppercase",
+                        color: 'rgba(240,230,211,0.38)',
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
                       }}
                     >
                       Última partida
@@ -1649,7 +1575,7 @@ export function LobbyPage() {
                             style={{
                               fontSize: 11,
                               fontWeight: 900,
-                              color: "#e8c76a",
+                              color: '#e8c76a',
                             }}
                           >
                             {recentMatchViewModel.scoreLabel}
@@ -1659,11 +1585,10 @@ export function LobbyPage() {
                           className="mt-1 truncate"
                           style={{
                             fontSize: 10.5,
-                            color: "rgba(240,230,211,0.42)",
+                            color: 'rgba(240,230,211,0.42)',
                           }}
                         >
-                          Contra {recentMatchViewModel.opponentLabel} ·{" "}
-                          {recentMatchViewModel.finishedAtLabel}
+                          Contra {recentMatchViewModel.opponentLabel} · {recentMatchViewModel.finishedAtLabel}
                         </p>
                       </>
                     ) : (
@@ -1671,7 +1596,7 @@ export function LobbyPage() {
                         className="mt-1 truncate"
                         style={{
                           fontSize: 10.5,
-                          color: "rgba(240,230,211,0.42)",
+                          color: 'rgba(240,230,211,0.42)',
                         }}
                       >
                         Jogue uma partida para registrar o histórico.
@@ -1682,17 +1607,17 @@ export function LobbyPage() {
                   <div
                     className="rounded-2xl px-3.5 py-3"
                     style={{
-                      background: "rgba(0,0,0,0.24)",
-                      border: "1px solid rgba(201,168,76,0.12)",
+                      background: 'rgba(0,0,0,0.24)',
+                      border: '1px solid rgba(201,168,76,0.12)',
                     }}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p
                         style={{
                           fontSize: 9,
-                          color: "rgba(240,230,211,0.38)",
-                          letterSpacing: "0.14em",
-                          textTransform: "uppercase",
+                          color: 'rgba(240,230,211,0.38)',
+                          letterSpacing: '0.14em',
+                          textTransform: 'uppercase',
                         }}
                       >
                         Aproveitamento
@@ -1701,7 +1626,7 @@ export function LobbyPage() {
                         style={{
                           fontSize: 14,
                           fontWeight: 900,
-                          color: "#f0e6d3",
+                          color: '#f0e6d3',
                         }}
                       >
                         {progressSnapshot.winRateLabel}
@@ -1717,27 +1642,26 @@ export function LobbyPage() {
                       className="mt-2 truncate"
                       style={{
                         fontSize: 10.5,
-                        color: "rgba(240,230,211,0.42)",
+                        color: 'rgba(240,230,211,0.42)',
                       }}
                     >
-                      {progressSnapshot.wins}V · {progressSnapshot.losses}D ·{" "}
-                      {progressSnapshot.matchesPlayed} jogos
+                      {progressSnapshot.wins}V · {progressSnapshot.losses}D · {progressSnapshot.matchesPlayed} jogos
                     </p>
                   </div>
 
                   <div
                     className="rounded-2xl px-3.5 py-3"
                     style={{
-                      background: "rgba(0,0,0,0.24)",
-                      border: "1px solid rgba(201,168,76,0.12)",
+                      background: 'rgba(0,0,0,0.24)',
+                      border: '1px solid rgba(201,168,76,0.12)',
                     }}
                   >
                     <p
                       style={{
                         fontSize: 9,
-                        color: "rgba(240,230,211,0.38)",
-                        letterSpacing: "0.14em",
-                        textTransform: "uppercase",
+                        color: 'rgba(240,230,211,0.38)',
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
                       }}
                     >
                       Rating
@@ -1747,21 +1671,21 @@ export function LobbyPage() {
                       style={{
                         fontSize: 15,
                         fontWeight: 900,
-                        color: "#e8c76a",
+                        color: '#e8c76a',
                       }}
                     >
-                      {progressSnapshot.ratingLabel ?? "—"}
+                      {progressSnapshot.ratingLabel ?? '—'}
                     </p>
                     <p
                       className="mt-1 truncate"
                       style={{
                         fontSize: 10.5,
-                        color: "rgba(240,230,211,0.42)",
+                        color: 'rgba(240,230,211,0.42)',
                       }}
                     >
                       {progressSnapshot.rankingPosition
                         ? `#${progressSnapshot.rankingPosition} no ranking`
-                        : "Ainda fora do Top 5"}
+                        : 'Ainda fora do Top 5'}
                     </p>
                   </div>
                 </div>
@@ -1778,30 +1702,16 @@ export function LobbyPage() {
                     >
                       Abrir mesa
                     </GoldButton>
-                    <GoldButton
-                      size="lg"
-                      variant="outline"
-                      onClick={handleCopyRoomCode}
-                      disabled={!derivedMatchId}
-                    >
+                    <GoldButton size="lg" variant="outline" onClick={handleCopyRoomCode} disabled={!derivedMatchId}>
                       Copiar convite
                     </GoldButton>
-                    <GoldButton
-                      size="lg"
-                      variant={currentReady ? "outline" : "ghost"}
-                      onClick={handleReady}
-                      disabled={!canToggleReady}
-                    >
-                      {currentReady ? "Desmarcar pronto" : "Marcar pronto"}
+                    <GoldButton size="lg" variant={currentReady ? 'outline' : 'ghost'} onClick={handleReady} disabled={!canToggleReady}>
+                      {currentReady ? 'Desmarcar pronto' : 'Marcar pronto'}
                     </GoldButton>
                   </>
                 ) : (
                   <>
-                    <GoldButton
-                      size="lg"
-                      onClick={() => handleCreateMatch("1v1")}
-                      disabled={!canCreateMatch}
-                    >
+                    <GoldButton size="lg" onClick={() => handleCreateMatch('1v1')} disabled={!canCreateMatch}>
                       Jogar agora
                     </GoldButton>
                     <GoldButton
@@ -1812,12 +1722,7 @@ export function LobbyPage() {
                     >
                       Criar mesa privada
                     </GoldButton>
-                    <GoldButton
-                      size="lg"
-                      variant="ghost"
-                      onClick={() => handleJoinMatch(matchId)}
-                      disabled={!canJoinMatch}
-                    >
+                    <GoldButton size="lg" variant="ghost" onClick={() => handleJoinMatch(matchId)} disabled={!canJoinMatch}>
                       Entrar com convite
                     </GoldButton>
                   </>
@@ -1829,25 +1734,24 @@ export function LobbyPage() {
               className="relative min-h-[310px] overflow-hidden rounded-[28px] p-3"
               style={{
                 background:
-                  "radial-gradient(ellipse at 50% 48%, rgba(43,106,79,0.72) 0%, rgba(16,50,35,0.82) 38%, rgba(4,11,13,0.96) 76%), linear-gradient(135deg, rgba(201,168,76,0.11), transparent 42%)",
-                border: "1px solid rgba(201,168,76,0.34)",
+                  'radial-gradient(ellipse at 50% 48%, rgba(43,106,79,0.72) 0%, rgba(16,50,35,0.82) 38%, rgba(4,11,13,0.96) 76%), linear-gradient(135deg, rgba(201,168,76,0.11), transparent 42%)',
+                border: '1px solid rgba(201,168,76,0.34)',
                 boxShadow:
-                  "inset 0 0 0 1px rgba(255,255,255,0.04), inset 0 0 110px rgba(0,0,0,0.58), 0 26px 70px rgba(0,0,0,0.42)",
+                  'inset 0 0 0 1px rgba(255,255,255,0.04), inset 0 0 110px rgba(0,0,0,0.58), 0 26px 70px rgba(0,0,0,0.42)',
               }}
             >
               <div
                 className="pointer-events-none absolute inset-4 rounded-[46%]"
                 style={{
-                  border: "1.5px solid rgba(232,199,106,0.28)",
-                  boxShadow:
-                    "inset 0 0 72px rgba(0,0,0,0.42), 0 0 40px rgba(201,168,76,0.08)",
+                  border: '1.5px solid rgba(232,199,106,0.28)',
+                  boxShadow: 'inset 0 0 72px rgba(0,0,0,0.42), 0 0 40px rgba(201,168,76,0.08)',
                 }}
               />
               <div
                 className="pointer-events-none absolute inset-0 opacity-[0.05]"
                 style={{
                   backgroundImage:
-                    "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.65'/%3E%3C/svg%3E\")",
+                    'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.92\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\' opacity=\'0.65\'/%3E%3C/svg%3E")',
                 }}
               />
 
@@ -1857,35 +1761,35 @@ export function LobbyPage() {
                     style={{
                       fontSize: 9,
                       fontWeight: 900,
-                      color: "rgba(201,168,76,0.82)",
-                      letterSpacing: "0.22em",
-                      textTransform: "uppercase",
+                      color: 'rgba(201,168,76,0.82)',
+                      letterSpacing: '0.22em',
+                      textTransform: 'uppercase',
                     }}
                   >
-                    {derivedMatchId ? roomStageLabel : "Mesa em destaque"}
+                    {derivedMatchId ? roomStageLabel : 'Mesa em destaque'}
                   </p>
                   <h2
                     style={{
-                      fontFamily: "Georgia, serif",
+                      fontFamily: 'Georgia, serif',
                       fontSize: 24,
                       fontWeight: 900,
-                      color: "#f0e6d3",
+                      color: '#f0e6d3',
                       lineHeight: 1.05,
                     }}
                   >
-                    {derivedMatchId ? "Mesa atual" : "Mesa pronta para abrir"}
+                    {derivedMatchId ? 'Mesa atual' : 'Mesa pronta para abrir'}
                   </h2>
                 </div>
 
                 <span
                   className="rounded-full px-3 py-1 font-mono text-[10px]"
                   style={{
-                    background: "rgba(0,0,0,0.34)",
-                    border: "1px solid rgba(201,168,76,0.18)",
-                    color: "rgba(232,199,106,0.72)",
+                    background: 'rgba(0,0,0,0.34)',
+                    border: '1px solid rgba(201,168,76,0.18)',
+                    color: 'rgba(232,199,106,0.72)',
                   }}
                 >
-                  {derivedMatchId ? `#${derivedMatchId.slice(-8)}` : "SEM MESA"}
+                  {derivedMatchId ? `#${derivedMatchId.slice(-8)}` : 'SEM MESA'}
                 </span>
               </div>
 
@@ -1899,42 +1803,42 @@ export function LobbyPage() {
                             className="pointer-events-none absolute left-1/2 top-1/2 h-[214px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-[46%]"
                             style={{
                               background:
-                                "radial-gradient(circle at 50% 48%, rgba(78,149,113,0.22) 0%, rgba(18,46,34,0.18) 56%, rgba(0,0,0,0) 76%)",
-                              border: "1.5px solid rgba(232,199,106,0.24)",
+                                'radial-gradient(circle at 50% 48%, rgba(78,149,113,0.22) 0%, rgba(18,46,34,0.18) 56%, rgba(0,0,0,0) 76%)',
+                              border: '1.5px solid rgba(232,199,106,0.24)',
                               boxShadow:
-                                "inset 0 0 80px rgba(0,0,0,0.42), 0 0 24px rgba(201,168,76,0.08)",
+                                'inset 0 0 80px rgba(0,0,0,0.42), 0 0 24px rgba(201,168,76,0.08)',
                             }}
                           />
                           <div
                             className="pointer-events-none absolute left-1/2 top-1/2 h-[154px] w-[408px] -translate-x-1/2 -translate-y-1/2 rounded-[46%]"
                             style={{
-                              border: "1px solid rgba(232,199,106,0.14)",
+                              border: '1px solid rgba(232,199,106,0.14)',
                             }}
                           />
                           <div
                             className="pointer-events-none absolute left-1/2 top-[46px] -translate-x-1/2 rounded-full px-4 py-1"
                             style={{
-                              background: "rgba(12,16,20,0.72)",
-                              border: "1px solid rgba(201,168,76,0.22)",
-                              color: "rgba(240,230,211,0.72)",
+                              background: 'rgba(12,16,20,0.72)',
+                              border: '1px solid rgba(201,168,76,0.22)',
+                              color: 'rgba(240,230,211,0.72)',
                               fontSize: 10,
                               fontWeight: 900,
-                              letterSpacing: "0.24em",
-                              textTransform: "uppercase",
+                              letterSpacing: '0.24em',
+                              textTransform: 'uppercase',
                             }}
                           >
                             Eles
                           </div>
                           <div
-                            className="pointer-events-none absolute left-1/2 bottom-[42px] -translate-x-1/2 rounded-full px-4 py-1"
+                            className="pointer-events-none absolute bottom-[42px] left-1/2 -translate-x-1/2 rounded-full px-4 py-1"
                             style={{
-                              background: "rgba(12,16,20,0.72)",
-                              border: "1px solid rgba(201,168,76,0.22)",
-                              color: "rgba(240,230,211,0.72)",
+                              background: 'rgba(12,16,20,0.72)',
+                              border: '1px solid rgba(201,168,76,0.22)',
+                              color: 'rgba(240,230,211,0.72)',
                               fontSize: 10,
                               fontWeight: 900,
-                              letterSpacing: "0.24em",
-                              textTransform: "uppercase",
+                              letterSpacing: '0.24em',
+                              textTransform: 'uppercase',
                             }}
                           >
                             Nós
@@ -1942,50 +1846,48 @@ export function LobbyPage() {
                           <div
                             className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-px -translate-x-1/2 -translate-y-1/2"
                             style={{
-                              background:
-                                "linear-gradient(180deg, rgba(201,168,76,0.32), transparent)",
+                              background: 'linear-gradient(180deg, rgba(201,168,76,0.32), transparent)',
                             }}
                           />
                           <div
                             className="pointer-events-none absolute left-1/2 top-1/2 h-px w-24 -translate-x-1/2 -translate-y-1/2"
                             style={{
-                              background:
-                                "linear-gradient(90deg, transparent, rgba(201,168,76,0.32), transparent)",
+                              background: 'linear-gradient(90deg, transparent, rgba(201,168,76,0.32), transparent)',
                             }}
                           />
                           <div
                             className="pointer-events-none absolute left-1/2 top-1/2 flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
                             style={{
                               background:
-                                "radial-gradient(circle at 30% 30%, rgba(232,199,106,0.16), rgba(8,13,18,0.96))",
-                              border: "1.5px solid rgba(201,168,76,0.32)",
+                                'radial-gradient(circle at 30% 30%, rgba(232,199,106,0.16), rgba(8,13,18,0.96))',
+                              border: '1.5px solid rgba(201,168,76,0.32)',
                               boxShadow:
-                                "0 0 24px rgba(201,168,76,0.12), inset 0 0 28px rgba(0,0,0,0.42)",
+                                '0 0 24px rgba(201,168,76,0.12), inset 0 0 28px rgba(0,0,0,0.42)',
                             }}
                           >
                             <div className="text-center">
                               <p
                                 style={{
-                                  fontFamily: "Georgia, serif",
+                                  fontFamily: 'Georgia, serif',
                                   fontSize: 24,
                                   fontWeight: 900,
-                                  color: "#f0e6d3",
+                                  color: '#f0e6d3',
                                   lineHeight: 1,
                                 }}
                               >
-                                {isFlexibleRoom ? "Flex" : "2v2"}
+                                {isFlexibleRoom ? 'Flex' : '2v2'}
                               </p>
                               <p
                                 style={{
                                   marginTop: 4,
                                   fontSize: 9,
                                   fontWeight: 900,
-                                  color: "rgba(201,168,76,0.72)",
-                                  letterSpacing: "0.18em",
-                                  textTransform: "uppercase",
+                                  color: 'rgba(201,168,76,0.72)',
+                                  letterSpacing: '0.18em',
+                                  textTransform: 'uppercase',
                                 }}
                               >
-                                {isFlexibleRoom ? "Adaptável" : "Mesa ativa"}
+                                {isFlexibleRoom ? 'Adaptável' : 'Mesa ativa'}
                               </p>
                             </div>
                           </div>
@@ -1993,49 +1895,49 @@ export function LobbyPage() {
                           <div className="absolute left-0 top-0 w-[calc(50%-54px)]">
                             <LobbySeatPreviewCard
                               seatId="T2A"
-                              player={getRoomPlayer("T2A")}
+                              player={getRoomPlayer('T2A')}
                               currentSeatId={playerAssigned?.seatId}
                               viewerDisplayName={displayName}
                               roleLabel="Rival"
                               teamLabel="Eles"
                               tone="opponent"
-                              {...resolveSeatSelectionProps("T2A")}
+                              {...resolveSeatSelectionProps('T2A')}
                             />
                           </div>
                           <div className="absolute right-0 top-0 w-[calc(50%-54px)]">
                             <LobbySeatPreviewCard
                               seatId="T2B"
-                              player={getRoomPlayer("T2B")}
+                              player={getRoomPlayer('T2B')}
                               currentSeatId={playerAssigned?.seatId}
                               viewerDisplayName={displayName}
                               roleLabel="Rival"
                               teamLabel="Eles"
                               tone="opponent"
-                              {...resolveSeatSelectionProps("T2B")}
+                              {...resolveSeatSelectionProps('T2B')}
                             />
                           </div>
                           <div className="absolute bottom-0 left-0 w-[calc(50%-54px)]">
                             <LobbySeatPreviewCard
                               seatId="T1A"
-                              player={getRoomPlayer("T1A")}
+                              player={getRoomPlayer('T1A')}
                               currentSeatId={playerAssigned?.seatId}
                               viewerDisplayName={displayName}
                               roleLabel="Você"
                               teamLabel="Nós"
                               tone="ally"
-                              {...resolveSeatSelectionProps("T1A")}
+                              {...resolveSeatSelectionProps('T1A')}
                             />
                           </div>
                           <div className="absolute bottom-0 right-0 w-[calc(50%-54px)]">
                             <LobbySeatPreviewCard
                               seatId="T1B"
-                              player={getRoomPlayer("T1B")}
+                              player={getRoomPlayer('T1B')}
                               currentSeatId={playerAssigned?.seatId}
                               viewerDisplayName={displayName}
                               roleLabel="Parceiro"
                               teamLabel="Nós"
                               tone="ally"
-                              {...resolveSeatSelectionProps("T1B")}
+                              {...resolveSeatSelectionProps('T1B')}
                             />
                           </div>
                         </div>
@@ -2044,64 +1946,58 @@ export function LobbyPage() {
                       <div className="grid grid-cols-1 gap-3 md:hidden">
                         <LobbySeatPreviewCard
                           seatId="T2A"
-                          player={getRoomPlayer("T2A")}
+                          player={getRoomPlayer('T2A')}
                           currentSeatId={playerAssigned?.seatId}
                           viewerDisplayName={displayName}
                           roleLabel="Rival"
                           teamLabel="Eles"
                           tone="opponent"
-                          {...resolveSeatSelectionProps("T2A")}
+                          {...resolveSeatSelectionProps('T2A')}
                         />
                         <LobbySeatPreviewCard
                           seatId="T2B"
-                          player={getRoomPlayer("T2B")}
+                          player={getRoomPlayer('T2B')}
                           currentSeatId={playerAssigned?.seatId}
                           viewerDisplayName={displayName}
                           roleLabel="Rival"
                           teamLabel="Eles"
                           tone="opponent"
-                          {...resolveSeatSelectionProps("T2B")}
+                          {...resolveSeatSelectionProps('T2B')}
                         />
                         <div className="flex items-center gap-3">
-                          <div
-                            className="h-px flex-1"
-                            style={{ background: "rgba(201,168,76,0.18)" }}
-                          />
+                          <div className="h-px flex-1" style={{ background: 'rgba(201,168,76,0.18)' }} />
                           <span
                             className="rounded-full px-4 py-1 text-[11px] font-black italic"
                             style={{
-                              background: "rgba(0,0,0,0.28)",
-                              border: "1px solid rgba(201,168,76,0.18)",
-                              color: "rgba(240,230,211,0.42)",
-                              letterSpacing: "0.18em",
+                              background: 'rgba(0,0,0,0.28)',
+                              border: '1px solid rgba(201,168,76,0.18)',
+                              color: 'rgba(240,230,211,0.42)',
+                              letterSpacing: '0.18em',
                             }}
                           >
                             MESA 2V2
                           </span>
-                          <div
-                            className="h-px flex-1"
-                            style={{ background: "rgba(201,168,76,0.18)" }}
-                          />
+                          <div className="h-px flex-1" style={{ background: 'rgba(201,168,76,0.18)' }} />
                         </div>
                         <LobbySeatPreviewCard
                           seatId="T1A"
-                          player={getRoomPlayer("T1A")}
+                          player={getRoomPlayer('T1A')}
                           currentSeatId={playerAssigned?.seatId}
                           viewerDisplayName={displayName}
                           roleLabel="Você"
                           teamLabel="Nós"
                           tone="ally"
-                          {...resolveSeatSelectionProps("T1A")}
+                          {...resolveSeatSelectionProps('T1A')}
                         />
                         <LobbySeatPreviewCard
                           seatId="T1B"
-                          player={getRoomPlayer("T1B")}
+                          player={getRoomPlayer('T1B')}
                           currentSeatId={playerAssigned?.seatId}
                           viewerDisplayName={displayName}
                           roleLabel="Parceiro"
                           teamLabel="Nós"
                           tone="ally"
-                          {...resolveSeatSelectionProps("T1B")}
+                          {...resolveSeatSelectionProps('T1B')}
                         />
                       </div>
                     </>
@@ -2112,49 +2008,48 @@ export function LobbyPage() {
                           className="pointer-events-none absolute left-1/2 top-1/2 hidden h-[172px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-[46%] md:block"
                           style={{
                             background:
-                              "radial-gradient(circle at 50% 50%, rgba(78,149,113,0.22), rgba(18,46,34,0.14) 58%, transparent 76%)",
-                            border: "1.5px solid rgba(232,199,106,0.22)",
+                              'radial-gradient(circle at 50% 50%, rgba(78,149,113,0.22), rgba(18,46,34,0.14) 58%, transparent 76%)',
+                            border: '1.5px solid rgba(232,199,106,0.22)',
                             boxShadow:
-                              "inset 0 0 70px rgba(0,0,0,0.44), 0 0 24px rgba(201,168,76,0.08)",
+                              'inset 0 0 70px rgba(0,0,0,0.44), 0 0 24px rgba(201,168,76,0.08)',
                           }}
                         />
 
                         <div className="relative grid grid-cols-1 items-center gap-4 md:grid-cols-[minmax(0,1fr)_96px_minmax(0,1fr)]">
                           <LobbySeatPreviewCard
                             seatId="T1A"
-                            player={getRoomPlayer("T1A")}
+                            player={getRoomPlayer('T1A')}
                             currentSeatId={playerAssigned?.seatId}
                             viewerDisplayName={displayName}
                             roleLabel="Você"
                             teamLabel="Nós"
                             tone="ally"
-                            {...resolveSeatSelectionProps("T1A")}
+                            {...resolveSeatSelectionProps('T1A')}
                           />
 
                           <div className="relative flex items-center justify-center py-1 md:py-0">
                             <div
                               className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 md:left-[-28px] md:right-[-28px]"
                               style={{
-                                background:
-                                  "linear-gradient(90deg, transparent, rgba(201,168,76,0.34), transparent)",
+                                background: 'linear-gradient(90deg, transparent, rgba(201,168,76,0.34), transparent)',
                               }}
                             />
                             <div
                               className="relative flex h-[72px] w-[72px] flex-col items-center justify-center rounded-full"
                               style={{
                                 background:
-                                  "radial-gradient(circle at 30% 25%, rgba(232,199,106,0.20), rgba(8,13,18,0.96))",
-                                border: "1.5px solid rgba(201,168,76,0.34)",
+                                  'radial-gradient(circle at 30% 25%, rgba(232,199,106,0.20), rgba(8,13,18,0.96))',
+                                border: '1.5px solid rgba(201,168,76,0.34)',
                                 boxShadow:
-                                  "0 0 24px rgba(201,168,76,0.13), inset 0 0 28px rgba(0,0,0,0.44)",
+                                  '0 0 24px rgba(201,168,76,0.13), inset 0 0 28px rgba(0,0,0,0.44)',
                               }}
                             >
                               <span
                                 style={{
-                                  fontFamily: "Georgia, serif",
+                                  fontFamily: 'Georgia, serif',
                                   fontSize: 22,
                                   fontWeight: 900,
-                                  color: "#f0e6d3",
+                                  color: '#f0e6d3',
                                   lineHeight: 1,
                                 }}
                               >
@@ -2162,7 +2057,7 @@ export function LobbyPage() {
                               </span>
                               <span
                                 className="mt-1 text-[8px] font-black uppercase tracking-[0.18em]"
-                                style={{ color: "rgba(201,168,76,0.70)" }}
+                                style={{ color: 'rgba(201,168,76,0.70)' }}
                               >
                                 1v1
                               </span>
@@ -2171,13 +2066,13 @@ export function LobbyPage() {
 
                           <LobbySeatPreviewCard
                             seatId="T2A"
-                            player={getRoomPlayer("T2A")}
+                            player={getRoomPlayer('T2A')}
                             currentSeatId={playerAssigned?.seatId}
                             viewerDisplayName={displayName}
                             roleLabel="Adversário"
                             teamLabel="Eles"
                             tone="opponent"
-                            {...resolveSeatSelectionProps("T2A")}
+                            {...resolveSeatSelectionProps('T2A')}
                           />
                         </div>
                       </div>
@@ -2189,19 +2084,18 @@ export function LobbyPage() {
                   <div
                     className="max-w-[440px] rounded-[28px] px-5 py-5"
                     style={{
-                      background:
-                        "linear-gradient(135deg, rgba(5,10,16,0.82), rgba(23,49,32,0.64))",
-                      border: "1px solid rgba(201,168,76,0.20)",
-                      boxShadow: "0 18px 44px rgba(0,0,0,0.34)",
+                      background: 'linear-gradient(135deg, rgba(5,10,16,0.82), rgba(23,49,32,0.64))',
+                      border: '1px solid rgba(201,168,76,0.20)',
+                      boxShadow: '0 18px 44px rgba(0,0,0,0.34)',
                     }}
                   >
                     <p
                       style={{
                         fontSize: 10,
                         fontWeight: 900,
-                        color: "rgba(201,168,76,0.86)",
-                        letterSpacing: "0.22em",
-                        textTransform: "uppercase",
+                        color: 'rgba(201,168,76,0.86)',
+                        letterSpacing: '0.22em',
+                        textTransform: 'uppercase',
                         marginBottom: 10,
                       }}
                     >
@@ -2209,10 +2103,10 @@ export function LobbyPage() {
                     </p>
                     <h3
                       style={{
-                        fontFamily: "Georgia, serif",
+                        fontFamily: 'Georgia, serif',
                         fontSize: 26,
                         fontWeight: 900,
-                        color: "#f0e6d3",
+                        color: '#f0e6d3',
                         lineHeight: 1.05,
                         marginBottom: 10,
                       }}
@@ -2222,7 +2116,7 @@ export function LobbyPage() {
                     <p
                       style={{
                         fontSize: 12.5,
-                        color: "rgba(240,230,211,0.55)",
+                        color: 'rgba(240,230,211,0.55)',
                         lineHeight: 1.55,
                       }}
                     >
@@ -2236,120 +2130,109 @@ export function LobbyPage() {
         </section>
 
         <section
-          className="relative mb-3 overflow-hidden rounded-[24px] p-3"
+          className="relative mb-3 overflow-hidden rounded-[24px] p-2.5 sm:p-3"
           style={{
             background:
-              "linear-gradient(135deg, rgba(8,34,24,0.94), rgba(5,10,14,0.96) 52%, rgba(22,17,8,0.92))",
-            border: "1px solid rgba(232,199,106,0.24)",
+              'linear-gradient(135deg, rgba(8,34,24,0.90), rgba(5,10,14,0.94) 58%, rgba(22,17,8,0.88))',
+            border: '1px solid rgba(232,199,106,0.20)',
             boxShadow:
-              "0 22px 58px rgba(0,0,0,0.38), 0 0 24px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.04)",
+              '0 18px 46px rgba(0,0,0,0.32), 0 0 18px rgba(201,168,76,0.08), inset 0 1px 0 rgba(255,255,255,0.035)',
           }}
         >
           <div
             className="pointer-events-none absolute inset-x-8 top-0 h-px"
             style={{
-              background:
-                "linear-gradient(90deg, transparent, rgba(255,223,128,0.62), transparent)",
+              background: 'linear-gradient(90deg, transparent, rgba(255,223,128,0.52), transparent)',
             }}
           />
           <div
-            className="pointer-events-none absolute -left-20 top-1/2 h-48 w-48 -translate-y-1/2 rounded-full"
-            style={{ background: "rgba(34,197,94,0.13)", filter: "blur(52px)" }}
+            className="pointer-events-none absolute -left-20 top-1/2 h-40 w-40 -translate-y-1/2 rounded-full"
+            style={{ background: 'rgba(34,197,94,0.11)', filter: 'blur(46px)' }}
           />
           <div
-            className="pointer-events-none absolute -right-20 top-0 h-52 w-52 rounded-full"
+            className="pointer-events-none absolute -right-20 top-0 h-44 w-44 rounded-full"
             style={{
-              background: "rgba(201,168,76,0.12)",
-              filter: "blur(48px)",
+              background: 'rgba(201,168,76,0.10)',
+              filter: 'blur(44px)',
             }}
           />
 
-          <div className="relative z-10 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(180px,0.48fr)_minmax(520px,1fr)_minmax(220px,0.42fr)] xl:items-center">
-            <div className="flex items-center gap-4">
+          <div className="relative z-10 grid grid-cols-1 gap-2.5 xl:grid-cols-[minmax(190px,0.34fr)_minmax(520px,1fr)_minmax(180px,0.26fr)] xl:items-center">
+            <div className="flex items-center gap-3">
               <div
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-base"
                 style={{
                   background:
-                    "radial-gradient(circle at 35% 25%, rgba(255,223,128,0.28), rgba(34,197,94,0.12) 48%, rgba(5,12,10,0.94) 100%)",
-                  border: "1px solid rgba(232,199,106,0.30)",
-                  boxShadow:
-                    "0 0 22px rgba(74,222,128,0.14), inset 0 1px 0 rgba(255,255,255,0.08)",
+                    'radial-gradient(circle at 35% 25%, rgba(255,223,128,0.25), rgba(34,197,94,0.11) 48%, rgba(5,12,10,0.94) 100%)',
+                  border: '1px solid rgba(232,199,106,0.26)',
+                  boxShadow: '0 0 18px rgba(74,222,128,0.12), inset 0 1px 0 rgba(255,255,255,0.07)',
                 }}
               >
                 🔗
               </div>
-              <div>
+              <div className="min-w-0">
                 <p
                   style={{
-                    fontSize: 9,
+                    fontSize: 8.5,
                     fontWeight: 900,
-                    color: "rgba(232,199,106,0.84)",
-                    letterSpacing: "0.26em",
-                    textTransform: "uppercase",
+                    color: 'rgba(232,199,106,0.82)',
+                    letterSpacing: '0.24em',
+                    textTransform: 'uppercase',
                   }}
                 >
                   Convite rápido
                 </p>
                 <h2
+                  className="truncate"
                   style={{
-                    marginTop: 4,
-                    fontFamily: "Georgia, serif",
-                    fontSize: 19,
+                    marginTop: 2,
+                    fontFamily: 'Georgia, serif',
+                    fontSize: 17,
                     fontWeight: 900,
-                    color: "#f0e6d3",
+                    color: '#f0e6d3',
                     lineHeight: 1.05,
                   }}
                 >
-                  Copie o link e chame seu amigo.
+                  Copie ou entre por código.
                 </h2>
-                <p
-                  className="mt-1 max-w-[420px] text-[11px] leading-5"
-                  style={{ color: "rgba(240,230,211,0.58)" }}
-                >
-                  O fluxo principal do lobby fica aqui: copiar, enviar no grupo
-                  e trazer a mesa direto para quem recebeu o convite.
-                </p>
               </div>
             </div>
 
             <div
-              className="grid gap-2 rounded-[22px] p-2.5 md:grid-cols-[minmax(140px,0.48fr)_minmax(260px,1fr)]"
+              className="grid gap-2 rounded-[20px] p-2 md:grid-cols-[minmax(136px,0.36fr)_minmax(260px,1fr)]"
               style={{
-                background: "rgba(0,0,0,0.22)",
-                border: "1px solid rgba(255,255,255,0.07)",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                background: 'rgba(0,0,0,0.22)',
+                border: '1px solid rgba(255,255,255,0.07)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
               }}
             >
               <button
                 type="button"
                 onClick={handleCopyRoomCode}
                 disabled={!derivedMatchId}
-                className="group rounded-[18px] px-3 py-2.5 text-left transition enabled:hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-45"
+                className="group rounded-[16px] px-3 py-2 text-left transition enabled:hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{
-                  background:
-                    "linear-gradient(180deg, rgba(201,168,76,0.12), rgba(0,0,0,0.18))",
-                  border: "1px solid rgba(232,199,106,0.20)",
+                  background: 'linear-gradient(180deg, rgba(201,168,76,0.12), rgba(0,0,0,0.18))',
+                  border: '1px solid rgba(232,199,106,0.20)',
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <p
                       style={{
-                        fontSize: 8.5,
+                        fontSize: 8,
                         fontWeight: 900,
-                        color: "rgba(240,230,211,0.42)",
-                        letterSpacing: "0.18em",
-                        textTransform: "uppercase",
+                        color: 'rgba(240,230,211,0.42)',
+                        letterSpacing: '0.18em',
+                        textTransform: 'uppercase',
                       }}
                     >
                       Código
                     </p>
                     <p
-                      className="mt-1 font-mono text-[18px] font-black tracking-[0.12em]"
+                      className="mt-1 truncate font-mono text-[17px] font-black tracking-[0.12em]"
                       style={{
-                        color: derivedMatchId
-                          ? "#f7e6b0"
-                          : "rgba(240,230,211,0.30)",
+                        color: derivedMatchId ? '#f7e6b0' : 'rgba(240,230,211,0.30)',
                       }}
                     >
                       {inviteCodeLabel}
@@ -2358,9 +2241,9 @@ export function LobbyPage() {
                   <span
                     className="rounded-xl px-2.5 py-2 text-[12px] font-black"
                     style={{
-                      background: "rgba(201,168,76,0.14)",
-                      border: "1px solid rgba(201,168,76,0.22)",
-                      color: "#e8c76a",
+                      background: 'rgba(201,168,76,0.14)',
+                      border: '1px solid rgba(201,168,76,0.22)',
+                      color: '#e8c76a',
                     }}
                   >
                     ⧉
@@ -2369,116 +2252,99 @@ export function LobbyPage() {
               </button>
 
               <div
-                className="rounded-[18px] px-3 py-2.5"
+                className="flex min-h-[50px] items-center gap-2 rounded-[16px] px-3 py-2"
                 style={{
-                  background: "rgba(0,0,0,0.26)",
-                  border: "1px solid rgba(255,255,255,0.07)",
+                  background: 'rgba(0,0,0,0.26)',
+                  border: '1px solid rgba(255,255,255,0.07)',
                 }}
               >
-                <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p
                     style={{
-                      fontSize: 8.5,
+                      fontSize: 8,
                       fontWeight: 900,
-                      color: "rgba(240,230,211,0.38)",
-                      letterSpacing: "0.18em",
-                      textTransform: "uppercase",
+                      color: 'rgba(240,230,211,0.38)',
+                      letterSpacing: '0.18em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     Link da sala
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleCopyRoomCode}
-                    disabled={!derivedMatchId}
-                    className="rounded-lg px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] transition enabled:hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+                  <p
+                    className="mt-1 truncate font-mono text-[10.5px]"
                     style={{
-                      background: "rgba(201,168,76,0.10)",
-                      border: "1px solid rgba(201,168,76,0.18)",
-                      color: "#e8c76a",
+                      color: derivedMatchId ? 'rgba(240,230,211,0.74)' : 'rgba(240,230,211,0.34)',
                     }}
                   >
-                    Copiar
-                  </button>
+                    {inviteLinkPreview}
+                  </p>
                 </div>
-                <p
-                  className="truncate font-mono text-[11px]"
+                <button
+                  type="button"
+                  onClick={handleCopyRoomCode}
+                  disabled={!derivedMatchId}
+                  className="shrink-0 rounded-lg px-2.5 py-1.5 text-[9px] font-black uppercase tracking-[0.14em] transition enabled:hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
                   style={{
-                    color: derivedMatchId
-                      ? "rgba(240,230,211,0.74)"
-                      : "rgba(240,230,211,0.34)",
+                    background: 'rgba(201,168,76,0.10)',
+                    border: '1px solid rgba(201,168,76,0.18)',
+                    color: '#e8c76a',
                   }}
                 >
-                  {inviteLinkPreview}
-                </p>
+                  {copyRoomCodeLabel === 'Copiar link' ? 'Copiar' : copyRoomCodeLabel}
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            <div className="flex flex-col gap-2 sm:flex-row xl:flex-col">
               {derivedMatchId ? (
-                <>
-                  <GoldButton
-                    className="min-h-[42px]"
-                    onClick={handleCopyRoomCode}
-                  >
-                    {copyRoomCodeLabel === "Copiar link"
-                      ? "Copiar link"
-                      : copyRoomCodeLabel}
-                  </GoldButton>
-                  <GoldButton
-                    className="min-h-[42px]"
-                    variant="outline"
-                    onClick={handleCopyRoomCode}
-                  >
-                    Compartilhar convite
-                  </GoldButton>
-                </>
+                <GoldButton className="min-h-[38px] w-full" onClick={handleCopyRoomCode}>
+                  Copiar link
+                </GoldButton>
               ) : (
-                <>
-                  <GoldButton
-                    className="min-h-[42px]"
-                    onClick={() => setShowCreateRoomPanel((value) => !value)}
-                    disabled={!canCreatePrivateMatch}
-                  >
-                    Criar mesa
-                  </GoldButton>
-                  <GoldButton
-                    className="min-h-[42px]"
-                    variant="outline"
-                    onClick={() => handleJoinMatch(matchId)}
-                    disabled={!canJoinMatch}
-                  >
-                    Entrar
-                  </GoldButton>
-                </>
+                <GoldButton
+                  className="min-h-[38px] w-full"
+                  onClick={() => setShowCreateRoomPanel((value) => !value)}
+                  disabled={!canCreatePrivateMatch}
+                >
+                  Criar mesa
+                </GoldButton>
               )}
+
+              <GoldButton
+                className="min-h-[38px] w-full"
+                variant="outline"
+                onClick={() => handleJoinMatch(matchId)}
+                disabled={!canJoinMatch}
+              >
+                Entrar
+              </GoldButton>
             </div>
 
             <div
-              className="xl:col-span-3 rounded-[20px] p-2.5"
+              className="rounded-[18px] p-2 xl:col-span-3"
               style={{
-                background: "rgba(0,0,0,0.18)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                background: 'rgba(0,0,0,0.17)',
+                border: '1px solid rgba(255,255,255,0.055)',
               }}
             >
               <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                <div className="min-w-[150px]">
+                <div className="min-w-[140px]">
                   <p
                     style={{
                       fontSize: 8.5,
                       fontWeight: 900,
-                      color: "rgba(201,168,76,0.78)",
-                      letterSpacing: "0.22em",
-                      textTransform: "uppercase",
+                      color: 'rgba(201,168,76,0.78)',
+                      letterSpacing: '0.22em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     Entrar por convite
                   </p>
                   <p
-                    className="mt-1 text-[10px] leading-4"
-                    style={{ color: "rgba(240,230,211,0.46)" }}
+                    className="mt-0.5 text-[10px] leading-4"
+                    style={{ color: 'rgba(240,230,211,0.42)' }}
                   >
-                    Cole o código ou link que recebeu.
+                    Cole código ou link.
                   </p>
                 </div>
 
@@ -2486,16 +2352,16 @@ export function LobbyPage() {
                   value={matchId}
                   onChange={(event) => setMatchId(event.target.value)}
                   placeholder="Código ou link da mesa..."
-                  className="min-h-[40px] flex-1 rounded-2xl px-4 py-2.5 text-sm outline-none"
+                  className="min-h-[38px] flex-1 rounded-2xl px-4 py-2 text-sm outline-none"
                   style={{
-                    background: "rgba(0,0,0,0.28)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    color: "#f0e6d3",
+                    background: 'rgba(0,0,0,0.28)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#f0e6d3',
                   }}
                 />
 
                 <GoldButton
-                  className="min-h-[40px] md:min-w-[120px]"
+                  className="min-h-[38px] md:min-w-[116px]"
                   onClick={() => handleJoinMatch(matchId)}
                   disabled={!canJoinMatch}
                 >
@@ -2511,11 +2377,9 @@ export function LobbyPage() {
             <div
               className="rounded-[30px] p-4"
               style={{
-                background:
-                  "linear-gradient(135deg, rgba(9,17,19,0.92), rgba(5,9,14,0.90))",
-                border: "1px solid rgba(201,168,76,0.18)",
-                boxShadow:
-                  "0 18px 48px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.035)",
+                background: 'linear-gradient(135deg, rgba(9,17,19,0.92), rgba(5,9,14,0.90))',
+                border: '1px solid rgba(201,168,76,0.18)',
+                boxShadow: '0 18px 48px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.035)',
               }}
             >
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
@@ -2524,19 +2388,19 @@ export function LobbyPage() {
                     style={{
                       fontSize: 9,
                       fontWeight: 900,
-                      color: "rgba(201,168,76,0.72)",
-                      letterSpacing: "0.28em",
-                      textTransform: "uppercase",
+                      color: 'rgba(201,168,76,0.72)',
+                      letterSpacing: '0.28em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     Mesas disponíveis
                   </p>
                   <h2
                     style={{
-                      fontFamily: "Georgia, serif",
+                      fontFamily: 'Georgia, serif',
                       fontSize: 24,
                       fontWeight: 900,
-                      color: "#f0e6d3",
+                      color: '#f0e6d3',
                       lineHeight: 1.05,
                     }}
                   >
@@ -2546,18 +2410,12 @@ export function LobbyPage() {
                 <span
                   className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
                   style={{
-                    background: hasActiveLobbyFocus
-                      ? "rgba(34,197,94,0.09)"
-                      : "rgba(201,168,76,0.08)",
-                    border: hasActiveLobbyFocus
-                      ? "1px solid rgba(34,197,94,0.20)"
-                      : "1px solid rgba(201,168,76,0.18)",
-                    color: hasActiveLobbyFocus
-                      ? "#4ade80"
-                      : "rgba(232,199,106,0.82)",
+                    background: hasActiveLobbyFocus ? 'rgba(34,197,94,0.09)' : 'rgba(201,168,76,0.08)',
+                    border: hasActiveLobbyFocus ? '1px solid rgba(34,197,94,0.20)' : '1px solid rgba(201,168,76,0.18)',
+                    color: hasActiveLobbyFocus ? '#4ade80' : 'rgba(232,199,106,0.82)',
                   }}
                 >
-                  {hasActiveLobbyFocus ? "Sessão ativa" : "Sem mesa ativa"}
+                  {hasActiveLobbyFocus ? 'Sessão ativa' : 'Sem mesa ativa'}
                 </span>
               </div>
 
@@ -2566,161 +2424,194 @@ export function LobbyPage() {
                   eyebrow="Treino solo"
                   title="Contra Bot"
                   description="Treine uma queda rápida contra bot, sem fila e sem convite."
-                  meta="Instantâneo"
+                  meta={modeCardsLockedByActiveRoom ? 'Mesa ativa' : 'Instantâneo'}
                   icon="♠"
                   tone="gold"
-                  featured
+                  featured={!modeCardsLockedByActiveRoom}
                   ctaLabel="Jogar"
-                  onClick={() => handleCreateMatch("1v1")}
-                  disabled={!canCreateMatch}
+                  disabledCtaLabel={modeCardsLockedByActiveRoom ? 'Mesa ativa' : 'Bloqueado'}
+                  onClick={() => handleCreateMatch('1v1')}
+                  disabled={modeCardsLockedByActiveRoom || !canUseQuickModeAction}
                 />
                 <ModeActionCard
                   eyebrow="Mesa flexível"
                   title="Mesa Adaptável"
-                  description="Entre em uma mesa aberta ou crie uma nova; sente em qualquer lugar e complete vazios com bots."
-                  meta="Entrar/criar"
+                  description="Entre em uma mesa aberta, escolha seu assento e complete vazios com bots."
+                  meta={modeCardsLockedByActiveRoom ? 'Mesa ativa' : 'Entrar/criar'}
                   icon="⚡"
                   tone="green"
+                  featured={!modeCardsLockedByActiveRoom}
                   ctaLabel="Entrar"
-                  onClick={() => handleCreateFlexibleRoom("2v2")}
-                  disabled={!canCreateMatch}
+                  disabledCtaLabel={modeCardsLockedByActiveRoom ? 'Mesa ativa' : 'Bloqueado'}
+                  onClick={() => handleCreateFlexibleRoom('2v2')}
+                  disabled={modeCardsLockedByActiveRoom || !canUseQuickModeAction}
                 />
                 <ModeActionCard
                   eyebrow="Fila pública"
                   title="Desafiar Jogador"
                   description={
                     derivedMatchId
-                      ? "Saia da sala atual e procure outro humano 1v1."
-                      : "Procure outro humano para uma queda 1v1."
+                      ? 'Troque sua sala atual por uma busca 1v1 contra outro humano.'
+                      : 'Procure outro humano para uma queda 1v1 rápida.'
                   }
                   meta={
-                    activeQueueMode === "1v1"
-                      ? "Na fila"
+                    activeQueueMode === '1v1'
+                      ? 'Na fila'
                       : derivedMatchId
-                        ? "Trocar sala"
-                        : "Humano"
+                        ? 'Trocar sala'
+                        : 'Humano'
                   }
                   icon="◎"
                   tone="blue"
+                  active={isPublicQueueWaiting}
+                  activeLabel="Fila ativa"
+                  disabledCtaLabel={isPublicQueueWaiting ? 'Fila ativa' : 'Indisponível'}
                   ctaLabel={
-                    isPublicQueueWaiting
-                      ? "Fila ativa"
-                      : derivedMatchId
-                        ? "Trocar para fila"
-                        : "Fila"
+                    isPublicQueueWaiting ? 'Fila ativa' : derivedMatchId ? 'Trocar para fila' : 'Fila'
                   }
                   onClick={() => {
                     if (derivedMatchId) {
-                      handleSwitchToPublicQueue("1v1");
+                      handleSwitchToPublicQueue('1v1');
                       return;
                     }
 
-                    handleJoinPublicQueue("1v1");
+                    handleJoinPublicQueue('1v1');
                   }}
-                  disabled={
-                    isPublicQueueWaiting ||
-                    (!canJoinPublicQueue && !canSwitchActiveRoomToQueue)
-                  }
+                  disabled={isPublicQueueWaiting || (!canJoinPublicQueue && !canSwitchActiveRoomToQueue)}
                 />
                 <ModeActionCard
                   eyebrow="Sala privada"
                   title="Mesa com Amigo"
-                  description="Crie uma mesa privada para jogar com amigo ou adversário."
-                  meta={showCreateRoomPanel ? "Selecionando" : "Privado"}
+                  description="Abra convite 1v1 ou 2v2 e envie o link direto para seu amigo."
+                  meta={
+                    modeCardsLockedByActiveRoom
+                      ? 'Mesa ativa'
+                      : showCreateRoomPanel
+                        ? 'Selecionando'
+                        : 'Privado'
+                  }
                   icon="◆"
                   tone="blue"
+                  active={showCreateRoomPanel && !modeCardsLockedByActiveRoom}
+                  activeLabel="Selecionando"
                   ctaLabel="Criar"
+                  disabledCtaLabel={modeCardsLockedByActiveRoom ? 'Mesa ativa' : 'Bloqueado'}
                   onClick={() => setShowCreateRoomPanel((value) => !value)}
-                  disabled={!canCreatePrivateMatch}
+                  disabled={modeCardsLockedByActiveRoom || !canUsePrivateModeAction}
                 />
               </div>
             </div>
 
             {showCreateRoomPanel ? (
               <div
-                className="rounded-[28px] p-4"
+                className="relative overflow-hidden rounded-[28px] p-4"
                 style={{
                   background:
-                    "linear-gradient(135deg, rgba(14,26,36,0.92), rgba(5,9,14,0.90))",
-                  border: "1px solid rgba(147,197,253,0.18)",
-                  boxShadow: "0 18px 48px rgba(0,0,0,0.26)",
+                    'linear-gradient(135deg, rgba(14,26,36,0.94), rgba(5,9,14,0.92) 52%, rgba(8,28,21,0.88))',
+                  border: '1px solid rgba(147,197,253,0.20)',
+                  boxShadow:
+                    '0 22px 58px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.04)',
                 }}
               >
-                <div className="mb-3">
-                  <p
+                <div
+                  className="pointer-events-none absolute inset-x-8 top-0 h-px"
+                  style={{
+                    background:
+                      'linear-gradient(90deg, transparent, rgba(147,197,253,0.56), rgba(232,199,106,0.42), transparent)',
+                  }}
+                />
+                <div
+                  className="pointer-events-none absolute -right-24 -top-24 h-56 w-56 rounded-full"
+                  style={{ background: 'rgba(147,197,253,0.12)', filter: 'blur(54px)' }}
+                />
+
+                <div className="relative z-10 mb-4 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 900,
+                        color: 'rgba(147,197,253,0.82)',
+                        letterSpacing: '0.24em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Mesas privadas
+                    </p>
+                    <h3
+                      style={{
+                        marginTop: 4,
+                        fontFamily: 'Georgia, serif',
+                        fontSize: 24,
+                        fontWeight: 900,
+                        color: '#f0e6d3',
+                      }}
+                    >
+                      Escolha a formação do convite
+                    </h3>
+                  </div>
+
+                  <span
+                    className="rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.16em]"
                     style={{
-                      fontSize: 9,
-                      fontWeight: 900,
-                      color: "rgba(147,197,253,0.80)",
-                      letterSpacing: "0.24em",
-                      textTransform: "uppercase",
+                      background: 'rgba(0,0,0,0.24)',
+                      border: '1px solid rgba(147,197,253,0.16)',
+                      color: 'rgba(147,197,253,0.78)',
                     }}
                   >
-                    Mesas privadas
-                  </p>
-                  <h3
-                    style={{
-                      fontFamily: "Georgia, serif",
-                      fontSize: 22,
-                      fontWeight: 900,
-                      color: "#f0e6d3",
-                    }}
-                  >
-                    Convide alguém para sentar
-                  </h3>
+                    O link aparece no convite rápido
+                  </span>
                 </div>
 
-                <div className="grid gap-3 lg:grid-cols-3">
+                <div className="relative z-10 grid gap-3 lg:grid-cols-3">
                   <ModeActionCard
                     eyebrow="Convite 1v1"
                     title="Duelo com Amigo"
-                    description="Crie uma sala sem bot automático para jogar contra um humano."
+                    description="Sala fechada para dois humanos, sem bot automático no adversário."
                     meta="Você vs amigo"
                     icon="◆"
                     tone="gold"
+                    featured
                     ctaLabel="Criar"
                     onClick={handleCreateHumanOneVsOneRoom}
-                    disabled={!canCreatePrivateMatch}
+                    disabled={!canUsePrivateModeAction}
                   />
                   <ModeActionCard
                     eyebrow="2v2 convite"
                     title="Duplas Híbridas"
-                    description="Cada humano joga com um parceiro bot em times opostos."
+                    description="Você e seu amigo caem em lados opostos; cada humano joga com um bot parceiro."
                     meta="Amigo rival"
                     icon="◇"
                     tone="blue"
                     ctaLabel="Criar"
-                    onClick={() => handleCreatePrivateMatch("opposite-team")}
-                    disabled={!canCreatePrivateMatch}
+                    onClick={() => handleCreatePrivateMatch('opposite-team')}
+                    disabled={!canUsePrivateModeAction}
                   />
                   <ModeActionCard
                     eyebrow="2v2 convite"
                     title="Minha Dupla vs Bots"
-                    description="Você e seu amigo jogam juntos contra dois bots."
+                    description="Você e seu amigo jogam juntos contra dois bots, ideal para testar parceria."
                     meta="Dupla humana"
                     icon="♢"
                     tone="green"
                     ctaLabel="Criar"
-                    onClick={() => handleCreatePrivateMatch("same-team")}
-                    disabled={!canCreatePrivateMatch}
+                    onClick={() => handleCreatePrivateMatch('same-team')}
+                    disabled={!canUsePrivateModeAction}
                   />
                 </div>
               </div>
             ) : null}
 
-            {continuation.state === "reconnect" ? (
-              <div
-                className="rounded-[28px] p-4"
-                style={{ background: CARD_BG, border: CARD_BORDER }}
-              >
+            {continuation.state === 'reconnect' ? (
+              <div className="rounded-[28px] p-4" style={{ background: CARD_BG, border: CARD_BORDER }}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p
                       style={{
                         fontSize: 9,
-                        color: "#f87171",
-                        letterSpacing: "0.22em",
-                        textTransform: "uppercase",
+                        color: '#f87171',
+                        letterSpacing: '0.22em',
+                        textTransform: 'uppercase',
                         fontWeight: 900,
                       }}
                     >
@@ -2730,11 +2621,10 @@ export function LobbyPage() {
                       style={{
                         marginTop: 4,
                         fontSize: 13,
-                        color: "rgba(240,230,211,0.56)",
+                        color: 'rgba(240,230,211,0.56)',
                       }}
                     >
-                      Reconecte o socket para carregar sala, ranking e
-                      histórico.
+                      Reconecte o socket para carregar sala, ranking e histórico.
                     </p>
                   </div>
                   <GoldButton onClick={handleConnect} disabled={!canConnect}>
@@ -2747,109 +2637,197 @@ export function LobbyPage() {
 
           <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
             <div
-              className="rounded-[28px] p-4"
+              className="relative overflow-hidden rounded-[28px] p-4"
               style={{
                 background:
-                  "linear-gradient(180deg, rgba(11,20,21,0.88), rgba(6,10,15,0.82))",
-                border: "1px solid rgba(201,168,76,0.12)",
+                  'linear-gradient(180deg, rgba(12,22,23,0.94), rgba(6,10,15,0.86))',
+                border: '1px solid rgba(201,168,76,0.16)',
+                boxShadow:
+                  '0 22px 58px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.04)',
               }}
             >
-              <div className="mb-3 flex items-center justify-between gap-2">
+              <div
+                className="pointer-events-none absolute inset-x-7 top-0 h-px"
+                style={{
+                  background:
+                    'linear-gradient(90deg, transparent, rgba(232,199,106,0.58), transparent)',
+                }}
+              />
+              <div
+                className="pointer-events-none absolute -right-24 -top-20 h-52 w-52 rounded-full"
+                style={{ background: 'rgba(201,168,76,0.12)', filter: 'blur(54px)' }}
+              />
+
+              <div className="relative z-10 mb-4 flex items-center justify-between gap-2">
                 <div>
                   <p
                     style={{
                       fontSize: 9,
                       fontWeight: 900,
-                      color: "rgba(201,168,76,0.76)",
-                      letterSpacing: "0.22em",
-                      textTransform: "uppercase",
+                      color: 'rgba(201,168,76,0.78)',
+                      letterSpacing: '0.22em',
+                      textTransform: 'uppercase',
                     }}
                   >
                     Ranking semanal
                   </p>
                   <h3
                     style={{
-                      fontFamily: "Georgia, serif",
-                      fontSize: 18,
+                      marginTop: 2,
+                      fontFamily: 'Georgia, serif',
+                      fontSize: 20,
                       fontWeight: 900,
-                      color: "#f0e6d3",
+                      color: '#f0e6d3',
                     }}
                   >
-                    Top 5
+                    Clube dos jogadores
                   </h3>
                 </div>
+
                 <span
-                  style={{ fontSize: 11, fontWeight: 900, color: "#e8c76a" }}
+                  className="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em]"
+                  style={{
+                    background: progressSnapshot.rankingPosition
+                      ? 'rgba(201,168,76,0.12)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: progressSnapshot.rankingPosition
+                      ? '1px solid rgba(201,168,76,0.24)'
+                      : '1px solid rgba(255,255,255,0.08)',
+                    color: progressSnapshot.rankingPosition
+                      ? '#e8c76a'
+                      : 'rgba(240,230,211,0.42)',
+                  }}
                 >
-                  {progressSnapshot.rankingPosition
-                    ? `#${progressSnapshot.rankingPosition}`
-                    : "—"}
+                  {progressSnapshot.rankingPosition ? `#${progressSnapshot.rankingPosition}` : 'Sem rank'}
                 </span>
               </div>
 
+              <div
+                className="relative z-10 mb-4 grid grid-cols-3 gap-2 rounded-[22px] p-2.5"
+                style={{
+                  background:
+                    'linear-gradient(135deg, rgba(201,168,76,0.10), rgba(0,0,0,0.24))',
+                  border: '1px solid rgba(201,168,76,0.13)',
+                }}
+              >
+                <div>
+                  <p className="text-[8px] font-black uppercase tracking-[0.14em] text-white/34">
+                    Rating
+                  </p>
+                  <p className="mt-1 text-[15px] font-black text-[#e8c76a]">
+                    {progressSnapshot.ratingLabel ?? '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[8px] font-black uppercase tracking-[0.14em] text-white/34">
+                    Aproveit.
+                  </p>
+                  <p className="mt-1 text-[15px] font-black text-[#f0e6d3]">
+                    {progressSnapshot.winRateLabel}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[8px] font-black uppercase tracking-[0.14em] text-white/34">
+                    Jogos
+                  </p>
+                  <p className="mt-1 text-[15px] font-black text-[#f0e6d3]">
+                    {progressSnapshot.matchesPlayed}
+                  </p>
+                </div>
+              </div>
+
               {rankingEntries.length > 0 ? (
-                <div className="space-y-2">
-                  {rankingEntries.map((entry) => (
-                    <div
-                      key={`${entry.position}-${entry.name}`}
-                      className="flex items-center justify-between gap-3 rounded-2xl px-3 py-2"
-                      style={{
-                        background: entry.isCurrentUser
-                          ? "rgba(201,168,76,0.10)"
-                          : "rgba(255,255,255,0.035)",
-                        border: entry.isCurrentUser
-                          ? "1px solid rgba(201,168,76,0.20)"
-                          : "1px solid rgba(255,255,255,0.04)",
-                      }}
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          style={{
-                            fontFamily: "Georgia, serif",
-                            fontSize: 14,
-                            fontWeight: 900,
-                            color: "#e8c76a",
-                            width: 18,
-                          }}
-                        >
-                          {entry.position}
-                        </span>
-                        <span
-                          className="truncate"
-                          style={{ fontSize: 13, color: "#f0e6d3" }}
-                        >
-                          {entry.name}
-                        </span>
-                        {entry.isCurrentUser ? (
-                          <span
-                            className="rounded-full px-2 py-0.5 text-[8px] font-black"
-                            style={{
-                              background: "rgba(201,168,76,0.16)",
-                              color: "#e8c76a",
-                            }}
-                          >
-                            VOCÊ
-                          </span>
-                        ) : null}
-                      </div>
-                      <span
+                <div className="relative z-10 space-y-2">
+                  {rankingEntries.map((entry) => {
+                    const isPodium = entry.position <= 3;
+
+                    return (
+                      <div
+                        key={`${entry.position}-${entry.name}`}
+                        className="group flex items-center justify-between gap-3 rounded-2xl px-3 py-2.5 transition hover:translate-x-0.5"
                         style={{
-                          fontSize: 11,
-                          color: "rgba(201,168,76,0.82)",
-                          fontWeight: 900,
+                          background: entry.isCurrentUser
+                            ? 'linear-gradient(135deg, rgba(201,168,76,0.14), rgba(0,0,0,0.24))'
+                            : 'rgba(255,255,255,0.035)',
+                          border: entry.isCurrentUser
+                            ? '1px solid rgba(201,168,76,0.24)'
+                            : '1px solid rgba(255,255,255,0.05)',
+                          boxShadow: entry.isCurrentUser
+                            ? '0 0 24px rgba(201,168,76,0.10)'
+                            : 'none',
                         }}
                       >
-                        {entry.ratingLabel}
-                      </span>
-                    </div>
-                  ))}
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                            style={{
+                              background: isPodium
+                                ? 'linear-gradient(135deg, rgba(255,241,184,0.18), rgba(201,168,76,0.08))'
+                                : 'rgba(255,255,255,0.04)',
+                              border: isPodium
+                                ? '1px solid rgba(201,168,76,0.26)'
+                                : '1px solid rgba(255,255,255,0.07)',
+                              fontFamily: 'Georgia, serif',
+                              fontSize: 13,
+                              fontWeight: 900,
+                              color: isPodium ? '#e8c76a' : 'rgba(240,230,211,0.52)',
+                            }}
+                          >
+                            {entry.position}
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span
+                                className="truncate"
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 800,
+                                  color: entry.isCurrentUser ? '#fff1b8' : '#f0e6d3',
+                                }}
+                              >
+                                {entry.name}
+                              </span>
+                              {entry.isCurrentUser ? (
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[8px] font-black"
+                                  style={{
+                                    background: 'rgba(201,168,76,0.16)',
+                                    color: '#e8c76a',
+                                  }}
+                                >
+                                  VOCÊ
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-0.5 text-[8px] font-black uppercase tracking-[0.16em] text-white/30">
+                              Semana competitiva
+                            </p>
+                          </div>
+                        </div>
+
+                        <span
+                          className="shrink-0 rounded-full px-2.5 py-1"
+                          style={{
+                            background: 'rgba(0,0,0,0.20)',
+                            border: '1px solid rgba(201,168,76,0.10)',
+                            fontSize: 11,
+                            color: 'rgba(201,168,76,0.86)',
+                            fontWeight: 900,
+                          }}
+                        >
+                          {entry.ratingLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p
-                  className="rounded-2xl p-3"
+                  className="relative z-10 rounded-2xl p-3"
                   style={{
-                    background: "rgba(0,0,0,0.20)",
-                    color: "rgba(240,230,211,0.52)",
+                    background: 'rgba(0,0,0,0.22)',
+                    color: 'rgba(240,230,211,0.52)',
                     fontSize: 12.5,
                     lineHeight: 1.5,
                   }}
@@ -2863,13 +2841,12 @@ export function LobbyPage() {
               <div
                 className="rounded-[24px] p-3"
                 style={{
-                  background: "rgba(239,68,68,0.08)",
-                  border: "1px solid rgba(239,68,68,0.18)",
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.18)',
                 }}
               >
-                <p style={{ fontSize: 12, color: "#fca5a5", lineHeight: 1.5 }}>
-                  Sessão incompleta. Faça login novamente para liberar as ações
-                  do lobby.
+                <p style={{ fontSize: 12, color: '#fca5a5', lineHeight: 1.5 }}>
+                  Sessão incompleta. Faça login novamente para liberar as ações do lobby.
                 </p>
               </div>
             ) : null}
