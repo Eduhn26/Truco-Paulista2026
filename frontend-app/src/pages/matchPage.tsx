@@ -400,7 +400,14 @@ type LocalMaoDeOnzeDeclineIntent = {
 
 type OpeningViraRevealState = {
   key: string;
-  rank: Rank;
+  card: CardPayload;
+  rawCard: string | null;
+};
+
+type PendingOpeningViraReveal = {
+  matchId: string;
+  viraRank: Rank;
+  requestedAt: number;
 };
 
 type MatchViewModel = {
@@ -911,7 +918,10 @@ export function MatchPage() {
   const effectiveMatchId = routeMatchId || getLastActiveMatchId() || '';
   const mySeatRef = useRef<string | null>(null);
   const [viraRank, setViraRank] = useState<Rank>('4');
-  const [openingViraReveal, setOpeningViraReveal] = useState<OpeningViraRevealState | null>(null);
+  const [openingViraReveal, setOpeningViraReveal] =
+    useState<OpeningViraRevealState | null>(null);
+  const [lastKnownViraCard, setLastKnownViraCard] = useState<string | null>(null);
+  const pendingOpeningViraRevealRef = useRef<PendingOpeningViraReveal | null>(null);
   const [showSecondary, setShowSecondary] = useState(false);
   const [visualBeat, setVisualBeat] = useState<VisualBeat>('idle');
   const visualBeatRef = useRef<VisualBeat>('idle');
@@ -1422,7 +1432,7 @@ export function MatchPage() {
   );
 
   const handleRealtimeHandStarted = useCallback(
-    (payload: { matchId?: string; viraRank?: Rank | null }) => {
+    (payload: { matchId?: string; viraRank?: Rank | null; viraCard?: string | null }) => {
       debugMatchPage('onHandStarted', {
         payload,
         previousVisualBeat: visualBeat,
@@ -1433,18 +1443,43 @@ export function MatchPage() {
       });
 
       if (payload.viraRank) {
-        const revealKey = [
-          'opening-vira',
-          payload.matchId ?? effectiveMatchId,
-          payload.viraRank,
-          Date.now(),
-        ].join('|');
+        const rawViraCard = payload.viraCard ?? null;
+        const revealedCard = rawViraCard ? cardStringToPayload(rawViraCard) : null;
+        const revealMatchId = payload.matchId ?? effectiveMatchId;
 
         setViraRank(payload.viraRank);
-        setOpeningViraReveal({ key: revealKey, rank: payload.viraRank });
-        scheduleOpeningViraSounds();
+
+        if (rawViraCard && revealedCard) {
+          const revealKey = ['opening-vira', revealMatchId, rawViraCard, Date.now()].join('|');
+
+          pendingOpeningViraRevealRef.current = null;
+          setLastKnownViraCard(rawViraCard);
+          setOpeningViraReveal({
+            key: revealKey,
+            card: revealedCard,
+            rawCard: rawViraCard,
+          });
+          scheduleOpeningViraSounds();
+        } else {
+          pendingOpeningViraRevealRef.current = {
+            matchId: revealMatchId,
+            viraRank: payload.viraRank,
+            requestedAt: Date.now(),
+          };
+          setLastKnownViraCard(null);
+          setOpeningViraReveal(null);
+          clearOpeningViraSoundTimers();
+
+          debugMatchPage('openingViraReveal:waiting-for-vira-card', {
+            matchId: revealMatchId,
+            viraRank: payload.viraRank,
+            rawViraCard,
+          });
+        }
       } else {
+        pendingOpeningViraRevealRef.current = null;
         setOpeningViraReveal(null);
+        setLastKnownViraCard(null);
         clearOpeningViraSoundTimers();
       }
 
@@ -1754,6 +1789,49 @@ export function MatchPage() {
       }
     },
   });
+
+  useEffect(() => {
+    const pendingReveal = pendingOpeningViraRevealRef.current;
+
+    if (!pendingReveal) {
+      return;
+    }
+
+    const authoritativeHand = privateMatchState?.currentHand ?? publicMatchState?.currentHand;
+    const rawViraCard = authoritativeHand?.viraCard ?? null;
+    const revealedCard = rawViraCard ? cardStringToPayload(rawViraCard) : null;
+
+    if (!rawViraCard || !revealedCard) {
+      return;
+    }
+
+    if (authoritativeHand?.viraRank && authoritativeHand.viraRank !== pendingReveal.viraRank) {
+      return;
+    }
+
+    const revealKey = [
+      'opening-vira',
+      pendingReveal.matchId,
+      rawViraCard,
+      pendingReveal.requestedAt,
+    ].join('|');
+
+    pendingOpeningViraRevealRef.current = null;
+    setViraRank(revealedCard.rank);
+    setLastKnownViraCard(rawViraCard);
+    setOpeningViraReveal({
+      key: revealKey,
+      card: revealedCard,
+      rawCard: rawViraCard,
+    });
+    scheduleOpeningViraSounds();
+
+    debugMatchPage('openingViraReveal:resolved-from-match-state', {
+      revealKey,
+      rawViraCard,
+      viraRank: revealedCard.rank,
+    });
+  }, [privateMatchState, publicMatchState, scheduleOpeningViraSounds]);
 
   const [visualRoomState, setVisualRoomState] = useState<RoomStatePayload | null>(
     roomState ?? initialSnapshot?.roomState ?? null,
@@ -4117,6 +4195,8 @@ export function MatchPage() {
                     closingTableCards={liveTableTransition.closingTableCards}
                     currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                     currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
+                    currentPrivateViraCard={viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard}
+                    currentPublicViraCard={viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard}
                     viraRank={viraRank}
                     isViraRevealActive={isNewHandOpeningLocked}
                     viraRevealKey={openingViraReveal?.key ?? 'vira-static'}
@@ -4186,6 +4266,8 @@ export function MatchPage() {
                     closingTableCards={liveTableTransition.closingTableCards}
                     currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                     currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
+                    currentPrivateViraCard={viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard}
+                    currentPublicViraCard={viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard}
                     viraRank={viraRank}
                     isViraRevealActive={isNewHandOpeningLocked}
                     viraRevealKey={openingViraReveal?.key ?? 'vira-static'}
@@ -4228,10 +4310,12 @@ export function MatchPage() {
                 {openingViraReveal ? (
                   <ViraRevealAnimation
                     key={openingViraReveal.key}
-                    rank={openingViraReveal.rank}
-                    suit="C"
-                    isRed
-                    manilhaLabel={`Manilha definida • Vira: ${openingViraReveal.rank}`}
+                    rank={openingViraReveal.card.rank}
+                    suit={openingViraReveal.card.suit}
+                    isRed={openingViraReveal.card.suit === 'C' || openingViraReveal.card.suit === 'O'}
+                    manilhaLabel={`Manilha definida • Vira: ${
+                      openingViraReveal.rawCard ?? openingViraReveal.card.rank
+                    }`}
                     onComplete={handleOpeningViraRevealComplete}
                   />
                 ) : null}
@@ -4517,3 +4601,5 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
+
+

@@ -34,6 +34,7 @@ import {
   isPostSettlePhase,
   isResolutionVisuallyActive,
 } from './useRoundResolutionPhase';
+import { cardStringToPayload } from '../../services/socket/socketTypes';
 import type {
   BotIdentityPayload,
   CardPayload,
@@ -111,6 +112,8 @@ type MatchTableShellProps = {
   roundResolvedKey: number;
   currentPrivateViraRank: Rank | null;
   currentPublicViraRank: Rank | null;
+  currentPrivateViraCard: string | null;
+  currentPublicViraCard: string | null;
   viraRank: Rank;
   isViraRevealActive?: boolean;
   viraRevealKey?: string;
@@ -5295,6 +5298,8 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     roundIntroKey,
     currentPrivateViraRank,
     currentPublicViraRank,
+    currentPrivateViraCard,
+    currentPublicViraCard,
     viraRank,
     isViraRevealActive = false,
     viraRevealKey,
@@ -5581,7 +5586,12 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     lastNonSelfSeatFlightSignatureRef.current = null;
   }, [roundIntroKey]);
 
-  const effectiveViraRank = currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
+  const effectiveViraCardSource = currentPrivateViraCard ?? currentPublicViraCard;
+  const effectiveViraCard =
+    effectiveViraCardSource !== null ? cardStringToPayload(effectiveViraCardSource) : null;
+  const effectiveViraRank =
+    effectiveViraCard?.rank ?? currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
+  const effectiveViraSuit = effectiveViraCard?.suit ?? 'P';
   const isNewHandOpeningLocked = isViraRevealActive;
   const isAwaitingBet = betState === 'awaiting_response';
   const scoreT1 = Number(props.scoreLabel?.match(/T1\s+(\d+)/)?.[1] ?? '0');
@@ -7138,7 +7148,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
         ) : (
           <ViraSlot
             rank={effectiveViraRank}
-            suit="C"
+            suit={effectiveViraSuit}
             revealKey={viraRevealKey ?? `vira-${effectiveViraRank}`}
             revealActive={false}
             isMutedDuringVerdict={canShowResolutionBadges || canShowTwoVersusTwoResolutionBadges}
@@ -7553,4 +7563,6 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     </div>
   );
 }
+
+
 

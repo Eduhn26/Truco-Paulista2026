@@ -44,6 +44,7 @@ export type ViewMatchStateResponseDto = {
   };
   currentHand: null | {
     viraRank: Rank;
+    viraCard: string;
     mode: HandMode;
     finished: boolean;
     viewerPlayerId: PlayerId | null;
@@ -79,3 +80,5 @@ export type ViewMatchStateResponseDto = {
     rounds: ViewMatchStateRoundDto[];
   };
 };
+
+

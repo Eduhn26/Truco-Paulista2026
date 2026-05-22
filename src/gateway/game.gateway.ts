@@ -2650,10 +2650,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const startedMatchState = await this.getAuthoritativeMatchState(matchId);
       const startedViraRank = startedMatchState.currentHand?.viraRank ?? null;
+      const startedViraCard = startedMatchState.currentHand?.viraCard ?? null;
 
       this.server.to(matchId).emit('hand-started', {
         matchId,
         viraRank: startedViraRank,
+        viraCard: startedViraCard,
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
 
@@ -2667,6 +2669,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         socketId,
         matchId,
         ...(startedViraRank !== null ? { viraRank: startedViraRank } : {}),
+          ...(startedViraCard !== null ? { viraCard: startedViraCard } : {}),
+        ...(startedViraCard !== null ? { viraCard: startedViraCard } : {}),
       });
 
       return result.matchId === matchId;
@@ -3920,10 +3924,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         const startedMatchState = await this.getAuthoritativeMatchState(matchId);
         const startedViraRank = startedMatchState.currentHand?.viraRank ?? null;
+        const startedViraCard = startedMatchState.currentHand?.viraCard ?? null;
 
         this.server.to(matchId).emit('hand-started', {
           matchId,
           viraRank: startedViraRank,
+          viraCard: startedViraCard,
           currentTurnSeatId: roomState.currentTurnSeatId,
         });
 
@@ -4990,3 +4996,5 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
+
+

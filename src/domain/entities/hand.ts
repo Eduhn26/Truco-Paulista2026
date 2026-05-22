@@ -15,6 +15,7 @@ export type HandSeatHandsSnapshot = Partial<Record<SeatId, string[]>>;
 
 export type HandSnapshot = {
   viraRank: Rank;
+  viraCard?: string;
   mode?: HandMode;
   rounds: RoundSnapshot[];
   finished: boolean;
@@ -36,6 +37,7 @@ export type HandSnapshot = {
 type HandStateConfig = {
   mode?: HandMode;
   seatHands?: HandSeatHandsSnapshot;
+  viraCard?: string;
   currentValue?: HandValue;
   betState?: HandBetState;
   pendingValue?: HandValue | null;
@@ -54,6 +56,7 @@ type PlayOptions = {
 };
 
 type TwoVsTwoDeal = {
+  viraCard: Card;
   viraRank: Rank;
   seatHands: Record<SeatId, Card[]>;
 };
@@ -85,7 +88,8 @@ function shuffle(cards: Card[]): Card[] {
   return deck;
 }
 
-function dealTwoVersusTwoFromDeck(viraRank: Rank, cards: Card[]): TwoVsTwoDeal {
+function dealTwoVersusTwoFromDeck(viraCard: Card, cards: Card[]): TwoVsTwoDeal {
+  const viraRank = viraCard.getRank();
   const seatHands = {
     T1A: cards.splice(0, 3),
     T2A: cards.splice(0, 3),
@@ -99,7 +103,7 @@ function dealTwoVersusTwoFromDeck(viraRank: Rank, cards: Card[]): TwoVsTwoDeal {
     }
   }
 
-  return { viraRank, seatHands };
+  return { viraCard, viraRank, seatHands };
 }
 
 function dealTwoVersusTwoHandsFromViraRank(viraRank: Rank): TwoVsTwoDeal {
@@ -110,9 +114,13 @@ function dealTwoVersusTwoHandsFromViraRank(viraRank: Rank): TwoVsTwoDeal {
     throw new Error(`Could not find a vira card for rank ${viraRank}.`);
   }
 
-  shuffledDeck.splice(viraIndex, 1);
+  const [viraCard] = shuffledDeck.splice(viraIndex, 1);
 
-  return dealTwoVersusTwoFromDeck(viraRank, shuffledDeck);
+  if (!viraCard) {
+    throw new Error('Failed to extract a 2v2 vira card from deck.');
+  }
+
+  return dealTwoVersusTwoFromDeck(viraCard, shuffledDeck);
 }
 
 function dealRandomTwoVersusTwoHand(): TwoVsTwoDeal {
@@ -123,7 +131,7 @@ function dealRandomTwoVersusTwoHand(): TwoVsTwoDeal {
     throw new Error('Failed to draw a random vira card from deck.');
   }
 
-  return dealTwoVersusTwoFromDeck(viraCard.getRank(), shuffledDeck);
+  return dealTwoVersusTwoFromDeck(viraCard, shuffledDeck);
 }
 
 function getTeamFromSeat(seatId: SeatId): PlayerId {
@@ -136,6 +144,7 @@ export class Hand {
   private readonly playerTwoHand: Card[];
   private readonly seatHands = new Map<SeatId, Card[]>();
   private readonly mode: HandMode;
+  private readonly viraCard: Card;
   private finished = false;
   private currentValue: HandValue;
   private betState: HandBetState;
@@ -155,6 +164,7 @@ export class Hand {
     state: HandStateConfig = {},
   ) {
     this.mode = state.mode ?? (state.seatHands ? '2v2' : '1v1');
+    this.viraCard = Card.from(state.viraCard ?? `${this.viraRank}C`);
     this.rounds = [new Round(this.viraRank, this.getExpectedRoundPlayCount())];
     this.playerOneHand = [...playerOneHand];
     this.playerTwoHand = [...playerTwoHand];
@@ -183,13 +193,17 @@ export class Hand {
       return new Hand(viraRank, dealtHands.seatHands.T1A, dealtHands.seatHands.T2A, {
         ...state,
         mode,
+        viraCard: dealtHands.viraCard.toString(),
         seatHands: Hand.cardSeatHandsToSnapshot(dealtHands.seatHands),
       });
     }
 
     const dealtHands = dealHandsFromViraRank(viraRank);
 
-    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, state);
+    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, {
+      ...state,
+      viraCard: dealtHands.viraCard.toString(),
+    });
   }
 
   static startRandom(state: HandStateConfig = {}, mode: HandMode = '1v1'): Hand {
@@ -199,6 +213,7 @@ export class Hand {
       return new Hand(dealtHands.viraRank, dealtHands.seatHands.T1A, dealtHands.seatHands.T2A, {
         ...state,
         mode,
+        viraCard: dealtHands.viraCard.toString(),
         seatHands: Hand.cardSeatHandsToSnapshot(dealtHands.seatHands),
       });
     }
@@ -206,7 +221,10 @@ export class Hand {
     const dealtHands = dealRandomHand();
     const viraRank = dealtHands.viraCard.getRank();
 
-    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, state);
+    return new Hand(viraRank, dealtHands.playerOneHand, dealtHands.playerTwoHand, {
+      ...state,
+      viraCard: dealtHands.viraCard.toString(),
+    });
   }
 
   static fromSnapshot(snapshot: HandSnapshot): Hand {
@@ -224,6 +242,7 @@ export class Hand {
       winner: snapshot.winner ?? null,
       awardedPoints: snapshot.awardedPoints ?? null,
       finished: snapshot.finished,
+      viraCard: snapshot.viraCard ?? `${snapshot.viraRank}C`,
     };
 
     if (snapshot.seatHands) {
@@ -429,6 +448,7 @@ export class Hand {
   toSnapshot(): HandSnapshot {
     return {
       viraRank: this.viraRank,
+      viraCard: this.viraCard.toString(),
       mode: this.mode,
       rounds: this.rounds.map((round) => round.toSnapshot()),
       finished: this.finished,
@@ -748,3 +768,5 @@ export class Hand {
     };
   }
 }
+
+

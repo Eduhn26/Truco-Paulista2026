@@ -286,6 +286,7 @@ export function mapMatchToViewMatchState(
     },
     currentHand: {
       viraRank: snapshot.viraRank,
+      viraCard: snapshot.viraCard ?? `${snapshot.viraRank}C`,
       mode,
       finished: snapshot.finished,
       viewerPlayerId: viewerPlayerId ?? null,
@@ -316,3 +317,5 @@ export function mapMatchToViewMatchState(
     },
   };
 }
+
+

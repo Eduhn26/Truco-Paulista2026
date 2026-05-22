@@ -205,6 +205,7 @@ export type MatchStateRoundPayload = {
 
 export type MatchStateHandPayload = {
   viraRank: Rank;
+  viraCard?: string;
   mode?: QueueModePayload;
   finished: boolean;
   viewerPlayerId: 'P1' | 'P2' | null;
@@ -254,6 +255,7 @@ export type RankingPayload = {
 export type HandStartedPayload = {
   matchId: string;
   viraRank?: Rank;
+  viraCard?: string;
   currentTurnSeatId?: SeatId | null;
 };
 
@@ -515,9 +517,11 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
 
   const input = asObject(value);
   const seatHands = normalizeSeatHandsMap(input.seatHands);
+  const viraCard = asOptionalString(input.viraCard);
 
   return {
     viraRank: asString(input.viraRank),
+    ...(viraCard !== undefined ? { viraCard } : {}),
     mode: asString(input.mode, '1v1'),
     finished: asBoolean(input.finished),
     viewerPlayerId:
@@ -903,11 +907,13 @@ export function normalizeRankingPayload(payload: unknown): RankingPayload {
 export function normalizeHandStartedPayload(payload: unknown): HandStartedPayload {
   const input = asObject(payload);
   const viraRank = asOptionalString(input.viraRank);
+  const viraCard = asOptionalString(input.viraCard);
   const currentTurnSeatId = asNullableString(input.currentTurnSeatId);
 
   return {
     matchId: asString(input.matchId),
     ...(viraRank !== undefined ? { viraRank } : {}),
+    ...(viraCard !== undefined ? { viraCard } : {}),
     ...(currentTurnSeatId !== null ? { currentTurnSeatId } : { currentTurnSeatId: null }),
   };
 }

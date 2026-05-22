@@ -196,6 +196,8 @@ export function buildMatchScreenViewModel({
       roundResolvedKey: liveTableTransition.roundResolvedKey,
       currentPrivateViraRank: viewModel.currentPrivateHand?.viraRank ?? null,
       currentPublicViraRank: viewModel.currentPublicHand?.viraRank ?? null,
+      currentPrivateViraCard: viewModel.currentPrivateHand?.viraCard ?? null,
+      currentPublicViraCard: viewModel.currentPublicHand?.viraCard ?? null,
       viraRank,
       availableActions: viewModel.availableActions,
       myCards: effectiveMyCards,

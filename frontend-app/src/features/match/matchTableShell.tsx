@@ -21,6 +21,7 @@ import {
   PremiumLoserBurn,
 } from './premiumOutcomeChrome';
 import { resolveValeTier, type ValeTier } from './matchPresentationSelectors';
+import { cardStringToPayload } from '../../services/socket/socketTypes';
 import type {
   BotIdentityPayload,
   CardPayload,
@@ -88,6 +89,8 @@ type MatchTableShellProps = {
   roundResolvedKey: number;
   currentPrivateViraRank: Rank | null;
   currentPublicViraRank: Rank | null;
+  currentPrivateViraCard: string | null;
+  currentPublicViraCard: string | null;
   viraRank: Rank;
   isViraRevealActive?: boolean;
   viraRevealKey?: string;
@@ -3782,6 +3785,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     roundIntroKey,
     currentPrivateViraRank,
     currentPublicViraRank,
+    currentPrivateViraCard,
+    currentPublicViraCard,
     viraRank,
     isViraRevealActive = false,
     viraRevealKey,
@@ -3889,7 +3894,12 @@ export function MatchTableShell(props: MatchTableShellProps) {
     lastOpponentLaunchSoundKeyRef.current = 0;
   }, [roundIntroKey]);
 
-  const effectiveViraRank = currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
+  const effectiveViraCardSource = currentPrivateViraCard ?? currentPublicViraCard;
+  const effectiveViraCard =
+    effectiveViraCardSource !== null ? cardStringToPayload(effectiveViraCardSource) : null;
+  const effectiveViraRank =
+    effectiveViraCard?.rank ?? currentPrivateViraRank ?? currentPublicViraRank ?? viraRank;
+  const effectiveViraSuit = effectiveViraCard?.suit ?? 'P';
   const isNewHandOpeningLocked = isViraRevealActive;
   const isAwaitingBet = betState === 'awaiting_response';
   const scoreT1 = parseScoreValue(props.scoreLabel, 'T1') ?? 0;
@@ -5004,7 +5014,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
                 <div className="flex w-[58px] shrink-0 origin-center scale-[0.70] justify-center sm:w-auto sm:scale-100">
                   <ViraCard
                     rank={effectiveViraRank}
-                    suit="C"
+                    suit={effectiveViraSuit}
                     {...(viraRevealKey ? { revealKey: viraRevealKey } : {})}
                     revealActive={false}
                   />
@@ -5246,6 +5256,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
     </div>
   );
 }
+
+
 
 
 
