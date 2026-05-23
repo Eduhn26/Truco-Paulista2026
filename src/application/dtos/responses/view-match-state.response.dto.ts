@@ -35,6 +35,28 @@ export type ViewMatchStateRoundDto = {
   winningSeatId?: SeatId | null;
 };
 
+export type TeamBetDecisionActionDto = 'accept' | 'decline' | 'raise';
+
+export type PartnerBetAdviceDto = {
+  seatId: SeatId;
+  action: TeamBetDecisionActionDto;
+  confidence: number;
+  label: string;
+  reason: string;
+};
+
+export type PendingTeamBetDecisionDto = {
+  decisionId: string;
+  respondingTeamId: 'T1' | 'T2';
+  requestedBySeatId: SeatId | null;
+  requestedValue: HandValue;
+  currentValue: HandValue;
+  phase: 'collecting_votes';
+  expiresAt: string;
+  votesBySeat: Partial<Record<SeatId, TeamBetDecisionActionDto>>;
+  botAdviceBySeat: Partial<Record<SeatId, PartnerBetAdviceDto>>;
+};
+
 export type ViewMatchStateResponseDto = {
   matchId: string;
   state: MatchState;
@@ -63,6 +85,8 @@ export type ViewMatchStateResponseDto = {
     nextDecisionType: NextDecisionType;
     viewerCanActNow: boolean;
     pendingBotAction: boolean;
+    teamBetDecision?: PendingTeamBetDecisionDto | null;
+    partnerAdvice?: PartnerBetAdviceDto | null;
     availableActions: {
       canRequestTruco: boolean;
       canRaiseToSix: boolean;

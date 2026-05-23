@@ -450,6 +450,36 @@ type BotBetAction =
   | 'raise-to-nine'
   | 'raise-to-twelve';
 
+type TeamBetDecisionAction = 'accept' | 'decline' | 'raise';
+
+type PartnerBetAdvice = {
+  seatId: SeatId;
+  action: TeamBetDecisionAction;
+  confidence: number;
+  label: string;
+  reason: string;
+};
+
+type PartnerAdviceSignal = {
+  action: TeamBetDecisionAction;
+  confidence: number;
+};
+
+type PendingTeamBetDecision = {
+  decisionId: string;
+  respondingTeamId: 'T1' | 'T2';
+  respondingPlayerId: 'P1' | 'P2';
+  requestedBySeatId: SeatId | null;
+  requestedValue: 3 | 6 | 9 | 12;
+  currentValue: 1 | 3 | 6 | 9;
+  phase: 'collecting_votes';
+  expiresAt: number;
+  votesBySeat: Partial<Record<SeatId, TeamBetDecisionAction>>;
+  botAdviceBySeat: Partial<Record<SeatId, PartnerBetAdvice>>;
+};
+
+const MIXED_TEAM_BET_DECISION_TIMEOUT_MS = 18000;
+
 @WebSocketGateway({
   cors: {
     origin: readGatewayCorsOrigin(),
@@ -465,6 +495,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly pendingStartHands = new Set<string>();
   private readonly lastBotDecisionByMatch = new Map<string, BotDecisionTelemetry>();
   private readonly pendingBetResumeSeatByMatch = new Map<string, SeatId>();
+  private readonly pendingTeamBetDecisionByMatch = new Map<string, PendingTeamBetDecision>();
+  private readonly scheduledTeamBetDecisionTimeouts = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -738,7 +773,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           viewerSeatId: session.seatId,
         });
 
-        this.server.to(session.socketId).emit('match-state:private', privateState);
+        this.server
+          .to(session.socketId)
+          .emit(
+            'match-state:private',
+            this.withTeamBetDecision(matchId, privateState, session.seatId),
+          );
       }),
     );
   }
@@ -780,6 +820,397 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private clearBetResumeSeat(matchId: string): void {
     this.pendingBetResumeSeatByMatch.delete(matchId);
+  }
+
+  private clearTeamBetDecision(matchId: string): void {
+    const timeout = this.scheduledTeamBetDecisionTimeouts.get(matchId);
+
+    if (timeout) {
+      clearTimeout(timeout);
+      this.scheduledTeamBetDecisionTimeouts.delete(matchId);
+    }
+
+    this.pendingTeamBetDecisionByMatch.delete(matchId);
+  }
+
+  private toTeamBetDecisionDto(decision: PendingTeamBetDecision) {
+    return {
+      ...decision,
+      expiresAt: new Date(decision.expiresAt).toISOString(),
+    };
+  }
+
+  private withTeamBetDecision(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+    viewerSeatId: SeatId,
+  ): ViewMatchStateResponseDto {
+    const decision = this.pendingTeamBetDecisionByMatch.get(matchId);
+
+    if (!decision || !state.currentHand) {
+      return state;
+    }
+
+    const viewerTeamId = viewerSeatId.startsWith('T1') ? 'T1' : 'T2';
+
+    if (viewerTeamId !== decision.respondingTeamId) {
+      return state;
+    }
+
+    return {
+      ...state,
+      currentHand: {
+        ...state.currentHand,
+        teamBetDecision: this.toTeamBetDecisionDto(decision),
+        partnerAdvice:
+          Object.values(decision.botAdviceBySeat).find((advice) => advice !== undefined) ?? null,
+      },
+    };
+  }
+
+  private resolveRespondingTeamFromState(
+    state: ViewMatchStateResponseDto,
+  ): { teamId: 'T1' | 'T2'; playerId: 'P1' | 'P2' } | null {
+    const requestedBy = state.currentHand?.requestedBy;
+
+    if (requestedBy === 'P1') {
+      return { teamId: 'T2', playerId: 'P2' };
+    }
+
+    if (requestedBy === 'P2') {
+      return { teamId: 'T1', playerId: 'P1' };
+    }
+
+    return null;
+  }
+
+  private resolveRequestedBySeatId(
+    roomState: ReturnType<RoomManager['getState']>,
+    requestedBy: 'P1' | 'P2' | null | undefined,
+  ): SeatId | null {
+    if (!requestedBy) {
+      return null;
+    }
+
+    const requester = roomState.players.find((player) => player.domainPlayerId === requestedBy);
+
+    return requester?.seatId ?? null;
+  }
+
+  private isMixedHumanBotTeam(
+    roomState: ReturnType<RoomManager['getState']>,
+    teamId: 'T1' | 'T2',
+  ): boolean {
+    const teamPlayers = roomState.players.filter((player) => player.teamId === teamId);
+    const hasHuman = teamPlayers.some((player) => !player.isBot);
+    const hasBot = teamPlayers.some((player) => player.isBot);
+
+    return roomState.mode === '2v2' && hasHuman && hasBot;
+  }
+
+  private buildTeamBetDecisionId(
+    matchId: string,
+    requestedBy: 'P1' | 'P2',
+    requestedValue: number,
+  ): string {
+    return `${matchId}:${requestedBy}:${requestedValue}:${Date.now()}`;
+  }
+
+  private isSupportedRequestedBetValue(value: number): value is 3 | 6 | 9 | 12 {
+    return value === 3 || value === 6 || value === 9 || value === 12;
+  }
+
+  private isSupportedCurrentBetValue(value: number): value is 1 | 3 | 6 | 9 {
+    return value === 1 || value === 3 || value === 6 || value === 9;
+  }
+
+  private armTeamBetDecisionTimeout(matchId: string, decisionId: string, expiresAt: number): void {
+    const existingTimeout = this.scheduledTeamBetDecisionTimeouts.get(matchId);
+
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    const delayMs = Math.max(0, expiresAt - Date.now());
+
+    const timeout = setTimeout(() => {
+      this.scheduledTeamBetDecisionTimeouts.delete(matchId);
+
+      void this.resolveTeamBetDecisionTimeout(matchId, decisionId).catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown team bet decision timeout error';
+
+        this.logGateway('warn', {
+          layer: 'gateway',
+          event: 'decline_bet_rejected',
+          status: 'rejected',
+          matchId,
+          errorType: 'unexpected_error',
+          errorMessage: message,
+        });
+      });
+    }, delayMs);
+
+    this.scheduledTeamBetDecisionTimeouts.set(matchId, timeout);
+  }
+
+  private async resolveTeamBetDecisionTimeout(
+    matchId: string,
+    decisionId: string,
+  ): Promise<void> {
+    const decision = this.pendingTeamBetDecisionByMatch.get(matchId);
+
+    if (!decision || decision.decisionId !== decisionId) {
+      return;
+    }
+
+    const state = await this.getAuthoritativeMatchState(matchId);
+    const currentHand = state.currentHand;
+
+    if (
+      state.state !== 'in_progress' ||
+      !currentHand ||
+      currentHand.finished ||
+      currentHand.betState !== 'awaiting_response' ||
+      currentHand.requestedBy === decision.respondingPlayerId
+    ) {
+      this.clearTeamBetDecision(matchId);
+      return;
+    }
+
+    const dto: DeclineBetRequestDto = {
+      matchId,
+      playerId: decision.respondingPlayerId,
+    };
+
+    await this.declineBetUseCase.execute(dto);
+    this.clearTeamBetDecision(matchId);
+    this.clearBetResumeSeat(matchId);
+
+    await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('decline'));
+  }
+
+  private async ensureMixedTeamBetDecision(matchId: string): Promise<void> {
+    const state = await this.getAuthoritativeMatchState(matchId);
+    const currentHand = state.currentHand;
+
+    if (
+      state.state !== 'in_progress' ||
+      !currentHand ||
+      currentHand.finished ||
+      currentHand.betState !== 'awaiting_response' ||
+      currentHand.requestedBy === null ||
+      currentHand.pendingValue === null
+    ) {
+      this.clearTeamBetDecision(matchId);
+      return;
+    }
+
+    const respondingTeam = this.resolveRespondingTeamFromState(state);
+
+    if (!respondingTeam) {
+      this.clearTeamBetDecision(matchId);
+      return;
+    }
+
+    const roomState = this.roomManager.getState(matchId);
+
+    if (!this.isMixedHumanBotTeam(roomState, respondingTeam.teamId)) {
+      this.clearTeamBetDecision(matchId);
+      return;
+    }
+
+    if (
+      !this.isSupportedRequestedBetValue(currentHand.pendingValue) ||
+      !this.isSupportedCurrentBetValue(currentHand.currentValue)
+    ) {
+      this.clearTeamBetDecision(matchId);
+      return;
+    }
+
+    const existingDecision = this.pendingTeamBetDecisionByMatch.get(matchId);
+
+    if (
+      existingDecision &&
+      existingDecision.respondingTeamId === respondingTeam.teamId &&
+      existingDecision.requestedValue === currentHand.pendingValue &&
+      existingDecision.respondingPlayerId === respondingTeam.playerId
+    ) {
+      return;
+    }
+
+    const expiresAt = Date.now() + MIXED_TEAM_BET_DECISION_TIMEOUT_MS;
+    const decision: PendingTeamBetDecision = {
+      decisionId: this.buildTeamBetDecisionId(
+        matchId,
+        currentHand.requestedBy,
+        currentHand.pendingValue,
+      ),
+      respondingTeamId: respondingTeam.teamId,
+      respondingPlayerId: respondingTeam.playerId,
+      requestedBySeatId: this.resolveRequestedBySeatId(roomState, currentHand.requestedBy),
+      requestedValue: currentHand.pendingValue,
+      currentValue: currentHand.currentValue,
+      phase: 'collecting_votes',
+      expiresAt,
+      votesBySeat: {},
+      botAdviceBySeat: {},
+    };
+
+    this.pendingTeamBetDecisionByMatch.set(matchId, decision);
+    this.armTeamBetDecisionTimeout(matchId, decision.decisionId, expiresAt);
+  }
+
+  private resolvePartnerAdviceStrength(decision: BotDecision): number {
+    const betAudit = decision.metadata?.rationale?.betAudit;
+    const strength = betAudit?.effectiveStrength ?? betAudit?.handStrength;
+
+    if (typeof strength === 'number' && Number.isFinite(strength)) {
+      return Math.max(0, Math.min(1, strength));
+    }
+
+    return decision.action === 'decline-bet' ? 0.35 : 0.62;
+  }
+
+  private resolvePartnerAdviceAcceptThreshold(pendingValue?: number | null): number {
+    if (pendingValue === 12) {
+      return 0.68;
+    }
+
+    if (pendingValue === 9) {
+      return 0.58;
+    }
+
+    if (pendingValue === 6) {
+      return 0.48;
+    }
+
+    return 0.38;
+  }
+
+  private resolvePartnerAdviceSignal(
+    action: BotBetAction,
+    decision: BotDecision,
+  ): PartnerAdviceSignal {
+    const betAudit = decision.metadata?.rationale?.betAudit;
+    const strength = this.resolvePartnerAdviceStrength(decision);
+    const pendingValue = betAudit?.pendingValue ?? null;
+    const acceptThreshold = this.resolvePartnerAdviceAcceptThreshold(pendingValue);
+
+    if (betAudit?.declineLosesMatch) {
+      return {
+        action: 'accept',
+        confidence: Math.max(0.78, strength),
+      };
+    }
+
+    if (action === 'raise-to-six' || action === 'raise-to-nine' || action === 'raise-to-twelve') {
+      return {
+        action: 'raise',
+        confidence: Math.max(0.74, strength),
+      };
+    }
+
+    if (action === 'accept-bet') {
+      return {
+        action: 'accept',
+        confidence: Math.max(0.66, strength),
+      };
+    }
+
+    if (betAudit?.acceptRisksMatch && strength < acceptThreshold) {
+      return {
+        action: 'decline',
+        confidence: Math.max(0.68, acceptThreshold - strength + 0.56),
+      };
+    }
+
+    // NOTE: Partner advice should be less conservative than autonomous bot execution.
+    // T1B is intentionally cautious, but its advice should still tell the human
+    // when a medium hand is playable at 3/6 instead of folding by default.
+    if (strength >= acceptThreshold) {
+      return {
+        action: 'accept',
+        confidence: Math.max(0.58, Math.min(0.88, strength + 0.12)),
+      };
+    }
+
+    return {
+      action: 'decline',
+      confidence: Math.max(0.58, Math.min(0.86, acceptThreshold - strength + 0.56)),
+    };
+  }
+
+  private resolvePartnerAdviceLabel(
+    action: TeamBetDecisionAction,
+    confidence: number,
+  ): string {
+    if (action === 'decline') {
+      return confidence >= 0.76 ? 'Corre, tô fraco.' : 'Melhor segurar.';
+    }
+
+    if (action === 'raise') {
+      return confidence >= 0.76 ? 'Dá para aumentar.' : 'Pode pressionar.';
+    }
+
+    return confidence >= 0.76 ? 'Eu pago essa.' : 'Dá para pagar.';
+  }
+
+  private resolvePartnerAdviceReason(decision: BotDecision): string {
+    const strategy = decision.metadata?.rationale?.strategy;
+    const betAudit = decision.metadata?.rationale?.betAudit;
+
+    if (strategy === 'bet-decline-by-score' || betAudit?.declineLosesMatch) {
+      return 'score-pressure';
+    }
+
+    if (strategy === 'bet-decline') {
+      return 'weak-hand';
+    }
+
+    if (strategy === 'bet-raise') {
+      return 'strong-hand';
+    }
+
+    if (strategy === 'bet-accept-forced-by-score') {
+      return 'match-risk';
+    }
+
+    if (betAudit?.roundsWonByMe && betAudit.roundsWonByMe > 0) {
+      return 'partner-winning';
+    }
+
+    return strategy ?? 'bot-advice';
+  }
+
+  private rememberPartnerBetAdvice(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+    action: BotBetAction,
+    decision: BotDecision,
+  ): void {
+    const pendingDecision = this.pendingTeamBetDecisionByMatch.get(matchId);
+
+    if (!pendingDecision || pendingDecision.respondingTeamId !== botTurnContext.teamId) {
+      return;
+    }
+
+    const adviceSignal = this.resolvePartnerAdviceSignal(action, decision);
+    const advice: PartnerBetAdvice = {
+      seatId: botTurnContext.seatId,
+      action: adviceSignal.action,
+      confidence: adviceSignal.confidence,
+      label: this.resolvePartnerAdviceLabel(adviceSignal.action, adviceSignal.confidence),
+      reason: this.resolvePartnerAdviceReason(decision),
+    };
+
+    this.pendingTeamBetDecisionByMatch.set(matchId, {
+      ...pendingDecision,
+      botAdviceBySeat: {
+        ...pendingDecision.botAdviceBySeat,
+        [botTurnContext.seatId]: advice,
+      },
+    });
   }
 
   private resolveFallbackBetResumeSeat(
@@ -1525,11 +1956,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const responderTeamId = responderPlayerId === 'P1' ? 'T1' : 'T2';
 
-      if (this.hasHumanSeatOnTeam(roomState, responderTeamId)) {
-        // In mixed 2v2 teams, humans own bet responses so partner bots cannot decide for them.
-        return null;
-      }
-
       const responderSeat = roomState.players.find(
         (player) => player.teamId === responderTeamId && player.isBot,
       );
@@ -2240,6 +2666,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.rememberBotDecision(matchId, botTurnContext, decision);
 
     if (botTeamHasHumanSeat) {
+      await this.ensureMixedTeamBetDecision(matchId);
+      this.rememberPartnerBetAdvice(matchId, botTurnContext, action, decision);
+
       // Bots on mixed teams may play cards, but the human partner owns all betting decisions.
       this.markBotDecisionExecution(matchId, {
         status: 'blocked',
@@ -2247,6 +2676,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reason: 'human_partner_owns_bet',
       });
       this.emitRoomState(matchId);
+      await this.emitPrivateMatchState(matchId);
       return false;
     }
 
@@ -2264,6 +2694,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
 
         await this.acceptBetUseCase.execute(dto);
+        this.clearTeamBetDecision(matchId);
         const resumedRoomState = this.restoreTurnAfterAcceptedBet(matchId, fallbackResumeSeatId);
         this.server
           .to(matchId)
@@ -2275,6 +2706,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         };
 
         await this.declineBetUseCase.execute(dto);
+        this.clearTeamBetDecision(matchId);
         this.clearBetResumeSeat(matchId);
       } else if (action === 'request-truco') {
         const dto: RequestTrucoRequestDto = {
@@ -2284,6 +2716,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         await this.requestTrucoUseCase.execute(dto);
         this.rememberBetResumeSeatFromCurrentTurn(matchId, botTurnContext.seatId);
+        this.clearTeamBetDecision(matchId);
+        await this.ensureMixedTeamBetDecision(matchId);
       } else if (action === 'raise-to-six') {
         const dto: RaiseToSixRequestDto = {
           matchId,
@@ -2292,6 +2726,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         await this.raiseToSixUseCase.execute(dto);
         this.rememberBetResumeSeatFromCurrentTurn(matchId, botTurnContext.seatId);
+        this.clearTeamBetDecision(matchId);
+        await this.ensureMixedTeamBetDecision(matchId);
       } else if (action === 'raise-to-nine') {
         const dto: RaiseToNineRequestDto = {
           matchId,
@@ -2300,6 +2736,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         await this.raiseToNineUseCase.execute(dto);
         this.rememberBetResumeSeatFromCurrentTurn(matchId, botTurnContext.seatId);
+        this.clearTeamBetDecision(matchId);
+        await this.ensureMixedTeamBetDecision(matchId);
       } else if (action === 'raise-to-twelve') {
         const dto: RaiseToTwelveRequestDto = {
           matchId,
@@ -2308,6 +2746,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         await this.raiseToTwelveUseCase.execute(dto);
         this.rememberBetResumeSeatFromCurrentTurn(matchId, botTurnContext.seatId);
+        this.clearTeamBetDecision(matchId);
+        await this.ensureMixedTeamBetDecision(matchId);
       }
     } catch (error) {
       this.markBotDecisionExecution(matchId, {
@@ -2642,6 +3082,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const result = await this.startHandUseCase.execute(dto);
 
       this.clearBotDecisionTelemetry(matchId);
+      this.clearTeamBetDecision(matchId);
       this.clearBetResumeSeat(matchId);
 
       // Ready 1v1 rooms can start from get-state without a frontend dispatcher.
@@ -4311,6 +4752,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.requestTrucoUseCase.execute(dto);
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
+      this.clearTeamBetDecision(matchId);
+      await this.ensureMixedTeamBetDecision(matchId);
 
       await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
@@ -4389,6 +4832,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.acceptBetUseCase.execute(dto);
+      this.clearTeamBetDecision(matchId);
 
       const resumedRoomState = this.restoreTurnAfterAcceptedBet(matchId, fallbackResumeSeatId);
       this.server
@@ -4474,6 +4918,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.declineBetUseCase.execute(dto);
+      this.clearTeamBetDecision(matchId);
       this.clearBetResumeSeat(matchId);
 
       await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('decline'));
@@ -4566,6 +5011,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToSixUseCase.execute(dto);
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
+      this.clearTeamBetDecision(matchId);
+      await this.ensureMixedTeamBetDecision(matchId);
 
       await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
@@ -4657,6 +5104,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToNineUseCase.execute(dto);
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
+      this.clearTeamBetDecision(matchId);
+      await this.ensureMixedTeamBetDecision(matchId);
 
       await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 
@@ -4748,6 +5197,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const result = await this.raiseToTwelveUseCase.execute(dto);
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
+      this.clearTeamBetDecision(matchId);
+      await this.ensureMixedTeamBetDecision(matchId);
 
       await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
 

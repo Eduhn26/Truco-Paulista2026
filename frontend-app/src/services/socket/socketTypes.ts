@@ -174,6 +174,28 @@ export type RoomStatePayload = {
   lastBotDecision?: BotDecisionTelemetryPayload | null;
 };
 
+export type TeamBetDecisionActionPayload = 'accept' | 'decline' | 'raise';
+
+export type PartnerBetAdvicePayload = {
+  seatId: SeatId;
+  action: TeamBetDecisionActionPayload;
+  confidence: number;
+  label: string;
+  reason: string;
+};
+
+export type PendingTeamBetDecisionPayload = {
+  decisionId: string;
+  respondingTeamId: 'T1' | 'T2';
+  requestedBySeatId: SeatId | null;
+  requestedValue: HandValue;
+  currentValue: HandValue;
+  phase: 'collecting_votes';
+  expiresAt: string;
+  votesBySeat: Partial<Record<SeatId, TeamBetDecisionActionPayload>>;
+  botAdviceBySeat: Partial<Record<SeatId, PartnerBetAdvicePayload>>;
+};
+
 export type MatchAvailableActionsPayload = {
   canRequestTruco: boolean;
   canRaiseToSix: boolean;
@@ -224,6 +246,8 @@ export type MatchStateHandPayload = {
   nextDecisionType: NextDecisionType;
   viewerCanActNow: boolean;
   pendingBotAction: boolean;
+  teamBetDecision?: PendingTeamBetDecisionPayload | null;
+  partnerAdvice?: PartnerBetAdvicePayload | null;
   availableActions: MatchAvailableActionsPayload;
   playerOneHand: string[];
   playerTwoHand: string[];
@@ -446,6 +470,107 @@ function normalizeMatchAvailableActionsPayload(value: unknown): MatchAvailableAc
   };
 }
 
+function normalizeTeamBetDecisionAction(value: unknown): TeamBetDecisionActionPayload | null {
+  return value === 'accept' || value === 'decline' || value === 'raise' ? value : null;
+}
+
+function normalizePartnerBetAdvicePayload(value: unknown): PartnerBetAdvicePayload | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const input = asObject(value);
+  const action = normalizeTeamBetDecisionAction(input.action);
+
+  if (!action) {
+    return null;
+  }
+
+  return {
+    seatId: asString(input.seatId),
+    action,
+    confidence: asNumber(input.confidence, 0),
+    label: asString(input.label),
+    reason: asString(input.reason, 'bot-advice'),
+  };
+}
+
+function normalizePartnerBetAdviceMap(
+  value: unknown,
+): Partial<Record<SeatId, PartnerBetAdvicePayload>> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const input = asObject(value);
+
+  return Object.entries(input).reduce<Partial<Record<SeatId, PartnerBetAdvicePayload>>>(
+    (accumulator, [seatId, advice]) => {
+      const normalizedAdvice = normalizePartnerBetAdvicePayload(advice);
+
+      if (normalizedAdvice) {
+        accumulator[seatId] = normalizedAdvice;
+      }
+
+      return accumulator;
+    },
+    {},
+  );
+}
+
+function normalizeTeamBetVoteMap(
+  value: unknown,
+): Partial<Record<SeatId, TeamBetDecisionActionPayload>> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const input = asObject(value);
+
+  return Object.entries(input).reduce<Partial<Record<SeatId, TeamBetDecisionActionPayload>>>(
+    (accumulator, [seatId, action]) => {
+      const normalizedAction = normalizeTeamBetDecisionAction(action);
+
+      if (normalizedAction) {
+        accumulator[seatId] = normalizedAction;
+      }
+
+      return accumulator;
+    },
+    {},
+  );
+}
+
+function normalizePendingTeamBetDecisionPayload(
+  value: unknown,
+): PendingTeamBetDecisionPayload | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const input = asObject(value);
+  const respondingTeamId = input.respondingTeamId === 'T1' || input.respondingTeamId === 'T2'
+    ? input.respondingTeamId
+    : null;
+  const phase = input.phase === 'collecting_votes' ? input.phase : 'collecting_votes';
+
+  if (!respondingTeamId) {
+    return null;
+  }
+
+  return {
+    decisionId: asString(input.decisionId),
+    respondingTeamId,
+    requestedBySeatId: asNullableString(input.requestedBySeatId),
+    requestedValue: asNumber(input.requestedValue, 3),
+    currentValue: asNumber(input.currentValue, 1),
+    phase,
+    expiresAt: asString(input.expiresAt),
+    votesBySeat: normalizeTeamBetVoteMap(input.votesBySeat),
+    botAdviceBySeat: normalizePartnerBetAdviceMap(input.botAdviceBySeat),
+  };
+}
+
 function normalizeSeatCardMap(value: unknown): Partial<Record<SeatId, string | null>> | undefined {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -556,6 +681,8 @@ function normalizeMatchStateHandPayload(value: unknown): MatchStateHandPayload |
     nextDecisionType: asString(input.nextDecisionType, 'idle'),
     viewerCanActNow: asBoolean(input.viewerCanActNow),
     pendingBotAction: asBoolean(input.pendingBotAction),
+    teamBetDecision: normalizePendingTeamBetDecisionPayload(input.teamBetDecision),
+    partnerAdvice: normalizePartnerBetAdvicePayload(input.partnerAdvice),
     availableActions: normalizeMatchAvailableActionsPayload(input.availableActions),
     playerOneHand: asCardStringArray(input.playerOneHand),
     playerTwoHand: asCardStringArray(input.playerTwoHand),

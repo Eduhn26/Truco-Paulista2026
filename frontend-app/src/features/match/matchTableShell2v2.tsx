@@ -3522,6 +3522,8 @@ function CenterActionBar({
   currentValue,
   pendingValue,
   requestedByMe,
+  teamBetDecision = null,
+  partnerAdvice = null,
 }: {
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   onAction: (action: MatchAction) => void;
@@ -3531,6 +3533,8 @@ function CenterActionBar({
   currentValue: number;
   pendingValue: number | null;
   requestedByMe: boolean;
+  teamBetDecision?: NonNullable<MatchStatePayload['currentHand']>['teamBetDecision'];
+  partnerAdvice?: NonNullable<MatchStatePayload['currentHand']>['partnerAdvice'];
 }) {
   const canAccept = availableActions.canAcceptBet || availableActions.canAcceptMaoDeOnze;
   const canDecline = availableActions.canDeclineBet || availableActions.canDeclineMaoDeOnze;
@@ -3575,6 +3579,45 @@ function CenterActionBar({
   const isWaitingMode = !isDecideMode && betState === 'awaiting_response';
   const isOpenMode = !isDecideMode && !isWaitingMode && (canTruco || canRaise);
   const actionValue = pendingValue ?? currentValue;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [confirmingDecline, setConfirmingDecline] = useState(false);
+  const declineConfirmationAutoWarnSeconds = 5;
+
+  useEffect(() => {
+    if (!teamBetDecision?.expiresAt) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 250);
+
+    return () => window.clearInterval(interval);
+  }, [teamBetDecision?.expiresAt]);
+
+  useEffect(() => {
+    setConfirmingDecline(false);
+  }, [partnerAdvice?.action, teamBetDecision?.decisionId]);
+
+  const decisionExpiresAtMs = teamBetDecision?.expiresAt
+    ? Date.parse(teamBetDecision.expiresAt)
+    : Number.NaN;
+  const remainingSeconds = Number.isFinite(decisionExpiresAtMs)
+    ? Math.max(0, Math.ceil((decisionExpiresAtMs - nowMs) / 1000))
+    : null;
+  const shouldConfirmDeclineAgainstAdvice = Boolean(
+    partnerAdvice && partnerAdvice.action !== 'decline' && availableActions.canDeclineBet,
+  );
+  const declineConfirmationLabel =
+    partnerAdvice?.action === 'raise'
+      ? 'Parceiro quer pressionar.'
+      : 'Parceiro recomenda pagar.';
+  const isDeclineConfirmationActive = Boolean(
+    shouldConfirmDeclineAgainstAdvice &&
+      (confirmingDecline ||
+        (remainingSeconds !== null && remainingSeconds <= declineConfirmationAutoWarnSeconds)),
+  );
+  const partnerAdviceLabel = partnerAdvice?.label ?? 'Parceiro pensando...';
 
   const chipBase = {
     alignItems: 'center',
@@ -3684,6 +3727,20 @@ function CenterActionBar({
     );
   };
 
+  const handleDecisionAction = (action: MatchAction): void => {
+    if (
+      action === 'decline-bet' &&
+      shouldConfirmDeclineAgainstAdvice &&
+      !isDeclineConfirmationActive
+    ) {
+      setConfirmingDecline(true);
+      return;
+    }
+
+    setConfirmingDecline(false);
+    onAction(action);
+  };
+
   if (!isOpenMode && !isDecideMode && !isWaitingMode) {
     return <div aria-hidden style={{ minHeight: 48 }} />;
   }
@@ -3721,7 +3778,7 @@ function CenterActionBar({
       chips.push({
         key: 'accept',
         label: availableActions.canAcceptMaoDeOnze ? 'Aceitar Mão 11' : 'Aceitar',
-        click: () => onAction(acceptAction),
+        click: () => handleDecisionAction(acceptAction),
         style: acceptStyle,
       });
     }
@@ -3729,8 +3786,12 @@ function CenterActionBar({
     if (canDecline && declineAction) {
       chips.push({
         key: 'decline',
-        label: availableActions.canDeclineMaoDeOnze ? 'Recusar Mão 11' : 'Correr',
-        click: () => onAction(declineAction),
+        label: isDeclineConfirmationActive
+          ? 'Correr mesmo'
+          : availableActions.canDeclineMaoDeOnze
+            ? 'Recusar Mão 11'
+            : 'Correr',
+        click: () => handleDecisionAction(declineAction),
         style: declineStyle,
       });
     }
@@ -3739,7 +3800,7 @@ function CenterActionBar({
       chips.push({
         key: 'raise',
         label: raiseLabel,
-        click: () => onAction(raiseAction),
+        click: () => handleDecisionAction(raiseAction),
         style: raiseStyle,
       });
     }
@@ -3772,6 +3833,44 @@ function CenterActionBar({
                 'linear-gradient(90deg, transparent 0%, rgba(255,241,184,0.62) 50%, transparent 100%)',
             }}
           />
+
+          {teamBetDecision ? (
+            <div className="flex max-w-[240px] flex-col items-center gap-1 text-center sm:items-start sm:text-left">
+              <span
+                className="text-[8px] font-black uppercase tracking-[0.24em]"
+                style={{
+                  color: 'rgba(255,241,184,0.52)',
+                  fontFamily: 'Georgia, serif',
+                }}
+              >
+                Conselho da dupla
+              </span>
+              <span
+                className="text-[11px] font-black uppercase tracking-[0.12em]"
+                style={{
+                  color: '#fff1b8',
+                  fontFamily: 'Georgia, serif',
+                  textShadow: '0 0 12px rgba(242,212,136,0.18)',
+                }}
+              >
+                {isDeclineConfirmationActive ? declineConfirmationLabel : partnerAdviceLabel}
+              </span>
+              {remainingSeconds !== null ? (
+                <span
+                  className="text-[9px] font-black uppercase tracking-[0.18em]"
+                  style={{
+                    color:
+                      remainingSeconds <= declineConfirmationAutoWarnSeconds
+                        ? '#fecaca'
+                        : 'rgba(232,213,160,0.70)',
+                    fontFamily: 'Inter, system-ui, sans-serif',
+                  }}
+                >
+                  {remainingSeconds}s para decidir
+                </span>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="hidden min-w-[96px] flex-col leading-none xl:flex">
             <span
@@ -7331,6 +7430,8 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
                   currentValue={currentValue}
                   pendingValue={pendingValue}
                   requestedByMe={requesterIsMine}
+                  teamBetDecision={currentPrivateHand?.teamBetDecision ?? null}
+                  partnerAdvice={currentPrivateHand?.partnerAdvice ?? null}
                 />
               )}
             </div>
