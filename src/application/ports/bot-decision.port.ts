@@ -75,6 +75,28 @@ export type BotHandProgressView = {
   currentRoundIndex: number;
 };
 
+export type BotPartnerSignalKind =
+  | 'has-manilha'
+  | 'strong-manilha'
+  | 'weak-manilha'
+  | 'no-manilha'
+  | 'weak-hand'
+  | 'hold'
+  | 'kill-round'
+  | 'pressure';
+
+export type BotPartnerSignalStrengthHint = 'none' | 'weak' | 'medium' | 'strong';
+
+export type BotPartnerSignalIntent = 'save' | 'attack' | 'pressure' | 'neutral';
+
+export type BotPartnerSignalView = {
+  fromSeatId: BotSeatId;
+  kind: BotPartnerSignalKind;
+  strengthHint: BotPartnerSignalStrengthHint;
+  intent: BotPartnerSignalIntent;
+  expiresAt: string;
+};
+
 export type BotDecisionContext = {
   matchId: string;
   profile: BotProfile;
@@ -82,6 +104,7 @@ export type BotDecisionContext = {
   actorSeatId?: BotSeatId;
   actorTeamId?: BotTeamId;
   partnerSeatId?: BotSeatId | null;
+  partnerSignal?: BotPartnerSignalView | null;
   viraRank: Rank;
   currentRound: BotRoundView | null;
   player: BotPlayerView;
@@ -107,6 +130,8 @@ export type BotDecisionStrategy =
   | 'response-losing-strongest'
   | 'two-versus-two-partner-winning-save-weakest'
   | 'two-versus-two-response-losing-save-weakest'
+  | 'two-versus-two-signal-hold-save-weakest'
+  | 'two-versus-two-signal-kill-round-weakest-winner'
   | 'two-versus-two-opening-after-first-win-pressure'
   | 'two-versus-two-opening-after-first-win-save-weakest'
   | 'bet-accept'
@@ -144,6 +169,7 @@ export type BotDecisionBetTelemetry = {
   handStrength?: number;
   progressBoost?: number;
   scoreBoost?: number;
+  partnerSignalBoost?: number;
   effectiveStrength?: number;
   acceptThreshold?: number;
   raiseThreshold?: number;
@@ -158,6 +184,9 @@ export type BotDecisionBetTelemetry = {
   roundsWonByOpponent?: number;
   roundsTied?: number;
   currentRoundIndex?: number;
+  partnerSignalKind?: BotPartnerSignalKind;
+  partnerSignalStrengthHint?: BotPartnerSignalStrengthHint;
+  partnerSignalIntent?: BotPartnerSignalIntent;
 };
 
 export type BotDecisionTacticalTelemetry = {
@@ -171,6 +200,8 @@ export type BotDecisionTacticalTelemetry = {
   partnerWasWinning?: boolean;
   actorHandBefore?: string[];
   selectedCard?: string;
+  partnerSignalKind?: BotPartnerSignalKind;
+  partnerSignalIntent?: BotPartnerSignalIntent;
   seatPlays?: Partial<Record<BotSeatId, string | null>>;
   orderedPlays?: BotRoundPlayView[];
 };

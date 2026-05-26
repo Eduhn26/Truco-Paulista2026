@@ -153,6 +153,27 @@ export type QueueTimeoutPayload = {
   availableActions: string[];
 };
 
+export type PartnerSignalKind =
+  | 'has-manilha'
+  | 'strong-manilha'
+  | 'weak-manilha'
+  | 'no-manilha'
+  | 'weak-hand'
+  | 'hold'
+  | 'kill-round'
+  | 'pressure';
+
+export type PartnerSignalPayload = {
+  signalId: string;
+  matchId: string;
+  fromSeatId: SeatId;
+  toTeamId: 'T1' | 'T2' | string;
+  kind: PartnerSignalKind;
+  label: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
 export type RoomStatePayload = {
   matchId: string;
   mode?: '1v1' | '2v2' | string;
@@ -330,6 +351,7 @@ export type GameSocketEvents = {
   onHandStarted?: (payload: HandStartedPayload) => void;
   onCardPlayed?: (payload: CardPlayedPayload) => void;
   onRoundTransition?: (payload: RoundTransitionPayload) => void;
+  onPartnerSignal?: (payload: PartnerSignalPayload) => void;
 };
 
 export type SuitDisplay = { symbol: string; colorClass: string };
@@ -549,9 +571,10 @@ function normalizePendingTeamBetDecisionPayload(
   }
 
   const input = asObject(value);
-  const respondingTeamId = input.respondingTeamId === 'T1' || input.respondingTeamId === 'T2'
-    ? input.respondingTeamId
-    : null;
+  const respondingTeamId =
+    input.respondingTeamId === 'T1' || input.respondingTeamId === 'T2'
+      ? input.respondingTeamId
+      : null;
   const phase = input.phase === 'collecting_votes' ? input.phase : 'collecting_votes';
 
   if (!respondingTeamId) {
@@ -827,7 +850,9 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
       : [],
     canStart: asBoolean(input.canStart),
     currentTurnSeatId: asNullableString(input.currentTurnSeatId),
-    ...(typeof input.fillBotsOnStart === 'boolean' ? { fillBotsOnStart: input.fillBotsOnStart } : {}),
+    ...(typeof input.fillBotsOnStart === 'boolean'
+      ? { fillBotsOnStart: input.fillBotsOnStart }
+      : {}),
     ...(lastBotDecision !== undefined ? { lastBotDecision } : {}),
   };
 }
@@ -1001,6 +1026,23 @@ export function normalizeMatchStatePayload(payload: unknown): MatchStatePayload 
       playerTwo: asNumber(score.playerTwo),
     },
     currentHand: normalizeMatchStateHandPayload(input.currentHand),
+  };
+}
+
+export function normalizePartnerSignalPayload(payload: unknown): PartnerSignalPayload {
+  const input = asObject(payload);
+  const kind = asString(input.kind) as PartnerSignalKind;
+  const toTeamId = asString(input.toTeamId);
+
+  return {
+    signalId: asString(input.signalId),
+    matchId: asString(input.matchId),
+    fromSeatId: asString(input.fromSeatId),
+    toTeamId,
+    kind,
+    label: asString(input.label),
+    createdAt: asString(input.createdAt),
+    expiresAt: asString(input.expiresAt),
   };
 }
 

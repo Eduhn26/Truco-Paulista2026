@@ -4,6 +4,7 @@ import {
   normalizeCardPlayedPayload,
   normalizeHandStartedPayload,
   normalizeMatchFoundPayload,
+  normalizePartnerSignalPayload,
   normalizeMatchStatePayload,
   normalizePlayerAssignedPayload,
   normalizeQueueLeftPayload,
@@ -15,6 +16,7 @@ import {
   normalizeServerErrorPayload,
   type CardPayload,
   type GameSocketEvents,
+  type PartnerSignalKind,
 } from './socketTypes';
 
 type ConnectOptions = {
@@ -115,6 +117,10 @@ export class GameSocketClient {
 
     socket.on('round-transition', (payload: unknown) => {
       events.onRoundTransition?.(normalizeRoundTransitionPayload(payload));
+    });
+
+    socket.on('partner-signal', (payload: unknown) => {
+      events.onPartnerSignal?.(normalizePartnerSignalPayload(payload));
     });
 
     return socket;
@@ -227,5 +233,9 @@ export class GameSocketClient {
 
   emitDeclineMaoDeOnze(matchId: string): void {
     this.socket?.emit('decline-mao-de-onze', { matchId });
+  }
+
+  emitSendPartnerSignal(matchId: string, kind: PartnerSignalKind): void {
+    this.socket?.emit('send-partner-signal', { matchId, kind });
   }
 }

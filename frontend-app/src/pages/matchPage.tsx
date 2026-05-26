@@ -36,6 +36,8 @@ import type {
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
+  PartnerSignalKind,
+  PartnerSignalPayload,
   Rank,
   RoomStatePayload,
 } from '../services/socket/socketTypes';
@@ -116,8 +118,8 @@ function isBetResponseState({
 
   return Boolean(
     hand &&
-      !hand.finished &&
-      (hand.nextDecisionType === 'respond-bet' || hand.betState === 'awaiting_response'),
+    !hand.finished &&
+    (hand.nextDecisionType === 'respond-bet' || hand.betState === 'awaiting_response'),
   );
 }
 
@@ -398,6 +400,12 @@ type LocalMaoDeOnzeDeclineIntent = {
   handKey: string;
 };
 
+type LocalPartnerSignalFeedback = {
+  id: string;
+  label: string;
+  expiresAt: string;
+};
+
 type OpeningViraRevealState = {
   key: string;
   card: CardPayload;
@@ -552,6 +560,21 @@ function buildCardRevealKey(card: string | null | undefined): number {
 
 function isMaoDeOnzeSpecialState(specialState: string | null | undefined): boolean {
   return specialState === 'mao_de_onze' || specialState === 'mao_de_ferro';
+}
+
+const PARTNER_SIGNAL_LABEL_BY_KIND: Record<PartnerSignalKind, string> = {
+  'has-manilha': 'Tenho manilha',
+  'strong-manilha': 'Manilha forte',
+  'weak-manilha': 'Manilha fraca',
+  'no-manilha': 'Tô sem manilha',
+  'weak-hand': 'Tô fraco',
+  hold: 'Segura',
+  'kill-round': 'Mata essa',
+  pressure: 'Pode pressionar',
+};
+
+function resolvePartnerSignalFeedbackLabel(kind: PartnerSignalKind): string {
+  return PARTNER_SIGNAL_LABEL_BY_KIND[kind];
 }
 
 function BetFeedbackBanner({ feedback }: BetFeedbackBannerProps) {
@@ -910,7 +933,6 @@ function NewHandOpeningMask({ isActive }: { isActive: boolean }) {
   );
 }
 
-
 export function MatchPage() {
   const params = useParams<{ matchId: string }>();
   const { session } = useAuth();
@@ -918,8 +940,7 @@ export function MatchPage() {
   const effectiveMatchId = routeMatchId || getLastActiveMatchId() || '';
   const mySeatRef = useRef<string | null>(null);
   const [viraRank, setViraRank] = useState<Rank>('4');
-  const [openingViraReveal, setOpeningViraReveal] =
-    useState<OpeningViraRevealState | null>(null);
+  const [openingViraReveal, setOpeningViraReveal] = useState<OpeningViraRevealState | null>(null);
   const [lastKnownViraCard, setLastKnownViraCard] = useState<string | null>(null);
   const pendingOpeningViraRevealRef = useRef<PendingOpeningViraReveal | null>(null);
   const [showSecondary, setShowSecondary] = useState(false);
@@ -1006,6 +1027,9 @@ export function MatchPage() {
   const drainBufferedCardsRef = useRef<() => void>(() => {});
   const handOutcomeRevealHoldKeyRef = useRef<string | null>(null);
   const handOutcomeRevealHoldTimeoutRef = useRef<number | null>(null);
+  const [lastPartnerSignal, setLastPartnerSignal] = useState<PartnerSignalPayload | null>(null);
+  const [lastSentPartnerSignal, setLastSentPartnerSignal] =
+    useState<LocalPartnerSignalFeedback | null>(null);
 
   useEffect(() => {
     if (!shouldRenderDeveloperTools && showSecondary) {
@@ -1522,6 +1546,8 @@ export function MatchPage() {
       localMaoDeOnzeDeclineIntentRef.current = null;
       lastMaoDeOnzeOpeningBannerKeyRef.current = null;
       setDeclinedHandResultSkipKey(null);
+      setLastPartnerSignal(null);
+      setLastSentPartnerSignal(null);
     },
     [
       clearBufferedCardReplayTimers,
@@ -1749,6 +1775,38 @@ export function MatchPage() {
     [clearSeatPlayedCardsSnapshot, commitResolvedSeatPlayedCards, shouldBlockRealtimeResolution],
   );
 
+  const handleRealtimePartnerSignal = useCallback((payload: PartnerSignalPayload) => {
+    setLastPartnerSignal(payload);
+  }, []);
+
+  useEffect(() => {
+    if (!lastPartnerSignal) {
+      return undefined;
+    }
+
+    const expiresAt = Date.parse(lastPartnerSignal.expiresAt);
+    const delayMs = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 9000;
+    const timeoutId = window.setTimeout(() => {
+      setLastPartnerSignal(null);
+    }, delayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [lastPartnerSignal]);
+
+  useEffect(() => {
+    if (!lastSentPartnerSignal) {
+      return undefined;
+    }
+
+    const expiresAt = Date.parse(lastSentPartnerSignal.expiresAt);
+    const delayMs = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 4500;
+    const timeoutId = window.setTimeout(() => {
+      setLastSentPartnerSignal(null);
+    }, delayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [lastSentPartnerSignal]);
+
   const {
     initialSnapshot,
     connectionStatus,
@@ -1769,19 +1827,21 @@ export function MatchPage() {
     emitRaiseToTwelve,
     emitAcceptMaoDeOnze,
     emitDeclineMaoDeOnze,
+    emitSendPartnerSignal,
   } = useMatchRealtimeSession({
     session,
     effectiveMatchId,
     onHandStarted: handleRealtimeHandStarted,
     onCardPlayed: handleRealtimeCardPlayed,
     onRoundTransition: handleRealtimeRoundTransition,
+    onPartnerSignal: handleRealtimePartnerSignal,
     onServerError: () => {
       setIsStartHandPending(false);
 
       const authoritativeHandInProgress = Boolean(
         publicMatchState?.state === 'in_progress' &&
-          publicMatchState.currentHand &&
-          !publicMatchState.currentHand.finished,
+        publicMatchState.currentHand &&
+        !publicMatchState.currentHand.finished,
       );
 
       if (!authoritativeHandInProgress) {
@@ -1789,6 +1849,25 @@ export function MatchPage() {
       }
     },
   });
+
+  const handleSendPartnerSignal = useCallback(
+    (kind: PartnerSignalKind) => {
+      if (!effectiveMatchId) {
+        return;
+      }
+
+      const createdAt = Date.now();
+
+      emitSendPartnerSignal(effectiveMatchId, kind);
+      setLastSentPartnerSignal({
+        id: `${effectiveMatchId}:${kind}:${createdAt}`,
+        label: resolvePartnerSignalFeedbackLabel(kind),
+        expiresAt: new Date(createdAt + 4500).toISOString(),
+      });
+      appendLog(`Emitted send-partner-signal (${kind}).`);
+    },
+    [appendLog, effectiveMatchId, emitSendPartnerSignal],
+  );
 
   useEffect(() => {
     const pendingReveal = pendingOpeningViraRevealRef.current;
@@ -1955,10 +2034,10 @@ export function MatchPage() {
 
           const shouldFlushPostBufferedReplayState = Boolean(
             bufferedCardReplayTimeoutsRef.current.length === 0 &&
-              bufferedCardReplayLandingGuardTimeoutsRef.current.length === 0 &&
-              bufferedCardsDuringIntroRef.current.length === 0 &&
-              !isDeferringVisualCommitRef.current &&
-              pendingPostBufferedReplayStateRef.current !== null,
+            bufferedCardReplayLandingGuardTimeoutsRef.current.length === 0 &&
+            bufferedCardsDuringIntroRef.current.length === 0 &&
+            !isDeferringVisualCommitRef.current &&
+            pendingPostBufferedReplayStateRef.current !== null,
           );
 
           if (shouldFlushPostBufferedReplayState) {
@@ -2023,8 +2102,8 @@ export function MatchPage() {
     });
     const hasBufferedReplayWork = Boolean(
       bufferedCardsDuringIntroRef.current.length > 0 ||
-        bufferedCardReplayTimeoutsRef.current.length > 0 ||
-        bufferedCardReplayLandingGuardTimeoutsRef.current.length > 0,
+      bufferedCardReplayTimeoutsRef.current.length > 0 ||
+      bufferedCardReplayLandingGuardTimeoutsRef.current.length > 0,
     );
 
     debugMatchPage('visualCommit:evaluate', {
@@ -2206,7 +2285,6 @@ export function MatchPage() {
     visualPublicMatchState,
   ]);
 
-
   useEffect(() => {
     return () => {
       isDeferringVisualCommitRef.current = false;
@@ -2380,13 +2458,13 @@ export function MatchPage() {
     const isMyTurnForVisuals = Boolean(mySeat && stableTurnSeatIdForChip === mySeat);
     const canPlayCard = Boolean(
       !matchFinished &&
-        !handFinished &&
-        nextDecisionType === 'play-card' &&
-        viewerCanActNow &&
-        isMyTurn &&
-        resolvedAvailableActions.canAttemptPlayCard &&
-        myCards.length > 0 &&
-        !pendingBotAction,
+      !handFinished &&
+      nextDecisionType === 'play-card' &&
+      viewerCanActNow &&
+      isMyTurn &&
+      resolvedAvailableActions.canAttemptPlayCard &&
+      myCards.length > 0 &&
+      !pendingBotAction,
     );
     const presentationRoomState: RoomStatePayload | null = visualRoomState
       ? {
@@ -2533,14 +2611,14 @@ export function MatchPage() {
     const scorePlayerTwo = visualPublicMatchState?.score.playerTwo ?? 0;
     const isElevenElevenOpening = Boolean(
       !viewModel.isOneVsOne &&
-        scorePlayerOne === 11 &&
-        scorePlayerTwo === 11 &&
-        hand !== null &&
-        isMaoDeOnzeSpecialState(viewModel.specialState) &&
-        viewModel.nextDecisionType === 'play-card' &&
-        viewModel.playedRoundsCount === 0 &&
-        !viewModel.handFinished &&
-        !viewModel.matchFinished,
+      scorePlayerOne === 11 &&
+      scorePlayerTwo === 11 &&
+      hand !== null &&
+      isMaoDeOnzeSpecialState(viewModel.specialState) &&
+      viewModel.nextDecisionType === 'play-card' &&
+      viewModel.playedRoundsCount === 0 &&
+      !viewModel.handFinished &&
+      !viewModel.matchFinished,
     );
 
     if (!isElevenElevenOpening || !hand) {
@@ -2705,7 +2783,6 @@ export function MatchPage() {
     viewModel.currentPublicHand,
   ]);
 
-
   useEffect(() => {
     const privateHand = viewModel.currentPrivateHand;
     const publicHand = viewModel.currentPublicHand;
@@ -2734,8 +2811,8 @@ export function MatchPage() {
       const existingCycle = pendingBetCycleRef.current;
       const isSameBetRequest = Boolean(
         existingCycle &&
-          existingCycle.requestedBy === requestedBy &&
-          existingCycle.pendingValue === pendingValue,
+        existingCycle.requestedBy === requestedBy &&
+        existingCycle.pendingValue === pendingValue,
       );
 
       if (existingCycle === null || !isSameBetRequest) {
@@ -2988,9 +3065,9 @@ export function MatchPage() {
 
     const isDeclinedMaoDeOnze = Boolean(
       activeCycle.observedDecision &&
-        effectiveHand.specialState === 'mao_de_onze' &&
-        effectiveHand.awardedPoints !== null &&
-        viewModel.playedRoundsCount === 0,
+      effectiveHand.specialState === 'mao_de_onze' &&
+      effectiveHand.awardedPoints !== null &&
+      viewModel.playedRoundsCount === 0,
     );
 
     if (!isDeclinedMaoDeOnze) {
@@ -3029,9 +3106,9 @@ export function MatchPage() {
     const localDeclineIntent = localMaoDeOnzeDeclineIntentRef.current;
     const viewerTriggeredDecline = Boolean(
       decisionByIsMyTeam &&
-        localDeclineIntent !== null &&
-        localDeclineIntent.decisionBy === activeCycle.decisionBy &&
-        localDeclineIntent.handKey === activeCycle.handKey,
+      localDeclineIntent !== null &&
+      localDeclineIntent.decisionBy === activeCycle.decisionBy &&
+      localDeclineIntent.handKey === activeCycle.handKey,
     );
     const title = decisionByIsMyTeam
       ? viewModel.isOneVsOne || viewerTriggeredDecline
@@ -3092,14 +3169,14 @@ export function MatchPage() {
   });
   const shouldSkipDeclinedHandResult = Boolean(
     currentFinishedHandResultKey !== null &&
-      declinedHandResultSkipKey === currentFinishedHandResultKey,
+    declinedHandResultSkipKey === currentFinishedHandResultKey,
   );
   const shouldSuppressDeclinedHandSeatCards = false;
   const shouldUseLiveOnlySeatCardsForDeclinedHand = Boolean(
     !viewModel.isOneVsOne &&
-      shouldSkipDeclinedHandResult &&
-      viewModel.handFinished &&
-      !viewModel.matchFinished,
+    shouldSkipDeclinedHandResult &&
+    viewModel.handFinished &&
+    !viewModel.matchFinished,
   );
 
   useEffect(() => {
@@ -3142,8 +3219,8 @@ export function MatchPage() {
 
     const shouldReleaseSeatSnapshotAfterRoundHold = Boolean(
       wasRoundResolutionVisualHoldActive &&
-        !isRoundResolutionVisualHoldActive &&
-        pendingNextRoundSeatSnapshotClearRef.current,
+      !isRoundResolutionVisualHoldActive &&
+      pendingNextRoundSeatSnapshotClearRef.current,
     );
 
     if (shouldReleaseSeatSnapshotAfterRoundHold) {
@@ -3180,8 +3257,8 @@ export function MatchPage() {
   // Card landing suppresses playable UI while flight animations still own the table.
   const isBufferedCardReplayBlockingPlay = Boolean(
     bufferedCardsDuringIntroRef.current.length > 0 ||
-      bufferedCardReplayTimeoutsRef.current.length > 0 ||
-      bufferedCardReplayLandingGuardTimeoutsRef.current.length > 0,
+    bufferedCardReplayTimeoutsRef.current.length > 0 ||
+    bufferedCardReplayLandingGuardTimeoutsRef.current.length > 0,
   );
   const isBetFeedbackBlockingPlay =
     betFeedback?.kind === 'accepted' ||
@@ -3189,24 +3266,24 @@ export function MatchPage() {
     betFeedback?.kind === 'special';
   const isVisualBeatStillPromotingPlayableState = Boolean(
     visualBeat === 'idle' &&
-      isFreshPlayableHandState({
-        publicMatchState: visualPublicMatchState,
-        privateMatchState: visualPrivateMatchState,
-      }) &&
-      !isDeferringVisualCommitRef.current,
+    isFreshPlayableHandState({
+      publicMatchState: visualPublicMatchState,
+      privateMatchState: visualPrivateMatchState,
+    }) &&
+    !isDeferringVisualCommitRef.current,
   );
 
   // Mão de 11 can reopen play before the previous visual hold has fully released.
   const shouldBypassStaleMaoDeOnzeRoundHold = Boolean(
     viewModel.specialState === 'mao_de_onze' &&
-      viewModel.nextDecisionType === 'play-card' &&
-      viewModel.canPlayCard &&
-      visualBeat === 'live' &&
-      !liveTableTransition.isAnyCardLandingInProgress &&
-      !liveTableTransition.isResolvingRound &&
-      !isBufferedCardReplayBlockingPlay &&
-      !isBetFeedbackBlockingPlay &&
-      !isDeferringVisualCommitRef.current,
+    viewModel.nextDecisionType === 'play-card' &&
+    viewModel.canPlayCard &&
+    visualBeat === 'live' &&
+    !liveTableTransition.isAnyCardLandingInProgress &&
+    !liveTableTransition.isResolvingRound &&
+    !isBufferedCardReplayBlockingPlay &&
+    !isBetFeedbackBlockingPlay &&
+    !isDeferringVisualCommitRef.current,
   );
 
   const shouldSuppressPlayableUi = Boolean(
@@ -3217,7 +3294,7 @@ export function MatchPage() {
       (!isVisualBeatStillPromotingPlayableState && visualBeat !== 'live') ||
       isNewHandOpeningLocked ||
       isDeferringVisualCommitRef.current) &&
-      !shouldBypassStaleMaoDeOnzeRoundHold,
+    !shouldBypassStaleMaoDeOnzeRoundHold,
   );
 
   // Card landings block card plays, not team-level betting responses.
@@ -3376,7 +3453,6 @@ export function MatchPage() {
       isResolvingRound: liveTableTransition.isResolvingRound,
       isTableInteractionLocked: shouldSuppressPlayableUi,
     });
-
 
   const handleStartHandWithGate = useCallback(() => {
     debugMatchPage('startHandWithGate:attempt', {
@@ -3603,8 +3679,8 @@ export function MatchPage() {
   useEffect(() => {
     const handIsLive = Boolean(
       !viewModel.handFinished &&
-        !viewModel.matchFinished &&
-        (viewModel.tablePhase === 'playing' || viewModel.nextDecisionType === 'play-card'),
+      !viewModel.matchFinished &&
+      (viewModel.tablePhase === 'playing' || viewModel.nextDecisionType === 'play-card'),
     );
 
     if (!handIsLive) {
@@ -3642,8 +3718,8 @@ export function MatchPage() {
   useEffect(() => {
     const authoritativeHandInProgress = Boolean(
       publicMatchState?.state === 'in_progress' &&
-        publicMatchState.currentHand &&
-        !publicMatchState.currentHand.finished,
+      publicMatchState.currentHand &&
+      !publicMatchState.currentHand.finished,
     );
 
     if (authoritativeHandInProgress) {
@@ -3985,15 +4061,15 @@ export function MatchPage() {
 
   const shouldStartHandOutcomeRevealHold = Boolean(
     handOutcomeRevealHoldKey !== null &&
-      handOutcomeRevealHoldKeyRef.current !== handOutcomeRevealHoldKey,
+    handOutcomeRevealHoldKeyRef.current !== handOutcomeRevealHoldKey,
   );
 
   const shouldDelayHandOutcomeModal = Boolean(
     liveTableTransition.isResolvingRound ||
-      visualBeat === 'hand_reset' ||
-      visualBeat === 'hand_intro' ||
-      isHandOutcomeRevealHoldActive ||
-      shouldStartHandOutcomeRevealHold,
+    visualBeat === 'hand_reset' ||
+    visualBeat === 'hand_intro' ||
+    isHandOutcomeRevealHoldActive ||
+    shouldStartHandOutcomeRevealHold,
   );
 
   useEffect(() => {
@@ -4187,7 +4263,7 @@ export function MatchPage() {
                     }
                     myCardLaunching={Boolean(
                       liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
-                        !viewModel.myPlayedCard,
+                      !viewModel.myPlayedCard,
                     )}
                     roundIntroKey={liveTableTransition.roundIntroKey}
                     roundResolvedKey={liveTableTransition.roundResolvedKey}
@@ -4195,8 +4271,12 @@ export function MatchPage() {
                     closingTableCards={liveTableTransition.closingTableCards}
                     currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                     currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
-                    currentPrivateViraCard={viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard}
-                    currentPublicViraCard={viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard}
+                    currentPrivateViraCard={
+                      viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard
+                    }
+                    currentPublicViraCard={
+                      viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard
+                    }
                     viraRank={viraRank}
                     isViraRevealActive={isNewHandOpeningLocked}
                     viraRevealKey={openingViraReveal?.key ?? 'vira-static'}
@@ -4258,7 +4338,7 @@ export function MatchPage() {
                     }
                     myCardLaunching={Boolean(
                       liveTableTransition.pendingPlayedCard?.owner === 'mine' &&
-                        !viewModel.myPlayedCard,
+                      !viewModel.myPlayedCard,
                     )}
                     roundIntroKey={liveTableTransition.roundIntroKey}
                     roundResolvedKey={liveTableTransition.roundResolvedKey}
@@ -4266,8 +4346,12 @@ export function MatchPage() {
                     closingTableCards={liveTableTransition.closingTableCards}
                     currentPrivateViraRank={viewModel.currentPrivateHand?.viraRank ?? null}
                     currentPublicViraRank={viewModel.currentPublicHand?.viraRank ?? null}
-                    currentPrivateViraCard={viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard}
-                    currentPublicViraCard={viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard}
+                    currentPrivateViraCard={
+                      viewModel.currentPrivateHand?.viraCard ?? lastKnownViraCard
+                    }
+                    currentPublicViraCard={
+                      viewModel.currentPublicHand?.viraCard ?? lastKnownViraCard
+                    }
                     viraRank={viraRank}
                     isViraRevealActive={isNewHandOpeningLocked}
                     viraRevealKey={openingViraReveal?.key ?? 'vira-static'}
@@ -4286,6 +4370,9 @@ export function MatchPage() {
                       suppressHandOutcomeModal || shouldDelayHandOutcomeModal
                     }
                     onHandClimaxDismissed={handleHandClimaxDismissed}
+                    partnerSignal={lastPartnerSignal}
+                    sentPartnerSignal={lastSentPartnerSignal}
+                    onSendPartnerSignal={handleSendPartnerSignal}
                   />
                 )}
 
@@ -4312,7 +4399,9 @@ export function MatchPage() {
                     key={openingViraReveal.key}
                     rank={openingViraReveal.card.rank}
                     suit={openingViraReveal.card.suit}
-                    isRed={openingViraReveal.card.suit === 'C' || openingViraReveal.card.suit === 'O'}
+                    isRed={
+                      openingViraReveal.card.suit === 'C' || openingViraReveal.card.suit === 'O'
+                    }
                     manilhaLabel={`Manilha definida • Vira: ${
                       openingViraReveal.rawCard ?? openingViraReveal.card.rank
                     }`}
@@ -4601,5 +4690,4 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
-
 

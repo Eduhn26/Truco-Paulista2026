@@ -7,6 +7,8 @@ import type {
   CardPayload,
   CardPlayedPayload,
   MatchStatePayload,
+  PartnerSignalKind,
+  PartnerSignalPayload,
   PlayerAssignedPayload,
   RoomStatePayload,
   RoundTransitionPayload,
@@ -46,6 +48,7 @@ type UseMatchRealtimeSessionParams = {
       isBot: boolean;
     };
   }) => void;
+  onPartnerSignal?: (payload: PartnerSignalPayload) => void;
   onServerError?: (payload: ServerErrorPayload) => void;
 };
 
@@ -69,6 +72,7 @@ type UseMatchRealtimeSessionResult = {
   emitRaiseToTwelve: (matchId: string) => void;
   emitAcceptMaoDeOnze: (matchId: string) => void;
   emitDeclineMaoDeOnze: (matchId: string) => void;
+  emitSendPartnerSignal: (matchId: string, kind: PartnerSignalKind) => void;
 };
 
 type PersistSnapshotParams = {
@@ -161,6 +165,15 @@ function describeRoundTransitionPayload(payload: RoundTransitionPayload): string
   ].join(' | ');
 }
 
+function describePartnerSignalPayload(payload: PartnerSignalPayload): string {
+  return [
+    'Received partner-signal',
+    `from=${payload.fromSeatId}`,
+    `kind=${payload.kind}`,
+    `expires=${payload.expiresAt}`,
+  ].join(' | ');
+}
+
 export function useMatchRealtimeSession(
   params: UseMatchRealtimeSessionParams,
 ): UseMatchRealtimeSessionResult {
@@ -170,6 +183,7 @@ export function useMatchRealtimeSession(
     onHandStarted,
     onCardPlayed,
     onRoundTransition,
+    onPartnerSignal,
     onServerError,
   } = params;
 
@@ -183,6 +197,7 @@ export function useMatchRealtimeSession(
   const onHandStartedRef = useRef(onHandStarted);
   const onCardPlayedRef = useRef(onCardPlayed);
   const onRoundTransitionRef = useRef(onRoundTransition);
+  const onPartnerSignalRef = useRef(onPartnerSignal);
   const onServerErrorRef = useRef(onServerError);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
@@ -222,6 +237,10 @@ export function useMatchRealtimeSession(
   useEffect(() => {
     onRoundTransitionRef.current = onRoundTransition;
   }, [onRoundTransition]);
+
+  useEffect(() => {
+    onPartnerSignalRef.current = onPartnerSignal;
+  }, [onPartnerSignal]);
 
   useEffect(() => {
     onServerErrorRef.current = onServerError;
@@ -507,6 +526,20 @@ export function useMatchRealtimeSession(
 
           appendLog(describeRoundTransitionPayload(payload));
         },
+        onPartnerSignal: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          onPartnerSignalRef.current?.(payload);
+          appendLog(describePartnerSignalPayload(payload));
+        },
       },
     );
 
@@ -545,5 +578,7 @@ export function useMatchRealtimeSession(
     emitRaiseToTwelve: (matchId) => clientRef.current?.emitRaiseToTwelve(matchId),
     emitAcceptMaoDeOnze: (matchId) => clientRef.current?.emitAcceptMaoDeOnze(matchId),
     emitDeclineMaoDeOnze: (matchId) => clientRef.current?.emitDeclineMaoDeOnze(matchId),
+    emitSendPartnerSignal: (matchId, kind) =>
+      clientRef.current?.emitSendPartnerSignal(matchId, kind),
   };
 }

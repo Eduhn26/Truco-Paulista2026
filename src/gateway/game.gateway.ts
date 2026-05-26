@@ -40,6 +40,7 @@ import {
   type BotDecisionMetadata,
   type BotDecisionPort,
   type BotHandProgressView,
+  type BotPartnerSignalView,
   type BotProfile,
   type BotRoundView,
 } from '@game/application/ports/bot-decision.port';
@@ -65,6 +66,8 @@ import { UpdateRatingUseCase } from '@game/application/use-cases/update-rating.u
 import { ViewMatchStateUseCase } from '@game/application/use-cases/view-match-state.use-case';
 import { AuthTokenService } from '@game/auth/auth-token.service';
 import { DomainError } from '@game/domain/exceptions/domain-error';
+import { manilhaRankFromVira } from '@game/domain/services/truco-rules';
+import type { Rank } from '@game/domain/value-objects/rank';
 
 import { GatewayMatchmakingService } from './matchmaking/gateway-matchmaking.service';
 import type {
@@ -118,6 +121,11 @@ type PlayCardPayload = {
     rank?: unknown;
     suit?: unknown;
   };
+};
+
+type SendPartnerSignalPayload = {
+  matchId?: unknown;
+  kind?: unknown;
 };
 
 type GetStatePayload = {
@@ -290,6 +298,9 @@ type GatewayLogContext = {
     | 'decline_mao_de_onze_requested'
     | 'decline_mao_de_onze_succeeded'
     | 'decline_mao_de_onze_rejected'
+    | 'send_partner_signal_requested'
+    | 'send_partner_signal_succeeded'
+    | 'send_partner_signal_rejected'
     | 'match_finished'
     | 'save_match_record_succeeded'
     | 'save_match_record_rejected'
@@ -318,6 +329,7 @@ type GatewayLogContext = {
   card?: string;
   limit?: number;
   mode?: MatchmakingMode;
+  signalKind?: string;
   rating?: number;
   queueSize?: number;
   errorType?: GatewayErrorCode;
@@ -358,6 +370,10 @@ type BotDecisionTelemetry = {
   actorSeatId?: string;
   actorTeamId?: 'T1' | 'T2';
   partnerSeatId?: string | null;
+  partnerSignalKind?: string;
+  partnerSignalStrengthHint?: string;
+  partnerSignalIntent?: string;
+  partnerSignalBoost?: number;
   winningSeatIdBeforeDecision?: string | null;
   winningTeamIdBeforeDecision?: 'T1' | 'T2' | null;
   winningCardBeforeDecision?: string | null;
@@ -478,6 +494,56 @@ type PendingTeamBetDecision = {
   botAdviceBySeat: Partial<Record<SeatId, PartnerBetAdvice>>;
 };
 
+type PartnerSignalKind =
+  | 'has-manilha'
+  | 'strong-manilha'
+  | 'weak-manilha'
+  | 'no-manilha'
+  | 'weak-hand'
+  | 'hold'
+  | 'kill-round'
+  | 'pressure';
+
+type PartnerSignalPayload = {
+  signalId: string;
+  matchId: string;
+  fromSeatId: SeatId;
+  toTeamId: 'T1' | 'T2';
+  kind: PartnerSignalKind;
+  label: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+type PartnerSignalRecord = PartnerSignalPayload & {
+  expiresAtMs: number;
+};
+
+const PARTNER_SIGNAL_KINDS = new Set<PartnerSignalKind>([
+  'has-manilha',
+  'strong-manilha',
+  'weak-manilha',
+  'no-manilha',
+  'weak-hand',
+  'hold',
+  'kill-round',
+  'pressure',
+]);
+
+const PARTNER_SIGNAL_LABELS: Record<PartnerSignalKind, string> = {
+  'has-manilha': 'Tenho manilha',
+  'strong-manilha': 'Manilha forte',
+  'weak-manilha': 'Manilha fraca',
+  'no-manilha': 'Tô sem manilha',
+  'weak-hand': 'Tô fraco',
+  hold: 'Segura',
+  'kill-round': 'Mata essa',
+  pressure: 'Pode pressionar',
+};
+
+const PARTNER_SIGNAL_COOLDOWN_MS = 3500;
+const PARTNER_SIGNAL_TTL_MS = 9000;
+
 const MIXED_TEAM_BET_DECISION_TIMEOUT_MS = 18000;
 
 @WebSocketGateway({
@@ -500,6 +566,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     string,
     ReturnType<typeof setTimeout>
   >();
+  private readonly partnerSignalsByMatch = new Map<string, PartnerSignalRecord[]>();
+  private readonly partnerSignalCooldownBySeat = new Map<string, number>();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -686,6 +754,195 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return null;
+  }
+
+  private normalizePartnerSignalKind(value: unknown): PartnerSignalKind | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const normalizedValue = value.trim();
+
+    return PARTNER_SIGNAL_KINDS.has(normalizedValue as PartnerSignalKind)
+      ? (normalizedValue as PartnerSignalKind)
+      : null;
+  }
+
+  private isManilhaPartnerSignal(kind: PartnerSignalKind): boolean {
+    return (
+      kind === 'has-manilha' ||
+      kind === 'strong-manilha' ||
+      kind === 'weak-manilha' ||
+      kind === 'no-manilha'
+    );
+  }
+
+  private readCardRank(card: string): string {
+    return card.slice(0, -1);
+  }
+
+  private hasSeatManilha(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): boolean {
+    const seatCards =
+      currentHand.seatHands?.[seatId] ??
+      (seatId.startsWith('T1') ? currentHand.playerOneHand : currentHand.playerTwoHand);
+    const manilhaRank = manilhaRankFromVira(currentHand.viraRank as Rank);
+
+    return seatCards.some((card) => this.readCardRank(card) === manilhaRank);
+  }
+
+  private validatePartnerSignalAgainstHand(
+    kind: PartnerSignalKind,
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): string | null {
+    if (!this.isManilhaPartnerSignal(kind)) {
+      return null;
+    }
+
+    const hasManilha = this.hasSeatManilha(currentHand, seatId);
+
+    if (kind === 'no-manilha' && hasManilha) {
+      return 'Cannot send "Tô sem manilha" while holding a manilha.';
+    }
+
+    if (kind !== 'no-manilha' && !hasManilha) {
+      return 'Cannot send a manilha signal without holding a manilha.';
+    }
+
+    return null;
+  }
+
+  private clearExpiredPartnerSignals(matchId: string): void {
+    const signals = this.partnerSignalsByMatch.get(matchId);
+
+    if (!signals) {
+      return;
+    }
+
+    const now = Date.now();
+    const activeSignals = signals.filter((signal) => signal.expiresAtMs > now);
+
+    if (activeSignals.length === 0) {
+      this.partnerSignalsByMatch.delete(matchId);
+      return;
+    }
+
+    this.partnerSignalsByMatch.set(matchId, activeSignals);
+  }
+
+  private clearPartnerSignals(matchId: string): void {
+    this.partnerSignalsByMatch.delete(matchId);
+
+    for (const cooldownKey of [...this.partnerSignalCooldownBySeat.keys()]) {
+      if (cooldownKey.startsWith(`${matchId}:`)) {
+        this.partnerSignalCooldownBySeat.delete(cooldownKey);
+      }
+    }
+  }
+
+  private rememberPartnerSignal(signal: PartnerSignalRecord): void {
+    this.clearExpiredPartnerSignals(signal.matchId);
+
+    const currentSignals = this.partnerSignalsByMatch.get(signal.matchId) ?? [];
+    const nextSignals = [
+      ...currentSignals.filter((currentSignal) => currentSignal.fromSeatId !== signal.fromSeatId),
+      signal,
+    ];
+
+    this.partnerSignalsByMatch.set(signal.matchId, nextSignals);
+  }
+
+  private emitPartnerSignalToHumanPartners(signal: PartnerSignalRecord): void {
+    const sessions = this.roomManager.getHumanSessions(signal.matchId);
+
+    sessions
+      .filter(
+        (session) => session.teamId === signal.toTeamId && session.seatId !== signal.fromSeatId,
+      )
+      .forEach((session) => {
+        this.server.to(session.socketId).emit('partner-signal', {
+          signalId: signal.signalId,
+          matchId: signal.matchId,
+          fromSeatId: signal.fromSeatId,
+          toTeamId: signal.toTeamId,
+          kind: signal.kind,
+          label: signal.label,
+          createdAt: signal.createdAt,
+          expiresAt: signal.expiresAt,
+        });
+      });
+  }
+
+  private resolvePartnerSignalStrengthHint(
+    kind: PartnerSignalKind,
+  ): BotPartnerSignalView['strengthHint'] {
+    if (kind === 'strong-manilha') {
+      return 'strong';
+    }
+
+    if (kind === 'has-manilha') {
+      return 'medium';
+    }
+
+    if (kind === 'weak-manilha' || kind === 'weak-hand' || kind === 'no-manilha') {
+      return 'weak';
+    }
+
+    return 'none';
+  }
+
+  private resolvePartnerSignalIntent(kind: PartnerSignalKind): BotPartnerSignalView['intent'] {
+    if (kind === 'hold') {
+      return 'save';
+    }
+
+    if (kind === 'kill-round') {
+      return 'attack';
+    }
+
+    if (kind === 'pressure') {
+      return 'pressure';
+    }
+
+    if (kind === 'strong-manilha' || kind === 'has-manilha') {
+      return 'attack';
+    }
+
+    return 'neutral';
+  }
+
+  private toBotPartnerSignalView(signal: PartnerSignalRecord): BotPartnerSignalView {
+    return {
+      fromSeatId: signal.fromSeatId as BotPartnerSignalView['fromSeatId'],
+      kind: signal.kind,
+      strengthHint: this.resolvePartnerSignalStrengthHint(signal.kind),
+      intent: this.resolvePartnerSignalIntent(signal.kind),
+      expiresAt: signal.expiresAt,
+    };
+  }
+
+  private resolveBotPartnerSignalView(
+    matchId: string,
+    partnerSeatId: SeatId | null,
+  ): BotPartnerSignalView | null {
+    if (!partnerSeatId) {
+      return null;
+    }
+
+    this.clearExpiredPartnerSignals(matchId);
+
+    const signal = (this.partnerSignalsByMatch.get(matchId) ?? []).find(
+      (candidate) => candidate.fromSeatId === partnerSeatId,
+    );
+
+    if (!signal) {
+      return null;
+    }
+
+    return this.toBotPartnerSignalView(signal);
   }
 
   private normalizePrivateFriendPlacement(value: unknown): PrivateFriendPlacement | null {
@@ -954,10 +1211,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.scheduledTeamBetDecisionTimeouts.set(matchId, timeout);
   }
 
-  private async resolveTeamBetDecisionTimeout(
-    matchId: string,
-    decisionId: string,
-  ): Promise<void> {
+  private async resolveTeamBetDecisionTimeout(matchId: string, decisionId: string): Promise<void> {
     const decision = this.pendingTeamBetDecisionByMatch.get(matchId);
 
     if (!decision || decision.decisionId !== decisionId) {
@@ -1141,10 +1395,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
-  private resolvePartnerAdviceLabel(
-    action: TeamBetDecisionAction,
-    confidence: number,
-  ): string {
+  private resolvePartnerAdviceLabel(action: TeamBetDecisionAction, confidence: number): string {
     if (action === 'decline') {
       return confidence >= 0.76 ? 'Corre, tô fraco.' : 'Melhor segurar.';
     }
@@ -1291,6 +1542,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const metadata = decision.metadata;
     const tactical = metadata?.rationale?.tactical;
     const betAudit = metadata?.rationale?.betAudit;
+    const partnerSignal = botTurnContext.context.partnerSignal ?? null;
     const selectedCard =
       tactical?.selectedCard ?? (decision.action === 'play-card' ? decision.card : undefined);
 
@@ -1311,6 +1563,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ...(tactical?.actorTeamId ? { actorTeamId: tactical.actorTeamId } : {}),
       ...(tactical && 'partnerSeatId' in tactical
         ? { partnerSeatId: tactical.partnerSeatId ?? null }
+        : {}),
+      ...(partnerSignal ? { partnerSignalKind: partnerSignal.kind } : {}),
+      ...(partnerSignal ? { partnerSignalStrengthHint: partnerSignal.strengthHint } : {}),
+      ...(partnerSignal ? { partnerSignalIntent: partnerSignal.intent } : {}),
+      ...(betAudit?.partnerSignalBoost !== undefined
+        ? { partnerSignalBoost: betAudit.partnerSignalBoost }
         : {}),
       ...(tactical && 'winningSeatIdBeforeDecision' in tactical
         ? { winningSeatIdBeforeDecision: tactical.winningSeatIdBeforeDecision ?? null }
@@ -2018,6 +2276,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const betView = this.buildBotBetView(currentHand);
     const handProgress = this.buildBotHandProgressView(viewerState, actor.playerId);
     const pointsToWin = this.resolvePointsToWin(viewerState);
+    const partnerSeatId = this.resolveBotPartnerSeatId(actor.seatId, currentHand.mode ?? '1v1');
+    const partnerSignal = this.resolveBotPartnerSignalView(matchId, partnerSeatId);
 
     return {
       ...actor,
@@ -2027,7 +2287,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         mode: currentHand.mode ?? '1v1',
         actorSeatId: actor.seatId,
         actorTeamId: actor.teamId,
-        partnerSeatId: this.resolveBotPartnerSeatId(actor.seatId, currentHand.mode ?? '1v1'),
+        partnerSeatId,
+        ...(partnerSignal ? { partnerSignal } : {}),
         viraRank: currentHand.viraRank,
         currentRound: this.getCurrentBotRoundView(viewerState),
         player: {
@@ -3084,6 +3345,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.clearBotDecisionTelemetry(matchId);
       this.clearTeamBetDecision(matchId);
       this.clearBetResumeSeat(matchId);
+      this.clearPartnerSignals(matchId);
 
       // Ready 1v1 rooms can start from get-state without a frontend dispatcher.
       const roomState = this.roomManager.beginHand(matchId, { random: true });
@@ -3110,7 +3372,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         socketId,
         matchId,
         ...(startedViraRank !== null ? { viraRank: startedViraRank } : {}),
-          ...(startedViraCard !== null ? { viraCard: startedViraCard } : {}),
+        ...(startedViraCard !== null ? { viraCard: startedViraCard } : {}),
         ...(startedViraCard !== null ? { viraCard: startedViraCard } : {}),
       });
 
@@ -4343,6 +4605,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         this.clearBotDecisionTelemetry(matchId);
         this.clearBetResumeSeat(matchId);
+        this.clearPartnerSignals(matchId);
 
         // After the first random opener, each new hand starts with the previous hand winner.
         const previousHandWinner = authoritativeState.currentHand?.winner ?? null;
@@ -5381,6 +5644,206 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('send-partner-signal')
+  async handleSendPartnerSignal(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: SendPartnerSignalPayload,
+  ): Promise<WsResponse<PartnerSignalPayload> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'send_partner_signal_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const kind = this.normalizePartnerSignalKind(payload?.kind);
+
+      if (!matchId || !kind) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Invalid payload: matchId and a valid signal kind are required.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+          },
+          'validation_error',
+        );
+      }
+
+      if (matchId !== session.matchId) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Invalid payload: matchId does not match the active room.',
+          {
+            socketId: socket.id,
+            matchId: session.matchId,
+            signalKind: kind,
+          },
+          'transport_error',
+        );
+      }
+
+      const roomState = this.roomManager.getState(matchId);
+
+      if (roomState.mode !== '2v2') {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Partner signals are only available in 2v2 matches.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
+            signalKind: kind,
+          },
+          'validation_error',
+        );
+      }
+
+      const partnerSeatId = this.resolveBotPartnerSeatId(session.seatId, '2v2');
+      const partnerSeat = partnerSeatId
+        ? roomState.players.find((player) => player.seatId === partnerSeatId)
+        : null;
+
+      if (!partnerSeat || partnerSeat.teamId !== session.teamId) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Cannot send a partner signal without an assigned partner.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
+            signalKind: kind,
+          },
+          'validation_error',
+        );
+      }
+
+      const now = Date.now();
+      const cooldownKey = `${matchId}:${session.seatId}`;
+      const nextAllowedAt = this.partnerSignalCooldownBySeat.get(cooldownKey) ?? 0;
+
+      if (nextAllowedAt > now) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Wait before sending another partner signal.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
+            signalKind: kind,
+          },
+          'validation_error',
+        );
+      }
+
+      const state = await this.getAuthoritativeMatchState(matchId);
+      const currentHand = state.currentHand;
+
+      if (state.state !== 'in_progress' || !currentHand || currentHand.finished) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          'Partner signals are only available while a hand is in progress.',
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
+            signalKind: kind,
+          },
+          'validation_error',
+        );
+      }
+
+      const handValidationMessage = this.validatePartnerSignalAgainstHand(
+        kind,
+        currentHand,
+        session.seatId,
+      );
+
+      if (handValidationMessage) {
+        return this.reject(
+          'send_partner_signal_rejected',
+          handValidationMessage,
+          {
+            socketId: socket.id,
+            matchId,
+            seatId: session.seatId,
+            teamId: session.teamId,
+            playerId: session.domainPlayerId,
+            signalKind: kind,
+          },
+          'validation_error',
+        );
+      }
+
+      const createdAtMs = now;
+      const expiresAtMs = createdAtMs + PARTNER_SIGNAL_TTL_MS;
+      const createdAt = new Date(createdAtMs).toISOString();
+      const expiresAt = new Date(expiresAtMs).toISOString();
+      const response: PartnerSignalPayload = {
+        signalId: `${matchId}:${session.seatId}:${createdAtMs}`,
+        matchId,
+        fromSeatId: session.seatId,
+        toTeamId: session.teamId,
+        kind,
+        label: PARTNER_SIGNAL_LABELS[kind],
+        createdAt,
+        expiresAt,
+      };
+
+      const record: PartnerSignalRecord = {
+        ...response,
+        expiresAtMs,
+      };
+
+      this.partnerSignalCooldownBySeat.set(cooldownKey, now + PARTNER_SIGNAL_COOLDOWN_MS);
+      this.rememberPartnerSignal(record);
+      this.emitPartnerSignalToHumanPartners(record);
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'send_partner_signal_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+        signalKind: kind,
+      });
+
+      return {
+        event: 'partner-signal:ack',
+        data: response,
+      };
+    } catch (error) {
+      return this.rejectFromError('send_partner_signal_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
   @SubscribeMessage('get-state')
   async handleGetState(
     @ConnectedSocket() socket: Socket,
@@ -5447,5 +5910,3 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 }
-
-

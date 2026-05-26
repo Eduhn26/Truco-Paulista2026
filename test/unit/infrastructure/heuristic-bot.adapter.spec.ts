@@ -113,6 +113,34 @@ describe('HeuristicBotAdapter', () => {
     );
   }
 
+  function createPartnerSignal(
+    kind: NonNullable<BotDecisionContext['partnerSignal']>['kind'],
+    overrides: Partial<NonNullable<BotDecisionContext['partnerSignal']>> = {},
+  ): NonNullable<BotDecisionContext['partnerSignal']> {
+    return {
+      fromSeatId: 'T1A',
+      kind,
+      strengthHint:
+        kind === 'strong-manilha'
+          ? 'strong'
+          : kind === 'has-manilha'
+            ? 'medium'
+            : kind === 'weak-manilha' || kind === 'weak-hand' || kind === 'no-manilha'
+              ? 'weak'
+              : 'none',
+      intent:
+        kind === 'hold'
+          ? 'save'
+          : kind === 'kill-round'
+            ? 'attack'
+            : kind === 'pressure'
+              ? 'pressure'
+              : 'neutral',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      ...overrides,
+    };
+  }
+
   it('returns pass when the bot hand is empty', () => {
     const decision = adapter.decide(
       createContext({
@@ -562,6 +590,49 @@ describe('HeuristicBotAdapter', () => {
     expectPlayCardDecision(decision, 'KO', 'response-winning-weakest');
   });
 
+  it('uses the lowest winning card when the partner signals to kill the round', () => {
+    const decision = adapter.decide(
+      createContext({
+        mode: '2v2',
+        actorSeatId: 'T1B',
+        actorTeamId: 'T1',
+        partnerSeatId: 'T1A',
+        profile: 'aggressive',
+        partnerSignal: createPartnerSignal('kill-round'),
+        currentRound: {
+          playerOneCard: '4O',
+          playerTwoCard: '7O',
+          finished: false,
+          result: null,
+          orderedPlays: [
+            {
+              ownerId: 'T1A',
+              seatId: 'T1A',
+              playerId: 'P1',
+              card: '4O',
+            },
+            {
+              ownerId: 'T2A',
+              seatId: 'T2A',
+              playerId: 'P2',
+              card: '7O',
+            },
+          ],
+          seatPlays: {
+            T1A: '4O',
+            T2A: '7O',
+          },
+        },
+        player: {
+          playerId: 'P1',
+          hand: ['KO', 'AO', '3P'],
+        },
+      }),
+    );
+
+    expectPlayCardDecision(decision, 'KO', 'two-versus-two-signal-kill-round-weakest-winner');
+  });
+
   it('uses the weakest card in 2v2 when it cannot kill the current winning opponent card', () => {
     const decision = adapter.decide(
       createContext({
@@ -622,7 +693,7 @@ describe('HeuristicBotAdapter', () => {
         },
         player: {
           playerId: 'P2',
-          hand: ['5C', 'KC'],
+          hand: ['6C', 'KC'],
         },
         bet: {
           currentValue: 6,
@@ -673,7 +744,7 @@ describe('HeuristicBotAdapter', () => {
         },
         player: {
           playerId: 'P2',
-          hand: ['5C', 'KC'],
+          hand: ['6C', 'KC'],
         },
       }),
     );
@@ -681,15 +752,15 @@ describe('HeuristicBotAdapter', () => {
     expect(decision).toEqual(
       expect.objectContaining({
         action: 'play-card',
-        card: '5C',
+        card: '6C',
         metadata: expect.objectContaining({
           rationale: expect.objectContaining({
             strategy: 'opening-weakest',
             tactical: expect.objectContaining({
               actorSeatId: 'T2A',
               partnerSeatId: 'T2B',
-              selectedCard: '5C',
-              actorHandBefore: ['5C', 'KC'],
+              selectedCard: '6C',
+              actorHandBefore: ['6C', 'KC'],
               winningSeatIdBeforeDecision: null,
               winningCardBeforeDecision: null,
             }),
@@ -822,6 +893,73 @@ describe('HeuristicBotAdapter', () => {
               initiativeThreshold: expect.any(Number),
               scoreBoost: expect.any(Number),
               roundsWonByMe: 1,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('uses a strong-manilha partner signal when responding to a truco request', () => {
+    const decision = adapter.decide(
+      createContext({
+        mode: '2v2',
+        actorSeatId: 'T1B',
+        actorTeamId: 'T1',
+        partnerSeatId: 'T1A',
+        partnerSignal: createPartnerSignal('strong-manilha', {
+          strengthHint: 'strong',
+          intent: 'attack',
+        }),
+        profile: 'balanced',
+        player: {
+          playerId: 'P1',
+          hand: ['4O', '5C', '6E'],
+        },
+        bet: {
+          currentValue: 1,
+          betState: 'awaiting_response',
+          pendingValue: 3,
+          requestedBy: 'P2',
+          specialState: 'normal',
+          specialDecisionPending: false,
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: false,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: true,
+            canDeclineBet: true,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: false,
+          },
+        },
+        score: {
+          playerOne: 0,
+          playerTwo: 0,
+          pointsToWin: 12,
+        },
+        handProgress: {
+          roundsWonByMe: 0,
+          roundsWonByOpponent: 1,
+          roundsTied: 0,
+          currentRoundIndex: 1,
+        },
+      }),
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        action: 'accept-bet',
+        metadata: expect.objectContaining({
+          rationale: expect.objectContaining({
+            strategy: 'bet-accept',
+            betAudit: expect.objectContaining({
+              partnerSignalKind: 'strong-manilha',
+              partnerSignalStrengthHint: 'strong',
+              partnerSignalIntent: 'attack',
+              partnerSignalBoost: expect.any(Number),
             }),
           }),
         }),

@@ -9,6 +9,8 @@ import type {
   BotDecisionTacticalTelemetry,
   BotDecisionBetTelemetry,
   BotHandProgressView,
+  BotPartnerSignalKind,
+  BotPartnerSignalView,
   BotProfile,
   BotSeatId,
   BotTeamId,
@@ -68,6 +70,13 @@ type TwoVersusTwoRoundState = {
   winningCard: string | null;
 };
 
+type PartnerSignalBetAdjustment = {
+  boost: number;
+  kind?: BotPartnerSignalKind;
+  strengthHint?: BotPartnerSignalView['strengthHint'];
+  intent?: BotPartnerSignalView['intent'];
+};
+
 const FULL_DECK_SUITS = ['C', 'O', 'P', 'E'] as const;
 const FULL_DECK_RANKS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'] as const;
 const FULL_DECK = FULL_DECK_RANKS.flatMap((rank) =>
@@ -94,6 +103,25 @@ const PARTNER_BY_SEAT: Record<BotSeatId, BotSeatId> = {
   T2A: 'T2B',
   T2B: 'T2A',
 };
+
+const PARTNER_SIGNAL_BET_BOOST_BY_KIND: Record<BotPartnerSignalKind, number> = {
+  'strong-manilha': 0.28,
+  'has-manilha': 0.14,
+  'weak-manilha': 0.06,
+  'no-manilha': -0.1,
+  'weak-hand': -0.16,
+  hold: -0.08,
+  'kill-round': 0.04,
+  pressure: 0.1,
+};
+
+const PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND: Partial<Record<BotPartnerSignalKind, number>> =
+  {
+    pressure: 0.05,
+    'strong-manilha': 0.04,
+    'has-manilha': 0.02,
+    hold: -0.04,
+  };
 
 @Injectable()
 export class HeuristicBotAdapter implements BotDecisionPort {
@@ -392,7 +420,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
     const handStrength = this.calculateHandStrength(context.player.hand, context.viraRank);
     const progressBoost = this.computeProgressBoost(context.handProgress);
-    const effectiveStrength = this.clamp01(handStrength + progressBoost);
+    const partnerSignalAdjustment = this.computePartnerSignalBetAdjustment(context, 'response');
+    const effectiveStrength = this.clamp01(
+      handStrength + progressBoost + partnerSignalAdjustment.boost,
+    );
 
     const thresholds = this.resolveBetThresholds(context.profile);
     const pressure = this.computeScorePressure(context, bet);
@@ -414,6 +445,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -436,6 +468,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -458,6 +491,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -479,6 +513,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -500,6 +535,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -522,6 +558,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost: 0,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -558,7 +595,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const thresholds = this.resolveBetThresholds(context.profile);
     const progressBoost = this.computeProgressBoost(context.handProgress);
     const scoreBoost = this.computeScoreInitiativeBoost(context);
-    const effectiveStrength = this.clamp01(handStrength + progressBoost + scoreBoost);
+    const partnerSignalAdjustment = this.computePartnerSignalBetAdjustment(context, 'initiative');
+    const effectiveStrength = this.clamp01(
+      handStrength + progressBoost + scoreBoost + partnerSignalAdjustment.boost,
+    );
 
     const pressure = this.computeScorePressure(context, bet);
 
@@ -574,6 +614,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -596,6 +637,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -618,6 +660,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             handStrength,
             progressBoost,
             scoreBoost,
+            partnerSignalAdjustment,
             effectiveStrength,
             thresholds,
             pressure,
@@ -716,6 +759,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     handStrength,
     progressBoost,
     scoreBoost,
+    partnerSignalAdjustment,
     effectiveStrength,
     thresholds,
     pressure,
@@ -725,6 +769,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     handStrength: number;
     progressBoost: number;
     scoreBoost: number;
+    partnerSignalAdjustment?: PartnerSignalBetAdjustment;
     effectiveStrength: number;
     thresholds: BotBetThresholds;
     pressure: ScorePressure;
@@ -743,6 +788,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       handStrength: this.roundStrength(handStrength),
       progressBoost: this.roundStrength(progressBoost),
       scoreBoost: this.roundStrength(scoreBoost),
+      partnerSignalBoost: this.roundStrength(partnerSignalAdjustment?.boost ?? 0),
       effectiveStrength: this.roundStrength(effectiveStrength),
       acceptThreshold: thresholds.accept,
       raiseThreshold: thresholds.raise,
@@ -753,6 +799,13 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       opponentPointsToWin: pressure.opponentPointsToWin,
       declineLosesMatch: pressure.declineLosesMatch,
       acceptRisksMatch: pressure.acceptRisksMatch,
+      ...(partnerSignalAdjustment?.kind ? { partnerSignalKind: partnerSignalAdjustment.kind } : {}),
+      ...(partnerSignalAdjustment?.strengthHint
+        ? { partnerSignalStrengthHint: partnerSignalAdjustment.strengthHint }
+        : {}),
+      ...(partnerSignalAdjustment?.intent
+        ? { partnerSignalIntent: partnerSignalAdjustment.intent }
+        : {}),
       ...(progress
         ? {
             roundsWonByMe: progress.roundsWonByMe,
@@ -762,6 +815,46 @@ export class HeuristicBotAdapter implements BotDecisionPort {
           }
         : {}),
     };
+  }
+
+  private computePartnerSignalBetAdjustment(
+    context: BotDecisionContext,
+    phase: 'response' | 'initiative',
+  ): PartnerSignalBetAdjustment {
+    const signal = this.getActivePartnerSignal(context);
+
+    if (!signal || context.mode !== '2v2') {
+      return { boost: 0 };
+    }
+
+    const baseBoost = PARTNER_SIGNAL_BET_BOOST_BY_KIND[signal.kind];
+    const phaseBoost =
+      phase === 'initiative'
+        ? (PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND[signal.kind] ?? 0)
+        : 0;
+
+    return {
+      boost: baseBoost + phaseBoost,
+      kind: signal.kind,
+      strengthHint: signal.strengthHint,
+      intent: signal.intent,
+    };
+  }
+
+  private getActivePartnerSignal(context: BotDecisionContext): BotPartnerSignalView | null {
+    const signal = context.partnerSignal;
+
+    if (!signal) {
+      return null;
+    }
+
+    const expiresAtMs = Date.parse(signal.expiresAt);
+
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      return null;
+    }
+
+    return signal;
   }
 
   private computeScorePressure(
@@ -992,6 +1085,21 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     }
 
     const actorTeamId = context.actorTeamId ?? TEAM_BY_SEAT[actorSeatId];
+    const activeSignal = this.getActivePartnerSignal(context);
+
+    if (
+      activeSignal?.kind === 'hold' &&
+      roundState.winningTeamId === actorTeamId &&
+      roundState.winningCard
+    ) {
+      const selectedCard = orderedHand[0]!;
+
+      return {
+        card: selectedCard,
+        strategy: 'two-versus-two-signal-hold-save-weakest',
+        tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
+      };
+    }
 
     if (roundState.winningTeamId !== actorTeamId && roundState.winningCard) {
       const winningCards = orderedHand.filter((candidate) =>
@@ -1004,6 +1112,16 @@ export class HeuristicBotAdapter implements BotDecisionPort {
         return {
           card: selectedCard,
           strategy: 'two-versus-two-response-losing-save-weakest',
+          tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
+        };
+      }
+
+      if (activeSignal?.kind === 'kill-round' || activeSignal?.kind === 'weak-hand') {
+        const selectedCard = winningCards[0]!;
+
+        return {
+          card: selectedCard,
+          strategy: 'two-versus-two-signal-kill-round-weakest-winner',
           tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
         };
       }
@@ -1064,6 +1182,15 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const currentValue = context.bet?.currentValue ?? 1;
     const remainingHandStrength = this.calculateHandStrength(orderedHand, context.viraRank);
     const hasScorePressure = this.hasTwoVersusTwoOpeningScorePressure(context, currentValue);
+    const activeSignal = this.getActivePartnerSignal(context);
+
+    if (activeSignal?.kind === 'pressure' && remainingHandStrength >= 0.38) {
+      return true;
+    }
+
+    if (activeSignal?.kind === 'hold') {
+      return false;
+    }
 
     if (context.profile === 'aggressive') {
       return currentValue >= 3 || remainingHandStrength >= 0.48 || hasScorePressure;
@@ -1107,6 +1234,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       : context.actorTeamId;
     const partnerSeatId =
       context.partnerSeatId ?? (actorSeatId ? PARTNER_BY_SEAT[actorSeatId] : null);
+    const partnerSignal = this.getActivePartnerSignal(context);
 
     const seatPlays = (roundState?.plays ?? []).reduce<Partial<Record<BotSeatId, string | null>>>(
       (accumulator, play) => ({
@@ -1127,6 +1255,12 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       partnerWasWinning: roundState?.winningSeatId === partnerSeatId,
       actorHandBefore: [...context.player.hand],
       selectedCard,
+      ...(partnerSignal
+        ? {
+            partnerSignalKind: partnerSignal.kind,
+            partnerSignalIntent: partnerSignal.intent,
+          }
+        : {}),
       seatPlays,
       orderedPlays: (roundState?.plays ?? []).map((play) => ({
         ownerId: play.seatId,

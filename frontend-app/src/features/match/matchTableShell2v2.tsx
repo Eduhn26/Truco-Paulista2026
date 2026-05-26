@@ -39,6 +39,8 @@ import type {
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
+  PartnerSignalKind,
+  PartnerSignalPayload,
   Rank,
 } from '../../services/socket/socketTypes';
 import { useConfetti } from '../../hooks/useConfetti';
@@ -71,6 +73,12 @@ type PendingPlayedCardView = {
   owner: 'mine' | 'opponent';
   card: string;
   id: number;
+};
+
+type SentPartnerSignalFeedback = {
+  id: string;
+  label: string;
+  expiresAt: string;
 };
 
 type MatchTableShellProps = {
@@ -131,6 +139,9 @@ type MatchTableShellProps = {
   isResolvingRound: boolean;
   closingTableCards: { mine: string | null; opponent: string | null };
   suppressHandOutcomeModal?: boolean;
+  partnerSignal?: PartnerSignalPayload | null;
+  sentPartnerSignal?: SentPartnerSignalFeedback | null;
+  onSendPartnerSignal?: (kind: PartnerSignalKind) => void;
   onHandClimaxDismissed?: () => void;
 };
 
@@ -146,6 +157,53 @@ const CLIMAX_AUTO_DISMISS_MS = 4400;
 const SETTLED_OUTCOME_BADGE_DELAY_MS = 900;
 const LOSER_DIM_DELAY_MS = 260;
 const MAO_DE_FERRO_OPENING_MS = 2600;
+
+const PARTNER_SIGNAL_OPTIONS: Array<{
+  kind: PartnerSignalKind;
+  label: string;
+  description: string;
+}> = [
+  {
+    kind: 'has-manilha',
+    label: 'Tenho manilha',
+    description: 'Força real na dupla.',
+  },
+  {
+    kind: 'strong-manilha',
+    label: 'Manilha forte',
+    description: 'Pode confiar mais.',
+  },
+  {
+    kind: 'weak-manilha',
+    label: 'Manilha fraca',
+    description: 'Ajuda, mas com cuidado.',
+  },
+  {
+    kind: 'no-manilha',
+    label: 'Tô sem manilha',
+    description: 'Não conte com manilha.',
+  },
+  {
+    kind: 'weak-hand',
+    label: 'Tô fraco',
+    description: 'Preciso de cobertura.',
+  },
+  {
+    kind: 'hold',
+    label: 'Segura',
+    description: 'Economiza carta forte.',
+  },
+  {
+    kind: 'kill-round',
+    label: 'Mata essa',
+    description: 'Tenta levar a vaza.',
+  },
+  {
+    kind: 'pressure',
+    label: 'Pode pressionar',
+    description: 'A mão permite risco.',
+  },
+];
 
 function shouldLogMatchTableShellDebug(): boolean {
   if (!import.meta.env.DEV) {
@@ -444,6 +502,253 @@ function HiddenSeatCards({
           />
         ))}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function PartnerSignalDock({
+  isEnabled,
+  lastSignal,
+  sentSignal,
+  onSendSignal,
+}: {
+  isEnabled: boolean;
+  lastSignal: PartnerSignalPayload | null;
+  sentSignal: SentPartnerSignalFeedback | null;
+  onSendSignal?: (kind: PartnerSignalKind) => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const isDisabled = !isEnabled || !onSendSignal;
+  const visibleSignal = sentSignal
+    ? {
+        id: sentSignal.id,
+        eyebrow: 'Sinal enviado',
+        label: sentSignal.label,
+        detail: 'Enviado para o parceiro.',
+        accent: '#f8df96',
+        dot: '#f8df96',
+        background:
+          'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.18), transparent 40%), linear-gradient(180deg, rgba(34,27,13,0.96), rgba(6,10,8,0.96))',
+        border: '1px solid rgba(248,223,150,0.30)',
+        shadow:
+          '0 18px 34px rgba(0,0,0,0.38), 0 0 20px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.08)',
+      }
+    : lastSignal
+      ? {
+          id: lastSignal.signalId,
+          eyebrow: 'Sinal da dupla',
+          label: lastSignal.label,
+          detail: 'Seu parceiro sinalizou.',
+          accent: '#86efac',
+          dot: '#4ade80',
+          background:
+            'radial-gradient(circle at 18% 0%, rgba(134,239,172,0.18), transparent 40%), linear-gradient(180deg, rgba(12,30,22,0.96), rgba(4,9,7,0.96))',
+          border: '1px solid rgba(134,239,172,0.28)',
+          shadow:
+            '0 18px 34px rgba(0,0,0,0.38), 0 0 20px rgba(34,197,94,0.12), inset 0 1px 0 rgba(255,255,255,0.08)',
+        }
+      : null;
+  const handSignals = PARTNER_SIGNAL_OPTIONS.filter(
+    (signal) =>
+      signal.kind === 'has-manilha' ||
+      signal.kind === 'strong-manilha' ||
+      signal.kind === 'weak-manilha' ||
+      signal.kind === 'no-manilha' ||
+      signal.kind === 'weak-hand',
+  );
+  const intentSignals = PARTNER_SIGNAL_OPTIONS.filter(
+    (signal) =>
+      signal.kind === 'hold' || signal.kind === 'kill-round' || signal.kind === 'pressure',
+  );
+
+  useEffect(() => {
+    if (isDisabled) {
+      setIsMenuOpen(false);
+    }
+  }, [isDisabled]);
+
+  const handleSendSignal = (kind: PartnerSignalKind): void => {
+    if (isDisabled || !onSendSignal) {
+      return;
+    }
+
+    onSendSignal(kind);
+    setIsMenuOpen(false);
+  };
+
+  const renderSignalButton = (signal: (typeof PARTNER_SIGNAL_OPTIONS)[number]) => (
+    <button
+      key={signal.kind}
+      type="button"
+      onClick={() => handleSendSignal(signal.kind)}
+      className="group rounded-[14px] px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:bg-white/[0.055] focus:outline-none focus:ring-1 focus:ring-[#f8df96]/45"
+      style={{
+        border: '1px solid rgba(255,255,255,0.055)',
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015))',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.045)',
+      }}
+    >
+      <span className="block text-[10px] font-black leading-none text-[#f0e6d3] transition group-hover:text-[#fff4dc]">
+        {signal.label}
+      </span>
+      <span className="mt-1 block text-[8px] font-bold leading-tight text-[#dccdaa]/58">
+        {signal.description}
+      </span>
+    </button>
+  );
+
+  return (
+    <div
+      className="pointer-events-auto absolute z-[76]"
+      style={{
+        bottom: 'clamp(5.4rem, 11vh, 7.4rem)',
+        left: 'clamp(1rem, 5.6vw, 4.5rem)',
+        width: 'min(344px, calc(100vw - 2rem))',
+      }}
+    >
+      <div className="relative flex items-start">
+        <motion.button
+          type="button"
+          disabled={isDisabled}
+          onClick={() => setIsMenuOpen((current) => !current)}
+          className="relative inline-flex h-9 items-center gap-2 overflow-hidden rounded-full px-3.5 text-[9px] font-black uppercase tracking-[0.18em] transition disabled:cursor-not-allowed disabled:opacity-45"
+          aria-expanded={isMenuOpen}
+          {...(!isDisabled
+            ? {
+                whileHover: { y: -1, scale: 1.025 },
+                whileTap: { scale: 0.97 },
+              }
+            : {})}
+          style={{
+            color: '#f8df96',
+            background:
+              'radial-gradient(circle at 24% 0%, rgba(255,241,184,0.16), transparent 40%), linear-gradient(180deg, rgba(35, 28, 14, 0.96), rgba(7, 11, 8, 0.92))',
+            border: '1px solid rgba(248, 223, 150, 0.38)',
+            boxShadow:
+              '0 12px 28px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.11)',
+          }}
+        >
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              background: isMenuOpen ? '#86efac' : '#f8df96',
+              boxShadow: isMenuOpen
+                ? '0 0 12px rgba(134,239,172,0.74)'
+                : '0 0 12px rgba(248,223,150,0.62)',
+            }}
+          />
+          Sinais
+        </motion.button>
+
+        <AnimatePresence>
+          {visibleSignal && !isMenuOpen ? (
+            <motion.div
+              key={visibleSignal.id}
+              className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[18px] px-3 py-2.5 backdrop-blur-xl"
+              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{
+                width: 'min(274px, calc(100vw - 2rem))',
+                background: visibleSignal.background,
+                border: visibleSignal.border,
+                boxShadow: visibleSignal.shadow,
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="h-2 w-2 rounded-full"
+                  style={{
+                    background: visibleSignal.dot,
+                    boxShadow: `0 0 14px ${visibleSignal.dot}`,
+                  }}
+                />
+                <div
+                  className="text-[8px] font-black uppercase tracking-[0.22em]"
+                  style={{ color: visibleSignal.accent }}
+                >
+                  {visibleSignal.eyebrow}
+                </div>
+              </div>
+              <div className="mt-1.5 text-[13px] font-black leading-none text-[#f0e6d3]">
+                {visibleSignal.label}
+              </div>
+              <div className="mt-1 text-[8px] font-bold uppercase tracking-[0.14em] text-[#dccdaa]/55">
+                {visibleSignal.detail}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {isMenuOpen ? (
+            <motion.div
+              key="partner-signal-menu"
+              className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[24px] p-2.5 backdrop-blur-xl"
+              initial={{ opacity: 0, y: 10, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{
+                width: 'min(344px, calc(100vw - 2rem))',
+                background:
+                  'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.18), transparent 34%), linear-gradient(180deg, rgba(10,18,14,0.97), rgba(4,8,7,0.96))',
+                border: '1px solid rgba(248,223,150,0.20)',
+                boxShadow:
+                  '0 24px 48px rgba(0,0,0,0.46), 0 0 24px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.08)',
+              }}
+            >
+              <div className="flex items-center justify-between gap-3 px-1 pb-2">
+                <div>
+                  <div className="text-[8px] font-black uppercase tracking-[0.24em] text-[#c9a84c]">
+                    Sinal privado
+                  </div>
+                  <div className="mt-0.5 text-[9px] font-bold text-[#dccdaa]/58">
+                    Só sua dupla recebe.
+                  </div>
+                </div>
+                <span
+                  className="rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] text-[#86efac]"
+                  style={{
+                    background: 'rgba(34,197,94,0.08)',
+                    border: '1px solid rgba(134,239,172,0.16)',
+                  }}
+                >
+                  Dupla
+                </span>
+              </div>
+
+              <div
+                className="rounded-[18px] p-1.5"
+                style={{ background: 'rgba(0,0,0,0.16)' }}
+              >
+                <div className="px-1 pb-1 text-[7px] font-black uppercase tracking-[0.22em] text-[#f8df96]/72">
+                  Força da mão
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {handSignals.map(renderSignalButton)}
+                </div>
+              </div>
+
+              <div
+                className="mt-2 rounded-[18px] p-1.5"
+                style={{ background: 'rgba(0,0,0,0.13)' }}
+              >
+                <div className="px-1 pb-1 text-[7px] font-black uppercase tracking-[0.22em] text-[#86efac]/72">
+                  Intenção
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {intentSignals.map(renderSignalButton)}
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
@@ -835,7 +1140,6 @@ function SeatNamePlate2v2({
           </span>
         ) : null}
       </div>
-
 
       <div
         className="relative z-10 mt-[2px] flex h-[76px] items-start justify-center sm:mt-[4px] sm:h-[108px]"
@@ -3609,13 +3913,11 @@ function CenterActionBar({
     partnerAdvice && partnerAdvice.action !== 'decline' && availableActions.canDeclineBet,
   );
   const declineConfirmationLabel =
-    partnerAdvice?.action === 'raise'
-      ? 'Parceiro quer pressionar.'
-      : 'Parceiro recomenda pagar.';
+    partnerAdvice?.action === 'raise' ? 'Parceiro quer pressionar.' : 'Parceiro recomenda pagar.';
   const isDeclineConfirmationActive = Boolean(
     shouldConfirmDeclineAgainstAdvice &&
-      (confirmingDecline ||
-        (remainingSeconds !== null && remainingSeconds <= declineConfirmationAutoWarnSeconds)),
+    (confirmingDecline ||
+      (remainingSeconds !== null && remainingSeconds <= declineConfirmationAutoWarnSeconds)),
   );
   const partnerAdviceLabel = partnerAdvice?.label ?? 'Parceiro pensando...';
 
@@ -6714,7 +7016,8 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
         const outcome = twoVersusTwoSeatOutcomes[seat.seatId] ?? null;
         const seatTeamId = resolveSeatTeamId(seat.seatId);
         const viewerTeam = resolveSeatTeamId(twoVersusTwoSeatLayout.self.seatId);
-        const isPartnerTeam = seatTeamId !== null && viewerTeam !== null && seatTeamId === viewerTeam;
+        const isPartnerTeam =
+          seatTeamId !== null && viewerTeam !== null && seatTeamId === viewerTeam;
 
         if (outcome === 'win' || outcome === 'team-win') {
           pushSignal({
@@ -6765,17 +7068,12 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     signals: botDialogueSignals,
     currentValue: activeValueForTier,
     isMuted:
-      props.isOneVsOne ||
-      shouldShowTrucoDrama ||
-      isNewHandOpeningLocked ||
-      isMaoDeFerroOpeningOpen,
+      props.isOneVsOne || shouldShowTrucoDrama || isNewHandOpeningLocked || isMaoDeFerroOpeningOpen,
   });
 
   const hasActiveTwoVersusTwoBotDialogue = Object.values(botDialoguesBySeat).some(Boolean);
   const shouldHoldHandClimaxForBotDialogue = Boolean(
-    !props.isOneVsOne &&
-      (isHandFinished || isMatchFinished) &&
-      hasActiveTwoVersusTwoBotDialogue,
+    !props.isOneVsOne && (isHandFinished || isMatchFinished) && hasActiveTwoVersusTwoBotDialogue,
   );
 
   const shouldHideCenterActionBar =
@@ -7065,6 +7363,15 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
 
   const lastDismissedClimaxKeyRef = useRef<string | null>(null);
 
+  const canUsePartnerSignals =
+    !props.isOneVsOne &&
+    tablePhase === 'playing' &&
+    !isHandFinished &&
+    !isMatchFinished &&
+    !isNewHandOpeningLocked &&
+    !isMaoDeFerroOpeningOpen &&
+    Boolean(currentPrivateHand);
+
   const handleClimaxDismiss = useCallback(() => {
     debugMatchTableShell('handClimax:dismiss-clicked', {
       hasClimax: Boolean(climax),
@@ -7238,6 +7545,15 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
       <AnimatePresence>
         {isMaoDeFerroOpeningOpen ? <MaoDeFerroOpeningStage /> : null}
       </AnimatePresence>
+
+      {!props.isOneVsOne && twoVersusTwoSeatLayout ? (
+        <PartnerSignalDock
+          isEnabled={canUsePartnerSignals}
+          lastSignal={props.partnerSignal ?? null}
+          sentSignal={props.sentPartnerSignal ?? null}
+          {...(props.onSendPartnerSignal ? { onSendSignal: props.onSendPartnerSignal } : {})}
+        />
+      ) : null}
 
       <div
         className={`relative z-[3] flex min-h-0 flex-1 flex-col ${props.isOneVsOne ? 'px-2 pb-1 pt-1 sm:px-4 sm:pb-5 sm:pt-3' : 'px-0.5 pb-0 pt-0.5 sm:px-3 sm:pb-2 sm:pt-1'}`}
@@ -7664,6 +7980,3 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     </div>
   );
 }
-
-
-

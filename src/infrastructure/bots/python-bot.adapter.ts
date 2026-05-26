@@ -26,6 +26,13 @@ type PythonBotDecisionRequest = {
     playerId: 'P1' | 'P2';
     hand: string[];
   };
+  partnerSignal?: {
+    fromSeatId: string;
+    kind: string;
+    strengthHint: 'none' | 'weak' | 'medium' | 'strong';
+    intent: 'save' | 'attack' | 'pressure' | 'neutral';
+    expiresAt: string;
+  };
   bet?: {
     currentValue: number;
     betState: 'idle' | 'awaiting_response';
@@ -114,6 +121,12 @@ const ACCEPTED_REMOTE_STRATEGIES: ReadonlySet<BotDecisionStrategy> = new Set<Bot
   'response-losing-weakest',
   'response-losing-middle',
   'response-losing-strongest',
+  'two-versus-two-partner-winning-save-weakest',
+  'two-versus-two-response-losing-save-weakest',
+  'two-versus-two-signal-hold-save-weakest',
+  'two-versus-two-signal-kill-round-weakest-winner',
+  'two-versus-two-opening-after-first-win-pressure',
+  'two-versus-two-opening-after-first-win-save-weakest',
   'bet-accept',
   'bet-decline',
   'bet-raise',
@@ -258,6 +271,17 @@ export class PythonBotAdapter implements BotDecisionPort {
         playerId: context.player.playerId,
         hand: [...context.player.hand],
       },
+      ...(context.partnerSignal
+        ? {
+            partnerSignal: {
+              fromSeatId: context.partnerSignal.fromSeatId,
+              kind: context.partnerSignal.kind,
+              strengthHint: context.partnerSignal.strengthHint,
+              intent: context.partnerSignal.intent,
+              expiresAt: context.partnerSignal.expiresAt,
+            },
+          }
+        : {}),
       ...(context.bet
         ? {
             bet: {

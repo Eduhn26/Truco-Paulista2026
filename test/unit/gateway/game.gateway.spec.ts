@@ -1913,4 +1913,184 @@ describe('GameGateway bot profile flow', () => {
       },
     });
   });
+  it('emits partner signals only to the human partner socket', async () => {
+    const { gateway, deps, server } = createGateway();
+    const senderSocket = createSocket({ id: 'socket-sender', authToken: 'token-1' });
+    const emitsBySocketId = new Map<string, jest.Mock>();
+
+    server.to.mockImplementation((socketId: string) => {
+      const emit = jest.fn();
+      emitsBySocketId.set(socketId, emit);
+
+      return { emit };
+    });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      socketId: 'socket-sender',
+      matchId: 'match-1',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.roomManager.getState.mockReturnValue({
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+      ],
+    });
+
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-sender',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+      {
+        socketId: 'socket-partner',
+        matchId: 'match-1',
+        seatId: 'T1B',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+      {
+        socketId: 'socket-rival',
+        matchId: 'match-1',
+        seatId: 'T2A',
+        teamId: 'T2',
+        domainPlayerId: 'P2',
+      },
+    ]);
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: {
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: null,
+        playerOneHand: ['5C', 'AO', '3P'],
+        playerTwoHand: ['7O', 'KO', 'JC'],
+        seatHands: {
+          T1A: ['5C', 'AO', '3P'],
+          T1B: ['6C', '7P', 'QO'],
+          T2A: ['7O', 'KO', 'JC'],
+          T2B: ['4C', '6O', 'AE'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    });
+
+    const response = await gateway.handleSendPartnerSignal(senderSocket as never, {
+      matchId: 'match-1',
+      kind: 'has-manilha',
+    });
+
+    expect(response).toEqual(
+      expect.objectContaining({
+        event: 'partner-signal:ack',
+        data: expect.objectContaining({
+          matchId: 'match-1',
+          fromSeatId: 'T1A',
+          toTeamId: 'T1',
+          kind: 'has-manilha',
+          label: 'Tenho manilha',
+        }),
+      }),
+    );
+
+    expect(emitsBySocketId.get('socket-partner')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1A',
+        toTeamId: 'T1',
+        kind: 'has-manilha',
+      }),
+    );
+    expect(emitsBySocketId.has('socket-sender')).toBe(false);
+    expect(emitsBySocketId.has('socket-rival')).toBe(false);
+  });
+
+  it('rejects partner signals outside 2v2 matches', async () => {
+    const { gateway, deps } = createGateway();
+    const senderSocket = createSocket({ id: 'socket-sender', authToken: 'token-1' });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      socketId: 'socket-sender',
+      matchId: 'match-1',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.roomManager.getState.mockReturnValue({
+      mode: '1v1',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+      ],
+    });
+
+    const response = await gateway.handleSendPartnerSignal(senderSocket as never, {
+      matchId: 'match-1',
+      kind: 'has-manilha',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'validation_error',
+        message: 'Partner signals are only available in 2v2 matches.',
+      },
+    });
+  });
 });
