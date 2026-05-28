@@ -563,14 +563,21 @@ function isMaoDeOnzeSpecialState(specialState: string | null | undefined): boole
 }
 
 const PARTNER_SIGNAL_LABEL_BY_KIND: Record<PartnerSignalKind, string> = {
+  'manilha-zap': 'Zap',
+  'manilha-copas': 'Copas',
+  'manilha-espadilha': 'Espadilha',
+  'manilha-ouros': 'Ouros',
   'has-manilha': 'Tenho manilha',
   'strong-manilha': 'Manilha forte',
   'weak-manilha': 'Manilha fraca',
   'no-manilha': 'Tô sem manilha',
+  'strong-hand': 'Tô forte',
   'weak-hand': 'Tô fraco',
   hold: 'Segura',
   'kill-round': 'Mata essa',
-  pressure: 'Pode pressionar',
+  'low-card': 'Joga baixo',
+  pressure: 'Pressiona',
+  'avoid-bet': 'Não compra',
 };
 
 function resolvePartnerSignalFeedbackLabel(kind: PartnerSignalKind): string {

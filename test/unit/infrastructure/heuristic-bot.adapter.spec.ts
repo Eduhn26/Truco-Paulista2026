@@ -121,17 +121,24 @@ describe('HeuristicBotAdapter', () => {
       fromSeatId: 'T1A',
       kind,
       strengthHint:
-        kind === 'strong-manilha'
+        kind === 'manilha-zap' || kind === 'manilha-copas' || kind === 'strong-manilha'
           ? 'strong'
-          : kind === 'has-manilha'
+          : kind === 'manilha-espadilha' ||
+              kind === 'manilha-ouros' ||
+              kind === 'has-manilha' ||
+              kind === 'strong-hand'
             ? 'medium'
             : kind === 'weak-manilha' || kind === 'weak-hand' || kind === 'no-manilha'
               ? 'weak'
               : 'none',
       intent:
-        kind === 'hold'
+        kind === 'hold' || kind === 'low-card' || kind === 'avoid-bet'
           ? 'save'
-          : kind === 'kill-round'
+          : kind === 'kill-round' ||
+              kind === 'manilha-zap' ||
+              kind === 'manilha-copas' ||
+              kind === 'manilha-espadilha' ||
+              kind === 'strong-hand'
             ? 'attack'
             : kind === 'pressure'
               ? 'pressure'
@@ -633,6 +640,40 @@ describe('HeuristicBotAdapter', () => {
     expectPlayCardDecision(decision, 'KO', 'two-versus-two-signal-kill-round-weakest-winner');
   });
 
+
+
+  it('saves the weakest card when the partner signals to play low and our team is winning', () => {
+    const decision = adapter.decide(
+      createContext({
+        mode: '2v2',
+        actorSeatId: 'T1B',
+        actorTeamId: 'T1',
+        partnerSeatId: 'T1A',
+        partnerSignal: createPartnerSignal('low-card'),
+        currentRound: {
+          playerOneCard: null,
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+          orderedPlays: [
+            {
+              ownerId: 'T1A',
+              seatId: 'T1A',
+              playerId: 'P1',
+              card: '3P',
+            },
+          ],
+          winningSeatId: 'T1A',
+        },
+        player: {
+          playerId: 'P1',
+          hand: ['4O', 'KO', '3P'],
+        },
+      }),
+    );
+
+    expectPlayCardDecision(decision, '4O', 'two-versus-two-signal-hold-save-weakest');
+  });
   it('uses the weakest card in 2v2 when it cannot kill the current winning opponent card', () => {
     const decision = adapter.decide(
       createContext({

@@ -158,52 +158,203 @@ const SETTLED_OUTCOME_BADGE_DELAY_MS = 900;
 const LOSER_DIM_DELAY_MS = 260;
 const MAO_DE_FERRO_OPENING_MS = 2600;
 
-const PARTNER_SIGNAL_OPTIONS: Array<{
+type PartnerSignalPresentation = {
   kind: PartnerSignalKind;
   label: string;
+  compactLabel: string;
   description: string;
-}> = [
+  icon: string;
+  accent: string;
+};
+
+type ManilhaPartnerSignalPresentation = PartnerSignalPresentation & {
+  suit: 'P' | 'C' | 'E' | 'O';
+};
+
+const MANILHA_PARTNER_SIGNAL_OPTIONS: ManilhaPartnerSignalPresentation[] = [
   {
-    kind: 'has-manilha',
-    label: 'Tenho manilha',
-    description: 'Força real na dupla.',
+    kind: 'manilha-zap',
+    suit: 'P',
+    label: 'Zap',
+    compactLabel: 'Zap',
+    description: 'Piscar um olho.',
+    icon: '♣',
+    accent: '#f8df96',
   },
   {
-    kind: 'strong-manilha',
-    label: 'Manilha forte',
-    description: 'Pode confiar mais.',
+    kind: 'manilha-copas',
+    suit: 'C',
+    label: 'Copas',
+    compactLabel: 'Copas',
+    description: 'Erguer sobrancelhas.',
+    icon: '♥',
+    accent: '#fca5a5',
   },
   {
-    kind: 'weak-manilha',
-    label: 'Manilha fraca',
-    description: 'Ajuda, mas com cuidado.',
+    kind: 'manilha-espadilha',
+    suit: 'E',
+    label: 'Espadilha',
+    compactLabel: 'Espadilha',
+    description: 'Encher a bochecha.',
+    icon: '♠',
+    accent: '#bfdbfe',
   },
   {
-    kind: 'no-manilha',
-    label: 'Tô sem manilha',
-    description: 'Não conte com manilha.',
+    kind: 'manilha-ouros',
+    suit: 'O',
+    label: 'Ouros',
+    compactLabel: 'Ouros',
+    description: 'Mostrar a língua.',
+    icon: '♦',
+    accent: '#fb923c',
+  },
+];
+
+const TACTICAL_PARTNER_SIGNAL_OPTIONS: PartnerSignalPresentation[] = [
+  {
+    kind: 'strong-hand',
+    label: 'Tô forte',
+    compactLabel: 'Tô forte',
+    description: 'Tenho jogo bom.',
+    icon: '◆',
+    accent: '#f8df96',
   },
   {
     kind: 'weak-hand',
     label: 'Tô fraco',
-    description: 'Preciso de cobertura.',
+    compactLabel: 'Tô fraco',
+    description: 'Preciso cobertura.',
+    icon: '□',
+    accent: '#dccdaa',
   },
   {
     kind: 'hold',
     label: 'Segura',
-    description: 'Economiza carta forte.',
+    compactLabel: 'Segura',
+    description: 'Economiza força.',
+    icon: '●',
+    accent: '#86efac',
   },
   {
     kind: 'kill-round',
     label: 'Mata essa',
+    compactLabel: 'Mata essa',
     description: 'Tenta levar a vaza.',
+    icon: '⚔',
+    accent: '#f8df96',
+  },
+  {
+    kind: 'low-card',
+    label: 'Joga baixo',
+    compactLabel: 'Joga baixo',
+    description: 'Não queima carta.',
+    icon: '↓',
+    accent: '#86efac',
   },
   {
     kind: 'pressure',
-    label: 'Pode pressionar',
+    label: 'Pressiona',
+    compactLabel: 'Pressiona',
     description: 'A mão permite risco.',
+    icon: '▲',
+    accent: '#fb923c',
+  },
+  {
+    kind: 'avoid-bet',
+    label: 'Não compra',
+    compactLabel: 'Não compra',
+    description: 'Evita pagar aposta.',
+    icon: '×',
+    accent: '#fca5a5',
   },
 ];
+
+const LEGACY_PARTNER_SIGNAL_PRESENTATIONS: PartnerSignalPresentation[] = [
+  {
+    kind: 'has-manilha',
+    label: 'Tenho manilha',
+    compactLabel: 'Manilha',
+    description: 'Tenho força na mão.',
+    icon: '★',
+    accent: '#f8df96',
+  },
+  {
+    kind: 'strong-manilha',
+    label: 'Manilha forte',
+    compactLabel: 'Forte',
+    description: 'Pode confiar mais.',
+    icon: '◆',
+    accent: '#f8df96',
+  },
+  {
+    kind: 'weak-manilha',
+    label: 'Manilha fraca',
+    compactLabel: 'Fraca',
+    description: 'Ajuda, com cuidado.',
+    icon: '◇',
+    accent: '#dccdaa',
+  },
+  {
+    kind: 'no-manilha',
+    label: 'Tô sem manilha',
+    compactLabel: 'Sem manilha',
+    description: 'Não conte com ela.',
+    icon: '○',
+    accent: '#dccdaa',
+  },
+];
+
+const PARTNER_SIGNAL_PRESENTATIONS: PartnerSignalPresentation[] = [
+  ...MANILHA_PARTNER_SIGNAL_OPTIONS,
+  ...TACTICAL_PARTNER_SIGNAL_OPTIONS,
+  ...LEGACY_PARTNER_SIGNAL_PRESENTATIONS,
+];
+
+function resolvePartnerSignalPresentationByKind(
+  kind: PartnerSignalKind,
+): PartnerSignalPresentation {
+  return (
+    PARTNER_SIGNAL_PRESENTATIONS.find((option) => option.kind === kind) ?? {
+      kind,
+      label: 'Sinal',
+      compactLabel: 'Sinal',
+      description: 'Comunicação privada.',
+      icon: '•',
+      accent: '#f8df96',
+    }
+  );
+}
+
+function resolvePartnerSignalPresentationByLabel(label: string): PartnerSignalPresentation {
+  return (
+    PARTNER_SIGNAL_PRESENTATIONS.find((option) => option.label === label) ?? {
+      kind: 'hold',
+      label,
+      compactLabel: label,
+      description: 'Comunicação privada.',
+      icon: '•',
+      accent: '#f8df96',
+    }
+  );
+}
+
+function isSpecificManilhaPartnerSignal(kind: PartnerSignalKind): boolean {
+  return MANILHA_PARTNER_SIGNAL_OPTIONS.some((option) => option.kind === kind);
+}
+
+function resolvePartnerSignalDisabledReason({
+  kind,
+  availableManilhaSignalKinds,
+}: {
+  kind: PartnerSignalKind;
+  availableManilhaSignalKinds: readonly PartnerSignalKind[];
+}): string | null {
+  if (isSpecificManilhaPartnerSignal(kind) && !availableManilhaSignalKinds.includes(kind)) {
+    return 'Você não tem essa manilha';
+  }
+
+  return null;
+}
 
 function shouldLogMatchTableShellDebug(): boolean {
   if (!import.meta.env.DEV) {
@@ -510,60 +661,29 @@ function PartnerSignalDock({
   isEnabled,
   lastSignal,
   sentSignal,
+  availableManilhaSignalKinds,
   onSendSignal,
 }: {
   isEnabled: boolean;
   lastSignal: PartnerSignalPayload | null;
   sentSignal: SentPartnerSignalFeedback | null;
+  availableManilhaSignalKinds: readonly PartnerSignalKind[];
   onSendSignal?: (kind: PartnerSignalKind) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isManilhaMenuOpen, setIsManilhaMenuOpen] = useState(false);
   const isDisabled = !isEnabled || !onSendSignal;
-  const visibleSignal = sentSignal
-    ? {
-        id: sentSignal.id,
-        eyebrow: 'Sinal enviado',
-        label: sentSignal.label,
-        detail: 'Enviado para o parceiro.',
-        accent: '#f8df96',
-        dot: '#f8df96',
-        background:
-          'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.18), transparent 40%), linear-gradient(180deg, rgba(34,27,13,0.96), rgba(6,10,8,0.96))',
-        border: '1px solid rgba(248,223,150,0.30)',
-        shadow:
-          '0 18px 34px rgba(0,0,0,0.38), 0 0 20px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.08)',
-      }
-    : lastSignal
-      ? {
-          id: lastSignal.signalId,
-          eyebrow: 'Sinal da dupla',
-          label: lastSignal.label,
-          detail: 'Seu parceiro sinalizou.',
-          accent: '#86efac',
-          dot: '#4ade80',
-          background:
-            'radial-gradient(circle at 18% 0%, rgba(134,239,172,0.18), transparent 40%), linear-gradient(180deg, rgba(12,30,22,0.96), rgba(4,9,7,0.96))',
-          border: '1px solid rgba(134,239,172,0.28)',
-          shadow:
-            '0 18px 34px rgba(0,0,0,0.38), 0 0 20px rgba(34,197,94,0.12), inset 0 1px 0 rgba(255,255,255,0.08)',
-        }
-      : null;
-  const handSignals = PARTNER_SIGNAL_OPTIONS.filter(
-    (signal) =>
-      signal.kind === 'has-manilha' ||
-      signal.kind === 'strong-manilha' ||
-      signal.kind === 'weak-manilha' ||
-      signal.kind === 'no-manilha' ||
-      signal.kind === 'weak-hand',
-  );
-  const intentSignals = PARTNER_SIGNAL_OPTIONS.filter(
-    (signal) =>
-      signal.kind === 'hold' || signal.kind === 'kill-round' || signal.kind === 'pressure',
-  );
+  const sentSignalPresentation = sentSignal
+    ? resolvePartnerSignalPresentationByLabel(sentSignal.label)
+    : null;
+  const receivedSignalPresentation = lastSignal
+    ? resolvePartnerSignalPresentationByKind(lastSignal.kind)
+    : null;
 
   useEffect(() => {
     if (isDisabled) {
       setIsMenuOpen(false);
+      setIsManilhaMenuOpen(false);
     }
   }, [isDisabled]);
 
@@ -574,180 +694,278 @@ function PartnerSignalDock({
 
     onSendSignal(kind);
     setIsMenuOpen(false);
+    setIsManilhaMenuOpen(false);
   };
 
-  const renderSignalButton = (signal: (typeof PARTNER_SIGNAL_OPTIONS)[number]) => (
-    <button
-      key={signal.kind}
-      type="button"
-      onClick={() => handleSendSignal(signal.kind)}
-      className="group rounded-[14px] px-2.5 py-2 text-left transition hover:-translate-y-0.5 hover:bg-white/[0.055] focus:outline-none focus:ring-1 focus:ring-[#f8df96]/45"
-      style={{
-        border: '1px solid rgba(255,255,255,0.055)',
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015))',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.045)',
-      }}
-    >
-      <span className="block text-[10px] font-black leading-none text-[#f0e6d3] transition group-hover:text-[#fff4dc]">
-        {signal.label}
-      </span>
-      <span className="mt-1 block text-[8px] font-bold leading-tight text-[#dccdaa]/58">
-        {signal.description}
-      </span>
-    </button>
-  );
+  const renderSignalButton = (signal: PartnerSignalPresentation) => {
+    const disabledReason = resolvePartnerSignalDisabledReason({
+      kind: signal.kind,
+      availableManilhaSignalKinds,
+    });
+    const isSignalDisabled = Boolean(disabledReason);
 
-  return (
-    <div
-      className="pointer-events-auto absolute z-[76]"
-      style={{
-        bottom: 'clamp(5.4rem, 11vh, 7.4rem)',
-        left: 'clamp(1rem, 5.6vw, 4.5rem)',
-        width: 'min(344px, calc(100vw - 2rem))',
-      }}
-    >
-      <div className="relative flex items-start">
-        <motion.button
-          type="button"
-          disabled={isDisabled}
-          onClick={() => setIsMenuOpen((current) => !current)}
-          className="relative inline-flex h-9 items-center gap-2 overflow-hidden rounded-full px-3.5 text-[9px] font-black uppercase tracking-[0.18em] transition disabled:cursor-not-allowed disabled:opacity-45"
-          aria-expanded={isMenuOpen}
-          {...(!isDisabled
-            ? {
-                whileHover: { y: -1, scale: 1.025 },
-                whileTap: { scale: 0.97 },
-              }
-            : {})}
+    return (
+      <button
+        key={signal.kind}
+        type="button"
+        disabled={isSignalDisabled}
+        title={disabledReason ?? signal.label}
+        onClick={() => {
+          if (isSignalDisabled) {
+            return;
+          }
+
+          handleSendSignal(signal.kind);
+        }}
+        className="group relative min-h-[50px] overflow-hidden rounded-[13px] px-2 py-1.5 text-left transition enabled:hover:-translate-y-0.5 enabled:hover:bg-white/[0.055] focus:outline-none focus:ring-1 focus:ring-[#f8df96]/45 disabled:cursor-not-allowed disabled:opacity-45"
+        style={{
+          border: isSignalDisabled
+            ? '1px solid rgba(255,255,255,0.035)'
+            : '1px solid rgba(255,255,255,0.06)',
+          background: isSignalDisabled
+            ? 'linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.008))'
+            : 'radial-gradient(circle at 26% 0%, rgba(255,241,184,0.055), transparent 42%), linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.014))',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.045)',
+        }}
+      >
+        <span
+          aria-hidden
+          className="absolute right-2 top-1.5 text-[14px] leading-none opacity-80 transition"
           style={{
-            color: '#f8df96',
-            background:
-              'radial-gradient(circle at 24% 0%, rgba(255,241,184,0.16), transparent 40%), linear-gradient(180deg, rgba(35, 28, 14, 0.96), rgba(7, 11, 8, 0.92))',
-            border: '1px solid rgba(248, 223, 150, 0.38)',
-            boxShadow:
-              '0 12px 28px rgba(0,0,0,0.34), 0 0 18px rgba(201,168,76,0.14), inset 0 1px 0 rgba(255,255,255,0.11)',
+            color: isSignalDisabled ? 'rgba(220,205,170,0.36)' : signal.accent,
+            textShadow: isSignalDisabled ? 'none' : `0 0 10px ${signal.accent}`,
           }}
         >
-          <span
-            aria-hidden
-            className="h-1.5 w-1.5 rounded-full"
+          {signal.icon}
+        </span>
+        <span
+          className="block max-w-[82px] text-[9px] font-black leading-none transition"
+          style={{ color: isSignalDisabled ? 'rgba(220,205,170,0.50)' : '#f0e6d3' }}
+        >
+          {signal.compactLabel}
+        </span>
+        <span className="mt-1 block max-w-[88px] text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] text-[#dccdaa]/54">
+          {disabledReason ?? signal.description}
+        </span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[76]">
+      <AnimatePresence>
+        {receivedSignalPresentation && !isMenuOpen ? (
+          <motion.div
+            key={lastSignal?.signalId ?? receivedSignalPresentation.kind}
+            className="absolute overflow-hidden rounded-full px-3 py-1.5 backdrop-blur-xl"
+            initial={{ opacity: 0, y: 5, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
             style={{
-              background: isMenuOpen ? '#86efac' : '#f8df96',
-              boxShadow: isMenuOpen
-                ? '0 0 12px rgba(134,239,172,0.74)'
-                : '0 0 12px rgba(248,223,150,0.62)',
+              top: 'clamp(4.05rem, 7.6vh, 4.85rem)',
+              left: 'calc(50% + clamp(5.1rem, 8.8vw, 7.8rem))',
+              width: '166px',
+              background:
+                'radial-gradient(circle at 18% 0%, rgba(134,239,172,0.14), transparent 42%), linear-gradient(180deg, rgba(8,18,14,0.96), rgba(3,8,6,0.94))',
+              border: '1px solid rgba(134,239,172,0.24)',
+              boxShadow:
+                '0 10px 22px rgba(0,0,0,0.30), 0 0 14px rgba(34,197,94,0.10), inset 0 1px 0 rgba(255,255,255,0.08)',
             }}
-          />
-          Sinais
-        </motion.button>
-
-        <AnimatePresence>
-          {visibleSignal && !isMenuOpen ? (
-            <motion.div
-              key={visibleSignal.id}
-              className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[18px] px-3 py-2.5 backdrop-blur-xl"
-              initial={{ opacity: 0, y: 8, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{
-                width: 'min(274px, calc(100vw - 2rem))',
-                background: visibleSignal.background,
-                border: visibleSignal.border,
-                boxShadow: visibleSignal.shadow,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className="h-2 w-2 rounded-full"
-                  style={{
-                    background: visibleSignal.dot,
-                    boxShadow: `0 0 14px ${visibleSignal.dot}`,
-                  }}
-                />
-                <div
-                  className="text-[8px] font-black uppercase tracking-[0.22em]"
-                  style={{ color: visibleSignal.accent }}
-                >
-                  {visibleSignal.eyebrow}
-                </div>
-              </div>
-              <div className="mt-1.5 text-[13px] font-black leading-none text-[#f0e6d3]">
-                {visibleSignal.label}
-              </div>
-              <div className="mt-1 text-[8px] font-bold uppercase tracking-[0.14em] text-[#dccdaa]/55">
-                {visibleSignal.detail}
-              </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-
-        <AnimatePresence>
-          {isMenuOpen ? (
-            <motion.div
-              key="partner-signal-menu"
-              className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[24px] p-2.5 backdrop-blur-xl"
-              initial={{ opacity: 0, y: 10, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{
-                width: 'min(344px, calc(100vw - 2rem))',
-                background:
-                  'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.18), transparent 34%), linear-gradient(180deg, rgba(10,18,14,0.97), rgba(4,8,7,0.96))',
-                border: '1px solid rgba(248,223,150,0.20)',
-                boxShadow:
-                  '0 24px 48px rgba(0,0,0,0.46), 0 0 24px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.08)',
-              }}
-            >
-              <div className="flex items-center justify-between gap-3 px-1 pb-2">
-                <div>
-                  <div className="text-[8px] font-black uppercase tracking-[0.24em] text-[#c9a84c]">
-                    Sinal privado
-                  </div>
-                  <div className="mt-0.5 text-[9px] font-bold text-[#dccdaa]/58">
-                    Só sua dupla recebe.
-                  </div>
-                </div>
-                <span
-                  className="rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] text-[#86efac]"
-                  style={{
-                    background: 'rgba(34,197,94,0.08)',
-                    border: '1px solid rgba(134,239,172,0.16)',
-                  }}
-                >
-                  Dupla
-                </span>
-              </div>
-
-              <div
-                className="rounded-[18px] p-1.5"
-                style={{ background: 'rgba(0,0,0,0.16)' }}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden
+                className="text-[13px] leading-none"
+                style={{
+                  color: receivedSignalPresentation.accent,
+                  textShadow: `0 0 10px ${receivedSignalPresentation.accent}`,
+                }}
               >
-                <div className="px-1 pb-1 text-[7px] font-black uppercase tracking-[0.22em] text-[#f8df96]/72">
-                  Força da mão
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {handSignals.map(renderSignalButton)}
-                </div>
-              </div>
+                {receivedSignalPresentation.icon}
+              </span>
 
-              <div
-                className="mt-2 rounded-[18px] p-1.5"
-                style={{ background: 'rgba(0,0,0,0.13)' }}
-              >
-                <div className="px-1 pb-1 text-[7px] font-black uppercase tracking-[0.22em] text-[#86efac]/72">
-                  Intenção
+              <div className="min-w-0">
+                <div className="text-[6.5px] font-black uppercase leading-none tracking-[0.16em] text-[#86efac]/78">
+                  Sinal da dupla
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {intentSignals.map(renderSignalButton)}
+                <div className="mt-1 truncate text-[11px] font-black leading-none text-[#f0e6d3]">
+                  {receivedSignalPresentation.compactLabel}
                 </div>
               </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <div
+        className="pointer-events-auto absolute"
+        style={{
+          bottom: 'clamp(2.6rem, 6.5vh, 4.2rem)',
+          left: 'clamp(1.1rem, 4vw, 3.1rem)',
+          width: 'min(236px, calc(100vw - 1.5rem))',
+        }}
+      >
+        <div className="relative flex items-end">
+          <motion.button
+            type="button"
+            disabled={isDisabled}
+            onClick={() => setIsMenuOpen((current) => !current)}
+            className="relative inline-flex h-8 items-center gap-2 overflow-hidden rounded-full px-3 text-[8px] font-black uppercase tracking-[0.18em] transition disabled:cursor-not-allowed disabled:opacity-45"
+            aria-expanded={isMenuOpen}
+            {...(!isDisabled
+              ? {
+                  whileHover: { y: -1, scale: 1.025 },
+                  whileTap: { scale: 0.97 },
+                }
+              : {})}
+            style={{
+              color: '#f8df96',
+              background:
+                'radial-gradient(circle at 24% 0%, rgba(255,241,184,0.14), transparent 40%), linear-gradient(180deg, rgba(35,28,14,0.96), rgba(7,11,8,0.92))',
+              border: '1px solid rgba(248,223,150,0.34)',
+              boxShadow:
+                '0 10px 22px rgba(0,0,0,0.32), 0 0 14px rgba(201,168,76,0.12), inset 0 1px 0 rgba(255,255,255,0.10)',
+            }}
+          >
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 rounded-full"
+              style={{
+                background: isMenuOpen ? '#86efac' : '#f8df96',
+                boxShadow: isMenuOpen
+                  ? '0 0 10px rgba(134,239,172,0.72)'
+                  : '0 0 10px rgba(248,223,150,0.58)',
+              }}
+            />
+            Sinais
+          </motion.button>
+
+          <AnimatePresence>
+            {sentSignalPresentation && sentSignal && !isMenuOpen ? (
+              <motion.div
+                key={sentSignal.id}
+                className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[12px] px-2.5 py-2 backdrop-blur-xl"
+                initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+                style={{
+                  width: 'min(190px, calc(100vw - 1.5rem))',
+                  background:
+                    'radial-gradient(circle at 12% 0%, rgba(134,239,172,0.15), transparent 38%), linear-gradient(180deg, rgba(8,21,15,0.96), rgba(4,8,7,0.95))',
+                  border: '1px solid rgba(134,239,172,0.24)',
+                  boxShadow:
+                    '0 12px 24px rgba(0,0,0,0.34), 0 0 14px rgba(34,197,94,0.10), inset 0 1px 0 rgba(255,255,255,0.07)',
+                }}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-black"
+                    style={{
+                      color: '#082016',
+                      background: 'linear-gradient(180deg, #86efac, #22c55e)',
+                      boxShadow: '0 0 12px rgba(34,197,94,0.36)',
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-[9px] font-black leading-none text-[#f0e6d3]">
+                      Sinal enviado — {sentSignalPresentation.compactLabel}
+                    </div>
+                    <div className="mt-1 text-[6.5px] font-black uppercase tracking-[0.15em] text-[#dccdaa]/50">
+                      Para sua dupla
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {isMenuOpen ? (
+              <motion.div
+                key="partner-signal-menu"
+                className="absolute bottom-[calc(100%+8px)] left-0 overflow-hidden rounded-[18px] p-2 backdrop-blur-xl"
+                initial={{ opacity: 0, y: 10, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+                style={{
+                  width: 'min(236px, calc(100vw - 1.5rem))',
+                  background:
+                    'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.16), transparent 34%), linear-gradient(180deg, rgba(9,16,13,0.98), rgba(4,8,7,0.97))',
+                  border: '1px solid rgba(248,223,150,0.19)',
+                  boxShadow:
+                    '0 20px 38px rgba(0,0,0,0.44), 0 0 20px rgba(201,168,76,0.10), inset 0 1px 0 rgba(255,255,255,0.08)',
+                }}
+              >
+                <div className="flex items-center justify-between gap-3 px-1 pb-2">
+                  <div className="text-[7px] font-black uppercase tracking-[0.24em] text-[#c9a84c]">
+                    Sinais
+                  </div>
+                  <span className="text-[6.5px] font-black uppercase tracking-[0.16em] text-[#86efac]/76">
+                    Privado
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    disabled={availableManilhaSignalKinds.length === 0}
+                    onClick={() => setIsManilhaMenuOpen((current) => !current)}
+                    className="relative flex min-h-[42px] w-full items-center justify-between overflow-hidden rounded-[14px] px-3 py-2 text-left transition enabled:hover:-translate-y-0.5 enabled:hover:bg-white/[0.055] focus:outline-none focus:ring-1 focus:ring-[#f8df96]/45 disabled:cursor-not-allowed disabled:opacity-45"
+                    style={{
+                      background:
+                        'radial-gradient(circle at 18% 0%, rgba(248,223,150,0.12), transparent 38%), linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.014))',
+                      border: '1px solid rgba(248,223,150,0.16)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.055)',
+                    }}
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-[9px] font-black uppercase leading-none tracking-[0.16em] text-[#f8df96]">
+                        Tenho manilha
+                      </span>
+                      <span className="mt-1 block text-[6.5px] font-black uppercase tracking-[0.12em] text-[#dccdaa]/58">
+                        {availableManilhaSignalKinds.length > 0
+                          ? 'Escolha Zap, Copas, Espadilha ou Ouros'
+                          : 'Sem manilha na mão'}
+                      </span>
+                    </span>
+                    <span
+                      aria-hidden
+                      className="text-[13px] font-black leading-none text-[#f8df96]"
+                      style={{ textShadow: '0 0 10px rgba(248,223,150,0.32)' }}
+                    >
+                      {isManilhaMenuOpen ? '−' : '+'}
+                    </span>
+                  </button>
+
+                  <AnimatePresence initial={false}>
+                    {isManilhaMenuOpen ? (
+                      <motion.div
+                        key="partner-signal-manilha-submenu"
+                        className="grid grid-cols-2 gap-1.5"
+                        initial={{ opacity: 0, y: -4, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: 'auto' }}
+                        exit={{ opacity: 0, y: -4, height: 0 }}
+                        transition={{ duration: 0.16, ease: [0.2, 0.8, 0.2, 1] }}
+                      >
+                        {MANILHA_PARTNER_SIGNAL_OPTIONS.map(renderSignalButton)}
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {TACTICAL_PARTNER_SIGNAL_OPTIONS.map(renderSignalButton)}
+                  </div>
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );
@@ -1237,6 +1455,15 @@ function resolveManilhaRank(viraRank: Rank): Rank {
   }
 
   return TRUCO_RANK_ORDER[(viraIndex + 1) % TRUCO_RANK_ORDER.length]!;
+}
+
+function resolveManilhaSignalKindBySuit(suit: string): PartnerSignalKind | null {
+  if (suit === 'P') return 'manilha-zap';
+  if (suit === 'C') return 'manilha-copas';
+  if (suit === 'E') return 'manilha-espadilha';
+  if (suit === 'O') return 'manilha-ouros';
+
+  return null;
 }
 
 function getTwoVersusTwoCardStrength(card: string | null | undefined, viraRank: Rank): number {
@@ -7371,6 +7598,28 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
     !isNewHandOpeningLocked &&
     !isMaoDeFerroOpeningOpen &&
     Boolean(currentPrivateHand);
+  const myManilhaRank = props.currentPrivateViraRank
+    ? resolveManilhaRank(props.currentPrivateViraRank)
+    : null;
+  const availableManilhaSignalKinds = useMemo(() => {
+    if (!myManilhaRank) {
+      return [];
+    }
+
+    return props.myCards.reduce<PartnerSignalKind[]>((signals, card) => {
+      if (card.rank !== myManilhaRank) {
+        return signals;
+      }
+
+      const signalKind = resolveManilhaSignalKindBySuit(card.suit);
+
+      if (signalKind && !signals.includes(signalKind)) {
+        signals.push(signalKind);
+      }
+
+      return signals;
+    }, []);
+  }, [myManilhaRank, props.myCards]);
 
   const handleClimaxDismiss = useCallback(() => {
     debugMatchTableShell('handClimax:dismiss-clicked', {
@@ -7551,6 +7800,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
           isEnabled={canUsePartnerSignals}
           lastSignal={props.partnerSignal ?? null}
           sentSignal={props.sentPartnerSignal ?? null}
+          availableManilhaSignalKinds={availableManilhaSignalKinds}
           {...(props.onSendPartnerSignal ? { onSendSignal: props.onSendPartnerSignal } : {})}
         />
       ) : null}

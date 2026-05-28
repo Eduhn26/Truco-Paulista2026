@@ -495,14 +495,21 @@ type PendingTeamBetDecision = {
 };
 
 type PartnerSignalKind =
+  | 'manilha-zap'
+  | 'manilha-copas'
+  | 'manilha-espadilha'
+  | 'manilha-ouros'
   | 'has-manilha'
   | 'strong-manilha'
   | 'weak-manilha'
   | 'no-manilha'
+  | 'strong-hand'
   | 'weak-hand'
   | 'hold'
   | 'kill-round'
-  | 'pressure';
+  | 'low-card'
+  | 'pressure'
+  | 'avoid-bet';
 
 type PartnerSignalPayload = {
   signalId: string;
@@ -520,25 +527,39 @@ type PartnerSignalRecord = PartnerSignalPayload & {
 };
 
 const PARTNER_SIGNAL_KINDS = new Set<PartnerSignalKind>([
+  'manilha-zap',
+  'manilha-copas',
+  'manilha-espadilha',
+  'manilha-ouros',
   'has-manilha',
   'strong-manilha',
   'weak-manilha',
   'no-manilha',
+  'strong-hand',
   'weak-hand',
   'hold',
   'kill-round',
+  'low-card',
   'pressure',
+  'avoid-bet',
 ]);
 
 const PARTNER_SIGNAL_LABELS: Record<PartnerSignalKind, string> = {
+  'manilha-zap': 'Zap',
+  'manilha-copas': 'Copas',
+  'manilha-espadilha': 'Espadilha',
+  'manilha-ouros': 'Ouros',
   'has-manilha': 'Tenho manilha',
   'strong-manilha': 'Manilha forte',
   'weak-manilha': 'Manilha fraca',
   'no-manilha': 'Tô sem manilha',
+  'strong-hand': 'Tô forte',
   'weak-hand': 'Tô fraco',
   hold: 'Segura',
   'kill-round': 'Mata essa',
-  pressure: 'Pode pressionar',
+  'low-card': 'Joga baixo',
+  pressure: 'Pressiona',
+  'avoid-bet': 'Não compra',
 };
 
 const PARTNER_SIGNAL_COOLDOWN_MS = 3500;
@@ -770,6 +791,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private isManilhaPartnerSignal(kind: PartnerSignalKind): boolean {
     return (
+      kind === 'manilha-zap' ||
+      kind === 'manilha-copas' ||
+      kind === 'manilha-espadilha' ||
+      kind === 'manilha-ouros' ||
       kind === 'has-manilha' ||
       kind === 'strong-manilha' ||
       kind === 'weak-manilha' ||
@@ -777,20 +802,54 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
   }
 
+  private resolveRequiredManilhaSuit(kind: PartnerSignalKind): 'P' | 'C' | 'E' | 'O' | null {
+    if (kind === 'manilha-zap') return 'P';
+    if (kind === 'manilha-copas') return 'C';
+    if (kind === 'manilha-espadilha') return 'E';
+    if (kind === 'manilha-ouros') return 'O';
+
+    return null;
+  }
+
   private readCardRank(card: string): string {
     return card.slice(0, -1);
+  }
+
+  private readCardSuit(card: string): string {
+    return card.slice(-1);
+  }
+
+  private resolveSeatCards(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): string[] {
+    return (
+      currentHand.seatHands?.[seatId] ??
+      (seatId.startsWith('T1') ? currentHand.playerOneHand : currentHand.playerTwoHand)
+    );
   }
 
   private hasSeatManilha(
     currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
     seatId: SeatId,
   ): boolean {
-    const seatCards =
-      currentHand.seatHands?.[seatId] ??
-      (seatId.startsWith('T1') ? currentHand.playerOneHand : currentHand.playerTwoHand);
+    const seatCards = this.resolveSeatCards(currentHand, seatId);
     const manilhaRank = manilhaRankFromVira(currentHand.viraRank as Rank);
 
     return seatCards.some((card) => this.readCardRank(card) === manilhaRank);
+  }
+
+  private hasSeatSpecificManilha(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+    suit: 'P' | 'C' | 'E' | 'O',
+  ): boolean {
+    const seatCards = this.resolveSeatCards(currentHand, seatId);
+    const manilhaRank = manilhaRankFromVira(currentHand.viraRank as Rank);
+
+    return seatCards.some(
+      (card) => this.readCardRank(card) === manilhaRank && this.readCardSuit(card) === suit,
+    );
   }
 
   private validatePartnerSignalAgainstHand(
@@ -802,13 +861,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return null;
     }
 
+    const requiredSuit = this.resolveRequiredManilhaSuit(kind);
+
+    if (requiredSuit && !this.hasSeatSpecificManilha(currentHand, seatId, requiredSuit)) {
+      return `Cannot send ${PARTNER_SIGNAL_LABELS[kind]} without holding that manilha.`;
+    }
+
     const hasManilha = this.hasSeatManilha(currentHand, seatId);
 
     if (kind === 'no-manilha' && hasManilha) {
       return 'Cannot send "Tô sem manilha" while holding a manilha.';
     }
 
-    if (kind !== 'no-manilha' && !hasManilha) {
+    if (!requiredSuit && kind !== 'no-manilha' && !hasManilha) {
       return 'Cannot send a manilha signal without holding a manilha.';
     }
 
@@ -879,11 +944,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private resolvePartnerSignalStrengthHint(
     kind: PartnerSignalKind,
   ): BotPartnerSignalView['strengthHint'] {
-    if (kind === 'strong-manilha') {
+    if (kind === 'manilha-zap' || kind === 'manilha-copas' || kind === 'strong-manilha') {
       return 'strong';
     }
 
-    if (kind === 'has-manilha') {
+    if (
+      kind === 'manilha-espadilha' ||
+      kind === 'manilha-ouros' ||
+      kind === 'has-manilha' ||
+      kind === 'strong-hand'
+    ) {
       return 'medium';
     }
 
@@ -895,7 +965,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private resolvePartnerSignalIntent(kind: PartnerSignalKind): BotPartnerSignalView['intent'] {
-    if (kind === 'hold') {
+    if (kind === 'hold' || kind === 'low-card' || kind === 'avoid-bet') {
       return 'save';
     }
 
@@ -907,7 +977,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return 'pressure';
     }
 
-    if (kind === 'strong-manilha' || kind === 'has-manilha') {
+    if (
+      kind === 'manilha-zap' ||
+      kind === 'manilha-copas' ||
+      kind === 'manilha-espadilha' ||
+      kind === 'strong-manilha' ||
+      kind === 'has-manilha' ||
+      kind === 'strong-hand'
+    ) {
       return 'attack';
     }
 

@@ -26,6 +26,7 @@ type TestSocket = {
     auth?: Record<string, unknown>;
   };
   join: jest.Mock<Promise<void>, [string]>;
+  leave: jest.Mock<Promise<void>, [string]>;
   emit: jest.Mock<void, [string, unknown]>;
   disconnect: jest.Mock<void, [boolean?]>;
 };
@@ -74,6 +75,7 @@ function createSocket(options?: { id?: string; authToken?: string; token?: strin
       auth,
     },
     join: jest.fn().mockResolvedValue(undefined),
+    leave: jest.fn().mockResolvedValue(undefined),
     emit: jest.fn(),
     disconnect: jest.fn(),
   };
@@ -151,6 +153,7 @@ describe('GameGateway bot profile flow', () => {
       getHumanSessions: jest.fn().mockReturnValue([]),
       getSessionBySocketId: jest.fn(),
       leave: jest.fn(),
+      leaveMatch: jest.fn().mockReturnValue(null),
       fillMissingSeatsWithBots: jest.fn(),
       reserveNextHumanSeat: jest.fn(),
       setReady: jest.fn(),
@@ -1027,7 +1030,7 @@ describe('GameGateway bot profile flow', () => {
     });
   });
 
-  it('rejects queue join when player is already assigned to a room', async () => {
+  it('detaches the active room before joining the public queue', async () => {
     const { gateway, deps } = createGateway();
     const socket = createSocket({
       id: 'socket-room-1',
@@ -1040,20 +1043,39 @@ describe('GameGateway bot profile flow', () => {
       teamId: 'T1',
       domainPlayerId: 'P1',
     });
+    deps.roomManager.leaveMatch.mockReturnValue({
+      matchId: 'match-1',
+      roomState: null,
+    });
+    deps.getOrCreatePlayerProfileUseCase.execute.mockResolvedValue({
+      profile: {
+        id: 'profile-room-1',
+        rating: 1180,
+      },
+    });
 
     const response = await gateway.handleJoinQueue(socket as never, {
       mode: '1v1',
     });
 
+    expect(deps.roomManager.leaveMatch).toHaveBeenCalledWith('socket-room-1');
+    expect(socket.leave).toHaveBeenCalledWith('match-1');
+    expect(socket.emit).toHaveBeenCalledWith('room-left', { matchId: 'match-1' });
     expect(response).toEqual({
-      event: 'error',
+      event: 'queue-joined',
       data: {
-        code: 'transport_error',
-        message: 'Player is already assigned to a room.',
+        mode: '1v1',
+        size: 1,
+        playersWaiting: [
+          expect.objectContaining({
+            socketId: 'socket-room-1',
+            userId: 'auth-user-1',
+            playerToken: 'auth:auth-user-1',
+            rating: 1180,
+          }),
+        ],
       },
     });
-
-    expect(deps.getOrCreatePlayerProfileUseCase.execute).not.toHaveBeenCalled();
   });
 
   it('rejects queue join when mode is invalid', async () => {
@@ -1198,14 +1220,22 @@ describe('GameGateway bot profile flow', () => {
     expect(firstSocket.join).toHaveBeenCalledWith('queue-match-1');
     expect(secondSocket.join).toHaveBeenCalledWith('queue-match-1');
 
-    expect(deps.roomManager.join).toHaveBeenCalledWith('queue-match-1', 'socket-match-1', {
-      userId: 'auth-user-match-1',
-      playerToken: 'auth:auth-user-match-1',
-    });
-    expect(deps.roomManager.join).toHaveBeenCalledWith('queue-match-1', 'socket-match-2', {
-      userId: 'auth-user-match-2',
-      playerToken: 'auth:auth-user-match-2',
-    });
+    expect(deps.roomManager.join).toHaveBeenCalledWith(
+      'queue-match-1',
+      'socket-match-1',
+      expect.objectContaining({
+        userId: 'auth-user-match-1',
+        playerToken: 'auth:auth-user-match-1',
+      }),
+    );
+    expect(deps.roomManager.join).toHaveBeenCalledWith(
+      'queue-match-1',
+      'socket-match-2',
+      expect.objectContaining({
+        userId: 'auth-user-match-2',
+        playerToken: 'auth:auth-user-match-2',
+      }),
+    );
 
     expect(firstSocket.emit).toHaveBeenCalledWith(
       'player-assigned',
@@ -2020,7 +2050,7 @@ describe('GameGateway bot profile flow', () => {
 
     const response = await gateway.handleSendPartnerSignal(senderSocket as never, {
       matchId: 'match-1',
-      kind: 'has-manilha',
+      kind: 'manilha-copas',
     });
 
     expect(response).toEqual(
@@ -2030,8 +2060,8 @@ describe('GameGateway bot profile flow', () => {
           matchId: 'match-1',
           fromSeatId: 'T1A',
           toTeamId: 'T1',
-          kind: 'has-manilha',
-          label: 'Tenho manilha',
+          kind: 'manilha-copas',
+          label: 'Copas',
         }),
       }),
     );
@@ -2042,11 +2072,98 @@ describe('GameGateway bot profile flow', () => {
         matchId: 'match-1',
         fromSeatId: 'T1A',
         toTeamId: 'T1',
-        kind: 'has-manilha',
+        kind: 'manilha-copas',
       }),
     );
     expect(emitsBySocketId.has('socket-sender')).toBe(false);
     expect(emitsBySocketId.has('socket-rival')).toBe(false);
+  });
+
+  it('rejects a specific manilha signal when the player does not hold that suit', async () => {
+    const { gateway, deps } = createGateway();
+    const senderSocket = createSocket({ id: 'socket-sender', authToken: 'token-1' });
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      socketId: 'socket-sender',
+      matchId: 'match-1',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+
+    deps.roomManager.getState.mockReturnValue({
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+      ],
+    });
+
+    deps.viewMatchStateUseCase.execute.mockResolvedValue({
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: {
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: null,
+        playerOneHand: ['5C', 'AO', '3P'],
+        playerTwoHand: ['7O', 'KO', 'JC'],
+        seatHands: {
+          T1A: ['5C', 'AO', '3P'],
+          T1B: ['6C', '7P', 'QO'],
+          T2A: ['7O', 'KO', 'JC'],
+          T2B: ['4C', '6O', 'AE'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    });
+
+    const response = await gateway.handleSendPartnerSignal(senderSocket as never, {
+      matchId: 'match-1',
+      kind: 'manilha-zap',
+    });
+
+    expect(response).toEqual({
+      event: 'error',
+      data: {
+        code: 'validation_error',
+        message: 'Cannot send Zap without holding that manilha.',
+      },
+    });
   });
 
   it('rejects partner signals outside 2v2 matches', async () => {

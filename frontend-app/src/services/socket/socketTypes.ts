@@ -154,14 +154,21 @@ export type QueueTimeoutPayload = {
 };
 
 export type PartnerSignalKind =
+  | 'manilha-zap'
+  | 'manilha-copas'
+  | 'manilha-espadilha'
+  | 'manilha-ouros'
   | 'has-manilha'
   | 'strong-manilha'
   | 'weak-manilha'
   | 'no-manilha'
+  | 'strong-hand'
   | 'weak-hand'
   | 'hold'
   | 'kill-round'
-  | 'pressure';
+  | 'low-card'
+  | 'pressure'
+  | 'avoid-bet';
 
 export type PartnerSignalPayload = {
   signalId: string;

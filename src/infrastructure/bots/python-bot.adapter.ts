@@ -7,6 +7,7 @@ import type {
   BotDecisionPort,
   BotDecisionRationale,
   BotDecisionStrategy,
+  BotPartnerSignalKind,
 } from '@game/application/ports/bot-decision.port';
 import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.adapter';
 
@@ -28,7 +29,7 @@ type PythonBotDecisionRequest = {
   };
   partnerSignal?: {
     fromSeatId: string;
-    kind: string;
+    kind: BotPartnerSignalKind;
     strengthHint: 'none' | 'weak' | 'medium' | 'strong';
     intent: 'save' | 'attack' | 'pressure' | 'neutral';
     expiresAt: string;

@@ -105,22 +105,36 @@ const PARTNER_BY_SEAT: Record<BotSeatId, BotSeatId> = {
 };
 
 const PARTNER_SIGNAL_BET_BOOST_BY_KIND: Record<BotPartnerSignalKind, number> = {
+  'manilha-zap': 0.34,
+  'manilha-copas': 0.26,
+  'manilha-espadilha': 0.16,
+  'manilha-ouros': 0.08,
   'strong-manilha': 0.28,
   'has-manilha': 0.14,
   'weak-manilha': 0.06,
   'no-manilha': -0.1,
+  'strong-hand': 0.18,
   'weak-hand': -0.16,
   hold: -0.08,
   'kill-round': 0.04,
+  'low-card': -0.1,
   pressure: 0.1,
+  'avoid-bet': -0.22,
 };
 
 const PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND: Partial<Record<BotPartnerSignalKind, number>> =
   {
     pressure: 0.05,
+    'manilha-zap': 0.06,
+    'manilha-copas': 0.04,
+    'manilha-espadilha': 0.02,
     'strong-manilha': 0.04,
     'has-manilha': 0.02,
+    'strong-hand': 0.03,
+    'no-manilha': -0.05,
     hold: -0.04,
+    'low-card': -0.04,
+    'avoid-bet': -0.08,
   };
 
 @Injectable()
@@ -1079,7 +1093,11 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
       return {
         card: selectedCard,
-        strategy: 'two-versus-two-partner-winning-save-weakest',
+        strategy:
+          this.getActivePartnerSignal(context)?.kind === 'hold' ||
+          this.getActivePartnerSignal(context)?.kind === 'low-card'
+            ? 'two-versus-two-signal-hold-save-weakest'
+            : 'two-versus-two-partner-winning-save-weakest',
         tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
       };
     }
@@ -1088,7 +1106,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const activeSignal = this.getActivePartnerSignal(context);
 
     if (
-      activeSignal?.kind === 'hold' &&
+      (activeSignal?.kind === 'hold' || activeSignal?.kind === 'low-card') &&
       roundState.winningTeamId === actorTeamId &&
       roundState.winningCard
     ) {
@@ -1188,7 +1206,11 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return true;
     }
 
-    if (activeSignal?.kind === 'hold') {
+    if (
+      activeSignal?.kind === 'hold' ||
+      activeSignal?.kind === 'low-card' ||
+      activeSignal?.kind === 'avoid-bet'
+    ) {
       return false;
     }
 
