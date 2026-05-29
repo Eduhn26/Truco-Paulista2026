@@ -92,6 +92,8 @@ export type BotPartnerSignalKind =
   | 'pressure'
   | 'avoid-bet';
 
+export type BotPartnerSignalScope = 'hand-memory' | 'round-tactic' | 'bet-intent';
+
 export type BotPartnerSignalStrengthHint = 'none' | 'weak' | 'medium' | 'strong';
 
 export type BotPartnerSignalIntent = 'save' | 'attack' | 'pressure' | 'neutral';
@@ -99,9 +101,16 @@ export type BotPartnerSignalIntent = 'save' | 'attack' | 'pressure' | 'neutral';
 export type BotPartnerSignalView = {
   fromSeatId: BotSeatId;
   kind: BotPartnerSignalKind;
+  scope: BotPartnerSignalScope;
   strengthHint: BotPartnerSignalStrengthHint;
   intent: BotPartnerSignalIntent;
   expiresAt: string;
+};
+
+export type BotPartnerSignalBucketView = {
+  handMemory?: BotPartnerSignalView | null;
+  roundTactic?: BotPartnerSignalView | null;
+  betIntent?: BotPartnerSignalView | null;
 };
 
 export type BotDecisionContext = {
@@ -112,6 +121,7 @@ export type BotDecisionContext = {
   actorTeamId?: BotTeamId;
   partnerSeatId?: BotSeatId | null;
   partnerSignal?: BotPartnerSignalView | null;
+  partnerSignals?: BotPartnerSignalBucketView;
   viraRank: Rank;
   currentRound: BotRoundView | null;
   player: BotPlayerView;
@@ -192,8 +202,12 @@ export type BotDecisionBetTelemetry = {
   roundsTied?: number;
   currentRoundIndex?: number;
   partnerSignalKind?: BotPartnerSignalKind;
+  partnerSignalScope?: BotPartnerSignalScope;
   partnerSignalStrengthHint?: BotPartnerSignalStrengthHint;
   partnerSignalIntent?: BotPartnerSignalIntent;
+  partnerHandMemorySignalKind?: BotPartnerSignalKind;
+  partnerRoundTacticSignalKind?: BotPartnerSignalKind;
+  partnerBetIntentSignalKind?: BotPartnerSignalKind;
 };
 
 export type BotDecisionTacticalTelemetry = {
@@ -208,7 +222,11 @@ export type BotDecisionTacticalTelemetry = {
   actorHandBefore?: string[];
   selectedCard?: string;
   partnerSignalKind?: BotPartnerSignalKind;
+  partnerSignalScope?: BotPartnerSignalScope;
   partnerSignalIntent?: BotPartnerSignalIntent;
+  partnerHandMemorySignalKind?: BotPartnerSignalKind;
+  partnerRoundTacticSignalKind?: BotPartnerSignalKind;
+  partnerBetIntentSignalKind?: BotPartnerSignalKind;
   seatPlays?: Partial<Record<BotSeatId, string | null>>;
   orderedPlays?: BotRoundPlayView[];
 };

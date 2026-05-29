@@ -20,6 +20,24 @@ type GameGatewayBotTurnAccess = {
   processBotTurns(matchId: string): Promise<void>;
 };
 
+type GameGatewayPartnerSignalTelemetryAccess = {
+  partnerSignalsByMatch: Map<
+    string,
+    Array<{
+      signalId: string;
+      matchId: string;
+      fromSeatId: string;
+      toTeamId: 'T1' | 'T2';
+      kind: string;
+      scope: 'hand-memory' | 'round-tactic' | 'bet-intent';
+      label: string;
+      createdAt: string;
+      expiresAt: string;
+      expiresAtMs: number;
+    }>
+  >;
+};
+
 type TestSocket = {
   id: string;
   handshake: {
@@ -155,6 +173,7 @@ describe('GameGateway bot profile flow', () => {
       leave: jest.fn(),
       leaveMatch: jest.fn().mockReturnValue(null),
       fillMissingSeatsWithBots: jest.fn(),
+      shouldFillBotsOnStart: jest.fn().mockReturnValue(false),
       reserveNextHumanSeat: jest.fn(),
       setReady: jest.fn(),
       canStart: jest.fn(),
@@ -611,6 +630,198 @@ describe('GameGateway bot profile flow', () => {
       card: '3P',
       seatId: 'T1A',
     });
+  });
+
+  it('emits lastBotDecision signal telemetry after a bot consumes a partner signal', async () => {
+    jest.useFakeTimers();
+
+    try {
+      const { gateway, gatewayBotTurnAccess, deps, server } = createGateway();
+      const roomEmit = jest.fn();
+      const now = Date.now();
+      const expiresAt = new Date(now + 9000).toISOString();
+
+      server.to.mockReturnValue({ emit: roomEmit });
+
+      const gatewaySignalAccess = gateway as unknown as GameGatewayPartnerSignalTelemetryAccess;
+      gatewaySignalAccess.partnerSignalsByMatch.set('match-1', [
+        {
+          signalId: 'signal-1',
+          matchId: 'match-1',
+          fromSeatId: 'T1A',
+          toTeamId: 'T1',
+          kind: 'kill-round',
+          scope: 'round-tactic',
+          label: 'Mata essa',
+          createdAt: new Date(now).toISOString(),
+          expiresAt,
+          expiresAtMs: now + 9000,
+        },
+      ]);
+
+      const roomState = {
+        mode: '2v2',
+        currentTurnSeatId: 'T1B',
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: false,
+          },
+          {
+            seatId: 'T1B',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+          },
+          {
+            seatId: 'T2A',
+            teamId: 'T2',
+            ready: true,
+            isBot: false,
+          },
+          {
+            seatId: 'T2B',
+            teamId: 'T2',
+            ready: true,
+            isBot: true,
+          },
+        ],
+      };
+
+      deps.roomManager.getState.mockReturnValue(roomState);
+      deps.roomManager.getBotProfile.mockReturnValue('balanced');
+      deps.roomManager.advanceTurn.mockReturnValue({
+        ...roomState,
+        currentTurnSeatId: 'T2A',
+      });
+
+      deps.viewMatchStateUseCase.execute.mockResolvedValue({
+        matchId: 'match-1',
+        state: 'in_progress',
+        score: {
+          playerOne: 0,
+          playerTwo: 0,
+        },
+        currentHand: {
+          mode: '2v2',
+          viraRank: '4',
+          finished: false,
+          viewerPlayerId: 'P1',
+          currentValue: 1,
+          betState: 'idle',
+          pendingValue: null,
+          requestedBy: null,
+          specialState: 'normal',
+          specialDecisionPending: false,
+          nextDecisionType: 'play-card',
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: false,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: false,
+            canDeclineBet: false,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: true,
+          },
+          playerOneHand: ['7O', '4O', 'AO'],
+          playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+          seatHands: {
+            T1B: ['7O', '4O', 'AO'],
+          },
+          rounds: [
+            {
+              playerOneCard: null,
+              playerTwoCard: null,
+              result: null,
+              finished: false,
+              seatPlays: {
+                T1A: '5O',
+              },
+              orderedPlays: [
+                {
+                  ownerId: 'T1A',
+                  seatId: 'T1A',
+                  playerId: 'P1',
+                  card: '5O',
+                },
+              ],
+              winningSeatId: 'T1A',
+            },
+          ],
+        },
+      });
+
+      deps.botDecisionPort.decide.mockReturnValue({
+        action: 'play-card',
+        card: '7O',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'two-versus-two-signal-kill-round-weakest-winner',
+            tactical: {
+              mode: '2v2',
+              actorSeatId: 'T1B',
+              actorTeamId: 'T1',
+              partnerSeatId: 'T1A',
+              winningSeatIdBeforeDecision: 'T1A',
+              winningTeamIdBeforeDecision: 'T1',
+              winningCardBeforeDecision: '5O',
+              partnerWasWinning: true,
+              actorHandBefore: ['7O', '4O', 'AO'],
+              selectedCard: '7O',
+            },
+          },
+        },
+      });
+
+      await gatewayBotTurnAccess.processBotTurns('match-1');
+
+      expect(deps.botDecisionPort.decide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          partnerSignal: expect.objectContaining({
+            fromSeatId: 'T1A',
+            kind: 'kill-round',
+            strengthHint: 'none',
+            intent: 'attack',
+            expiresAt,
+          }),
+        }),
+      );
+
+      expect(roomEmit).toHaveBeenCalledWith(
+        'room-state',
+        expect.objectContaining({
+          lastBotDecision: expect.objectContaining({
+            seatId: 'T1B',
+            teamId: 'T1',
+            playerId: 'P1',
+            profile: 'balanced',
+            action: 'play-card',
+            source: 'heuristic',
+            strategy: 'two-versus-two-signal-kill-round-weakest-winner',
+            partnerSignalKind: 'kill-round',
+            partnerSignalStrengthHint: 'none',
+            partnerSignalIntent: 'attack',
+            partnerSignalExpiresAt: expiresAt,
+            partnerSignalTtlMs: expect.any(Number),
+            selectedCard: '7O',
+            executionStatus: 'succeeded',
+            executedAction: 'play-card',
+            partnerWasWinning: true,
+            actorHandBefore: ['7O', '4O', 'AO'],
+          }),
+        }),
+      );
+
+      expect(gatewaySignalAccess.partnerSignalsByMatch.has('match-1')).toBe(false);
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   it('falls back to balanced when no bot profile is found for the seat', async () => {
@@ -1943,12 +2154,200 @@ describe('GameGateway bot profile flow', () => {
       },
     });
   });
+
+  it('emits an initial bot manilha signal only to the human partner after a 2v2 hand starts', async () => {
+    const { gateway, deps, server } = createGateway();
+    const socket = createSocket({
+      id: 'socket-human-partner',
+      authToken: 'auth-token-human-partner',
+    });
+    const emitsBySocketId = new Map<string, jest.Mock>();
+
+    server.to.mockImplementation((socketOrRoomId: string) => {
+      const existingEmit = emitsBySocketId.get(socketOrRoomId);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsBySocketId.set(socketOrRoomId, emit);
+
+      return { emit };
+    });
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+        },
+      ],
+    };
+
+    const waitingState = {
+      matchId: 'match-1',
+      state: 'waiting',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: null,
+    };
+
+    const startedState = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 0,
+        playerTwo: 0,
+      },
+      currentHand: {
+        viraRank: '4',
+        viraCard: '4O',
+        finished: false,
+        viewerPlayerId: null,
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'normal',
+        specialDecisionPending: false,
+        playerOneHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1A: ['6O', '7C', 'QO'],
+          T1B: ['5P', 'AO', '3C'],
+          T2A: ['6C', '7P', 'QO'],
+          T2B: ['5C', 'KO', 'JO'],
+        },
+        availableActions: {
+          canRequestTruco: true,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: true,
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+            seatPlays: {},
+            orderedPlays: [],
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getSessionBySocketId.mockReturnValue({
+      socketId: 'socket-human-partner',
+      matchId: 'match-1',
+      seatId: 'T1A',
+      teamId: 'T1',
+      domainPlayerId: 'P1',
+    });
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.canStart.mockReturnValue(true);
+    deps.roomManager.beginHand.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+      {
+        socketId: 'socket-rival-human',
+        matchId: 'match-1',
+        seatId: 'T2A',
+        teamId: 'T2',
+        domainPlayerId: 'P2',
+      },
+    ]);
+    deps.startHandUseCase.execute.mockResolvedValue({ matchId: 'match-1' });
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(startedState);
+    deps.viewMatchStateUseCase.execute.mockResolvedValueOnce(waitingState);
+
+    const response = await gateway.handleStartHand(socket as never, {
+      matchId: 'match-1',
+    });
+
+    expect(response).toEqual({
+      event: 'start-hand:ack',
+      data: {
+        matchId: 'match-1',
+      },
+    });
+    expect(emitsBySocketId.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'manilha-zap',
+        label: 'Zap',
+      }),
+    );
+    expect(emitsBySocketId.get('socket-rival-human')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T2B',
+        toTeamId: 'T2',
+        kind: 'manilha-copas',
+        label: 'Copas',
+      }),
+    );
+    expect(emitsBySocketId.get('socket-rival-human')).not.toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+      }),
+    );
+  });
+
   it('emits partner signals only to the human partner socket', async () => {
     const { gateway, deps, server } = createGateway();
     const senderSocket = createSocket({ id: 'socket-sender', authToken: 'token-1' });
     const emitsBySocketId = new Map<string, jest.Mock>();
 
     server.to.mockImplementation((socketId: string) => {
+      const existingEmit = emitsBySocketId.get(socketId);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
       const emit = jest.fn();
       emitsBySocketId.set(socketId, emit);
 
@@ -2075,8 +2474,16 @@ describe('GameGateway bot profile flow', () => {
         kind: 'manilha-copas',
       }),
     );
-    expect(emitsBySocketId.has('socket-sender')).toBe(false);
-    expect(emitsBySocketId.has('socket-rival')).toBe(false);
+    const senderEmit = emitsBySocketId.get('socket-sender');
+    const rivalEmit = emitsBySocketId.get('socket-rival');
+
+    if (senderEmit) {
+      expect(senderEmit).not.toHaveBeenCalledWith('partner-signal', expect.anything());
+    }
+
+    if (rivalEmit) {
+      expect(rivalEmit).not.toHaveBeenCalledWith('partner-signal', expect.anything());
+    }
   });
 
   it('rejects a specific manilha signal when the player does not hold that suit', async () => {

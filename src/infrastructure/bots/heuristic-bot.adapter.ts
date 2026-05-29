@@ -73,8 +73,11 @@ type TwoVersusTwoRoundState = {
 type PartnerSignalBetAdjustment = {
   boost: number;
   kind?: BotPartnerSignalKind;
+  scope?: BotPartnerSignalView['scope'];
   strengthHint?: BotPartnerSignalView['strengthHint'];
   intent?: BotPartnerSignalView['intent'];
+  handMemoryKind?: BotPartnerSignalKind;
+  betIntentKind?: BotPartnerSignalKind;
 };
 
 const FULL_DECK_SUITS = ['C', 'O', 'P', 'E'] as const;
@@ -814,11 +817,18 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       declineLosesMatch: pressure.declineLosesMatch,
       acceptRisksMatch: pressure.acceptRisksMatch,
       ...(partnerSignalAdjustment?.kind ? { partnerSignalKind: partnerSignalAdjustment.kind } : {}),
+      ...(partnerSignalAdjustment?.scope ? { partnerSignalScope: partnerSignalAdjustment.scope } : {}),
       ...(partnerSignalAdjustment?.strengthHint
         ? { partnerSignalStrengthHint: partnerSignalAdjustment.strengthHint }
         : {}),
       ...(partnerSignalAdjustment?.intent
         ? { partnerSignalIntent: partnerSignalAdjustment.intent }
+        : {}),
+      ...(partnerSignalAdjustment?.handMemoryKind
+        ? { partnerHandMemorySignalKind: partnerSignalAdjustment.handMemoryKind }
+        : {}),
+      ...(partnerSignalAdjustment?.betIntentKind
+        ? { partnerBetIntentSignalKind: partnerSignalAdjustment.betIntentKind }
         : {}),
       ...(progress
         ? {
@@ -835,40 +845,137 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     context: BotDecisionContext,
     phase: 'response' | 'initiative',
   ): PartnerSignalBetAdjustment {
-    const signal = this.getActivePartnerSignal(context);
-
-    if (!signal || context.mode !== '2v2') {
+    if (context.mode !== '2v2') {
       return { boost: 0 };
     }
 
-    const baseBoost = PARTNER_SIGNAL_BET_BOOST_BY_KIND[signal.kind];
-    const phaseBoost =
-      phase === 'initiative'
-        ? (PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND[signal.kind] ?? 0)
-        : 0;
+    const handMemorySignal = this.getActiveScopedPartnerSignal(context, 'handMemory');
+    const betIntentSignal = this.getActiveScopedPartnerSignal(context, 'betIntent');
+    const contributingSignals = [handMemorySignal, betIntentSignal].filter(
+      (signal): signal is BotPartnerSignalView => Boolean(signal),
+    );
+
+    if (contributingSignals.length === 0) {
+      return { boost: 0 };
+    }
+
+    const boost = contributingSignals.reduce((total, signal) => {
+      const baseBoost = PARTNER_SIGNAL_BET_BOOST_BY_KIND[signal.kind];
+      const phaseBoost =
+        phase === 'initiative'
+          ? (PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND[signal.kind] ?? 0)
+          : 0;
+
+      return total + baseBoost + phaseBoost;
+    }, 0);
+    const primarySignal = betIntentSignal ?? handMemorySignal;
 
     return {
-      boost: baseBoost + phaseBoost,
-      kind: signal.kind,
-      strengthHint: signal.strengthHint,
-      intent: signal.intent,
+      boost,
+      ...(primarySignal
+        ? {
+            kind: primarySignal.kind,
+            scope: primarySignal.scope,
+            strengthHint: primarySignal.strengthHint,
+            intent: primarySignal.intent,
+          }
+        : {}),
+      ...(handMemorySignal ? { handMemoryKind: handMemorySignal.kind } : {}),
+      ...(betIntentSignal ? { betIntentKind: betIntentSignal.kind } : {}),
     };
   }
 
-  private getActivePartnerSignal(context: BotDecisionContext): BotPartnerSignalView | null {
-    const signal = context.partnerSignal;
-
+  private isActivePartnerSignal(signal: BotPartnerSignalView | null | undefined): signal is BotPartnerSignalView {
     if (!signal) {
-      return null;
+      return false;
     }
 
     const expiresAtMs = Date.parse(signal.expiresAt);
 
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    return Number.isFinite(expiresAtMs) && expiresAtMs > Date.now();
+  }
+
+  private resolvePartnerSignalScopeByKind(
+    kind: BotPartnerSignalKind,
+  ): BotPartnerSignalView['scope'] {
+    if (kind === 'hold' || kind === 'kill-round' || kind === 'low-card') {
+      return 'round-tactic';
+    }
+
+    if (kind === 'pressure' || kind === 'avoid-bet') {
+      return 'bet-intent';
+    }
+
+    return 'hand-memory';
+  }
+
+  private normalizeActivePartnerSignal(
+    signal: BotPartnerSignalView | null | undefined,
+  ): BotPartnerSignalView | null {
+    if (!this.isActivePartnerSignal(signal)) {
       return null;
     }
 
-    return signal;
+    const scopedSignal = signal as BotPartnerSignalView & {
+      scope?: BotPartnerSignalView['scope'];
+    };
+
+    return {
+      ...signal,
+      scope: scopedSignal.scope ?? this.resolvePartnerSignalScopeByKind(signal.kind),
+    };
+  }
+
+  private resolvePartnerSignalScopeSlot(
+    slot: keyof NonNullable<BotDecisionContext['partnerSignals']>,
+  ): BotPartnerSignalView['scope'] {
+    if (slot === 'roundTactic') {
+      return 'round-tactic';
+    }
+
+    if (slot === 'betIntent') {
+      return 'bet-intent';
+    }
+
+    return 'hand-memory';
+  }
+
+  private getActiveScopedPartnerSignal(
+    context: BotDecisionContext,
+    slot: keyof NonNullable<BotDecisionContext['partnerSignals']>,
+  ): BotPartnerSignalView | null {
+    const expectedScope = this.resolvePartnerSignalScopeSlot(slot);
+    const signal = this.normalizeActivePartnerSignal(context.partnerSignals?.[slot]);
+
+    if (signal?.scope === expectedScope) {
+      return signal;
+    }
+
+    const legacySignal = this.normalizeActivePartnerSignal(context.partnerSignal);
+
+    if (legacySignal?.scope === expectedScope) {
+      return legacySignal;
+    }
+
+    return null;
+  }
+
+  private getActivePartnerSignal(context: BotDecisionContext): BotPartnerSignalView | null {
+    const legacySignal = this.normalizeActivePartnerSignal(context.partnerSignal);
+
+    if (legacySignal) {
+      return legacySignal;
+    }
+
+    const roundTactic = this.getActiveScopedPartnerSignal(context, 'roundTactic');
+    const betIntent = this.getActiveScopedPartnerSignal(context, 'betIntent');
+    const handMemory = this.getActiveScopedPartnerSignal(context, 'handMemory');
+
+    return roundTactic ?? betIntent ?? handMemory;
+  }
+
+  private getActiveCardTacticSignal(context: BotDecisionContext): BotPartnerSignalView | null {
+    return this.getActiveScopedPartnerSignal(context, 'roundTactic');
   }
 
   private computeScorePressure(
@@ -1094,8 +1201,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       return {
         card: selectedCard,
         strategy:
-          this.getActivePartnerSignal(context)?.kind === 'hold' ||
-          this.getActivePartnerSignal(context)?.kind === 'low-card'
+          this.getActiveCardTacticSignal(context)?.kind === 'hold' ||
+          this.getActiveCardTacticSignal(context)?.kind === 'low-card'
             ? 'two-versus-two-signal-hold-save-weakest'
             : 'two-versus-two-partner-winning-save-weakest',
         tactical: this.buildTwoVersusTwoTacticalTelemetry(context, roundState, selectedCard),
@@ -1103,7 +1210,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     }
 
     const actorTeamId = context.actorTeamId ?? TEAM_BY_SEAT[actorSeatId];
-    const activeSignal = this.getActivePartnerSignal(context);
+    const activeSignal = this.getActiveCardTacticSignal(context);
 
     if (
       (activeSignal?.kind === 'hold' || activeSignal?.kind === 'low-card') &&
@@ -1134,7 +1241,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
         };
       }
 
-      if (activeSignal?.kind === 'kill-round' || activeSignal?.kind === 'weak-hand') {
+      if (activeSignal?.kind === 'kill-round') {
         const selectedCard = winningCards[0]!;
 
         return {
@@ -1200,7 +1307,10 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const currentValue = context.bet?.currentValue ?? 1;
     const remainingHandStrength = this.calculateHandStrength(orderedHand, context.viraRank);
     const hasScorePressure = this.hasTwoVersusTwoOpeningScorePressure(context, currentValue);
-    const activeSignal = this.getActivePartnerSignal(context);
+    const activeSignal =
+      this.getActiveScopedPartnerSignal(context, 'roundTactic') ??
+      this.getActiveScopedPartnerSignal(context, 'betIntent') ??
+      this.getActivePartnerSignal(context);
 
     if (activeSignal?.kind === 'pressure' && remainingHandStrength >= 0.38) {
       return true;
@@ -1256,7 +1366,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       : context.actorTeamId;
     const partnerSeatId =
       context.partnerSeatId ?? (actorSeatId ? PARTNER_BY_SEAT[actorSeatId] : null);
-    const partnerSignal = this.getActivePartnerSignal(context);
+    const partnerSignal = this.getActiveCardTacticSignal(context);
 
     const seatPlays = (roundState?.plays ?? []).reduce<Partial<Record<BotSeatId, string | null>>>(
       (accumulator, play) => ({
@@ -1280,7 +1390,17 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       ...(partnerSignal
         ? {
             partnerSignalKind: partnerSignal.kind,
+            partnerSignalScope: partnerSignal.scope,
             partnerSignalIntent: partnerSignal.intent,
+            ...(context.partnerSignals?.handMemory
+              ? { partnerHandMemorySignalKind: context.partnerSignals.handMemory.kind }
+              : {}),
+            ...(context.partnerSignals?.roundTactic
+              ? { partnerRoundTacticSignalKind: context.partnerSignals.roundTactic.kind }
+              : {}),
+            ...(context.partnerSignals?.betIntent
+              ? { partnerBetIntentSignalKind: context.partnerSignals.betIntent.kind }
+              : {}),
           }
         : {}),
       seatPlays,

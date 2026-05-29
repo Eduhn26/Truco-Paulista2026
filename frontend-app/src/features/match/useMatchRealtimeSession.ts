@@ -4,9 +4,11 @@ import type { FrontendSession } from '../auth/authStorage';
 import { loadMatchSnapshot, saveMatchSnapshot, type MatchSnapshot } from './matchSnapshotStorage';
 import { GameSocketClient } from '../../services/socket/gameSocketClient';
 import type {
+  BotDecisionTelemetryPayload,
   CardPayload,
   CardPlayedPayload,
   MatchStatePayload,
+  PartnerSignalDebugPayload,
   PartnerSignalKind,
   PartnerSignalPayload,
   PlayerAssignedPayload,
@@ -49,6 +51,8 @@ type UseMatchRealtimeSessionParams = {
     };
   }) => void;
   onPartnerSignal?: (payload: PartnerSignalPayload) => void;
+  onPartnerSignalDebug?: (payload: PartnerSignalDebugPayload) => void;
+  onBotDecision?: (payload: BotDecisionTelemetryPayload) => void;
   onServerError?: (payload: ServerErrorPayload) => void;
 };
 
@@ -170,7 +174,35 @@ function describePartnerSignalPayload(payload: PartnerSignalPayload): string {
     'Received partner-signal',
     `from=${payload.fromSeatId}`,
     `kind=${payload.kind}`,
+    `scope=${payload.scope}`,
     `expires=${payload.expiresAt}`,
+  ].join(' | ');
+}
+
+function describeBotDecisionPayload(payload: BotDecisionTelemetryPayload): string {
+  return [
+    'Received bot-decision',
+    `seat=${payload.actorSeatId ?? payload.seatId}`,
+    `role=${payload.debugRole ?? 'unknown'}`,
+    `action=${payload.action}`,
+    `signal=${payload.partnerSignalKind ?? 'none'}`,
+    `scope=${payload.partnerSignalScope ?? 'none'}`,
+    `strategy=${payload.strategy ?? 'none'}`,
+    `card=${payload.selectedCard ?? 'none'}`,
+    `exec=${payload.executionStatus ?? 'none'}`,
+  ].join(' | ');
+}
+
+function describePartnerSignalDebugPayload(payload: PartnerSignalDebugPayload): string {
+  return [
+    'Received partner-signal-debug',
+    `phase=${payload.phase}`,
+    `kind=${payload.kind ?? 'none'}`,
+    `scope=${payload.scope ?? 'none'}`,
+    `from=${payload.fromSeatId ?? 'none'}`,
+    `bot=${payload.botSeatId ?? 'none'}`,
+    `partner=${payload.partnerSeatId ?? 'none'}`,
+    `ttl=${payload.ttlMs ?? 'none'}`,
   ].join(' | ');
 }
 
@@ -184,6 +216,8 @@ export function useMatchRealtimeSession(
     onCardPlayed,
     onRoundTransition,
     onPartnerSignal,
+    onPartnerSignalDebug,
+    onBotDecision,
     onServerError,
   } = params;
 
@@ -198,6 +232,8 @@ export function useMatchRealtimeSession(
   const onCardPlayedRef = useRef(onCardPlayed);
   const onRoundTransitionRef = useRef(onRoundTransition);
   const onPartnerSignalRef = useRef(onPartnerSignal);
+  const onPartnerSignalDebugRef = useRef(onPartnerSignalDebug);
+  const onBotDecisionRef = useRef(onBotDecision);
   const onServerErrorRef = useRef(onServerError);
 
   const [connectionStatus, setConnectionStatus] = useState<'offline' | 'online'>('offline');
@@ -241,6 +277,14 @@ export function useMatchRealtimeSession(
   useEffect(() => {
     onPartnerSignalRef.current = onPartnerSignal;
   }, [onPartnerSignal]);
+
+  useEffect(() => {
+    onPartnerSignalDebugRef.current = onPartnerSignalDebug;
+  }, [onPartnerSignalDebug]);
+
+  useEffect(() => {
+    onBotDecisionRef.current = onBotDecision;
+  }, [onBotDecision]);
 
   useEffect(() => {
     onServerErrorRef.current = onServerError;
@@ -539,6 +583,28 @@ export function useMatchRealtimeSession(
 
           onPartnerSignalRef.current?.(payload);
           appendLog(describePartnerSignalPayload(payload));
+        },
+        onPartnerSignalDebug: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          onPartnerSignalDebugRef.current?.(payload);
+          appendLog(describePartnerSignalDebugPayload(payload));
+        },
+        onBotDecision: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          onBotDecisionRef.current?.(payload);
+          appendLog(describeBotDecisionPayload(payload));
         },
       },
     );

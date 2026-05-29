@@ -74,6 +74,18 @@ export type BotDecisionTelemetryPayload = {
   actorSeatId?: SeatId;
   actorTeamId?: 'T1' | 'T2' | string;
   partnerSeatId?: SeatId | null;
+  partnerSignalKind?: PartnerSignalKind | string;
+  partnerSignalScope?: PartnerSignalScope | string;
+  partnerSignalFromSeatId?: SeatId | string;
+  partnerSignalStrengthHint?: 'none' | 'weak' | 'medium' | 'strong' | string;
+  partnerSignalIntent?: 'save' | 'attack' | 'pressure' | 'neutral' | string;
+  partnerHandMemorySignalKind?: PartnerSignalKind | string;
+  partnerRoundTacticSignalKind?: PartnerSignalKind | string;
+  partnerBetIntentSignalKind?: PartnerSignalKind | string;
+  debugRole?: 'partner-bot' | 'rival-bot' | 'unknown' | string;
+  partnerSignalBoost?: number;
+  partnerSignalExpiresAt?: string;
+  partnerSignalTtlMs?: number;
   winningSeatIdBeforeDecision?: SeatId | null;
   winningTeamIdBeforeDecision?: 'T1' | 'T2' | string | null;
   winningCardBeforeDecision?: string | null;
@@ -170,15 +182,63 @@ export type PartnerSignalKind =
   | 'pressure'
   | 'avoid-bet';
 
+export type PartnerSignalScope = 'hand-memory' | 'round-tactic' | 'bet-intent';
+
 export type PartnerSignalPayload = {
   signalId: string;
   matchId: string;
   fromSeatId: SeatId;
   toTeamId: 'T1' | 'T2' | string;
   kind: PartnerSignalKind;
+  scope: PartnerSignalScope | string;
   label: string;
   createdAt: string;
   expiresAt: string;
+};
+
+export type PartnerSignalDebugPhasePayload =
+  | 'remembered'
+  | 'sent'
+  | 'superseded'
+  | 'expired'
+  | 'resolved-for-bot'
+  | 'missed-for-bot'
+  | 'consumed'
+  | 'cleared-hand'
+  | 'cleared-round'
+  | 'cleared-bet'
+  | 'window-opened'
+  | 'window-closed'
+  | string;
+
+export type PartnerSignalDebugSummaryPayload = {
+  signalId: string;
+  fromSeatId: SeatId;
+  toTeamId: 'T1' | 'T2' | string;
+  kind: PartnerSignalKind | string;
+  scope?: PartnerSignalScope | string;
+  expiresAt: string;
+  ttlMs: number;
+};
+
+export type PartnerSignalDebugPayload = {
+  phase: PartnerSignalDebugPhasePayload;
+  matchId: string;
+  occurredAt: string;
+  signalId?: string;
+  fromSeatId?: SeatId;
+  toTeamId?: 'T1' | 'T2' | string;
+  kind?: PartnerSignalKind | string;
+  scope?: PartnerSignalScope | string;
+  label?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  ttlMs?: number;
+  botSeatId?: SeatId;
+  botTeamId?: 'T1' | 'T2' | string;
+  partnerSeatId?: SeatId | null;
+  reason?: string;
+  availableSignals?: PartnerSignalDebugSummaryPayload[];
 };
 
 export type RoomStatePayload = {
@@ -359,6 +419,8 @@ export type GameSocketEvents = {
   onCardPlayed?: (payload: CardPlayedPayload) => void;
   onRoundTransition?: (payload: RoundTransitionPayload) => void;
   onPartnerSignal?: (payload: PartnerSignalPayload) => void;
+  onPartnerSignalDebug?: (payload: PartnerSignalDebugPayload) => void;
+  onBotDecision?: (payload: BotDecisionTelemetryPayload) => void;
 };
 
 export type SuitDisplay = { symbol: string; colorClass: string };
@@ -864,7 +926,7 @@ export function normalizeRoomStatePayload(payload: unknown): RoomStatePayload {
   };
 }
 
-function normalizeBotDecisionTelemetryPayload(
+export function normalizeBotDecisionTelemetryPayload(
   value: unknown,
 ): BotDecisionTelemetryPayload | undefined {
   if (value === null) {
@@ -888,6 +950,18 @@ function normalizeBotDecisionTelemetryPayload(
   const actorSeatId = asOptionalString(input.actorSeatId);
   const actorTeamId = asOptionalString(input.actorTeamId);
   const partnerSeatId = normalizeNullableStringField(input.partnerSeatId);
+  const partnerSignalKind = asOptionalString(input.partnerSignalKind);
+  const partnerSignalScope = asOptionalString(input.partnerSignalScope);
+  const partnerSignalFromSeatId = asOptionalString(input.partnerSignalFromSeatId);
+  const partnerSignalStrengthHint = asOptionalString(input.partnerSignalStrengthHint);
+  const partnerSignalIntent = asOptionalString(input.partnerSignalIntent);
+  const partnerHandMemorySignalKind = asOptionalString(input.partnerHandMemorySignalKind);
+  const partnerRoundTacticSignalKind = asOptionalString(input.partnerRoundTacticSignalKind);
+  const partnerBetIntentSignalKind = asOptionalString(input.partnerBetIntentSignalKind);
+  const debugRole = asOptionalString(input.debugRole);
+  const partnerSignalBoost = asOptionalNumber(input.partnerSignalBoost);
+  const partnerSignalExpiresAt = asOptionalString(input.partnerSignalExpiresAt);
+  const partnerSignalTtlMs = asOptionalNumber(input.partnerSignalTtlMs);
   const winningSeatIdBeforeDecision = normalizeNullableStringField(
     input.winningSeatIdBeforeDecision,
   );
@@ -955,6 +1029,18 @@ function normalizeBotDecisionTelemetryPayload(
     ...(actorSeatId !== undefined ? { actorSeatId } : {}),
     ...(actorTeamId !== undefined ? { actorTeamId } : {}),
     ...(partnerSeatId !== undefined ? { partnerSeatId } : {}),
+    ...(partnerSignalKind !== undefined ? { partnerSignalKind } : {}),
+    ...(partnerSignalScope !== undefined ? { partnerSignalScope } : {}),
+    ...(partnerSignalFromSeatId !== undefined ? { partnerSignalFromSeatId } : {}),
+    ...(partnerSignalStrengthHint !== undefined ? { partnerSignalStrengthHint } : {}),
+    ...(partnerSignalIntent !== undefined ? { partnerSignalIntent } : {}),
+    ...(partnerHandMemorySignalKind !== undefined ? { partnerHandMemorySignalKind } : {}),
+    ...(partnerRoundTacticSignalKind !== undefined ? { partnerRoundTacticSignalKind } : {}),
+    ...(partnerBetIntentSignalKind !== undefined ? { partnerBetIntentSignalKind } : {}),
+    ...(debugRole !== undefined ? { debugRole } : {}),
+    ...(partnerSignalBoost !== undefined ? { partnerSignalBoost } : {}),
+    ...(partnerSignalExpiresAt !== undefined ? { partnerSignalExpiresAt } : {}),
+    ...(partnerSignalTtlMs !== undefined ? { partnerSignalTtlMs } : {}),
     ...(winningSeatIdBeforeDecision !== undefined ? { winningSeatIdBeforeDecision } : {}),
     ...(winningTeamIdBeforeDecision !== undefined ? { winningTeamIdBeforeDecision } : {}),
     ...(winningCardBeforeDecision !== undefined ? { winningCardBeforeDecision } : {}),
@@ -1039,6 +1125,7 @@ export function normalizeMatchStatePayload(payload: unknown): MatchStatePayload 
 export function normalizePartnerSignalPayload(payload: unknown): PartnerSignalPayload {
   const input = asObject(payload);
   const kind = asString(input.kind) as PartnerSignalKind;
+  const scope = asString(input.scope, 'hand-memory');
   const toTeamId = asString(input.toTeamId);
 
   return {
@@ -1047,9 +1134,64 @@ export function normalizePartnerSignalPayload(payload: unknown): PartnerSignalPa
     fromSeatId: asString(input.fromSeatId),
     toTeamId,
     kind,
+    scope,
     label: asString(input.label),
     createdAt: asString(input.createdAt),
     expiresAt: asString(input.expiresAt),
+  };
+}
+
+export function normalizePartnerSignalDebugPayload(
+  payload: unknown,
+): PartnerSignalDebugPayload {
+  const input = asObject(payload);
+  const signalId = asOptionalString(input.signalId);
+  const fromSeatId = asOptionalString(input.fromSeatId);
+  const toTeamId = asOptionalString(input.toTeamId);
+  const kind = asOptionalString(input.kind);
+  const scope = asOptionalString(input.scope);
+  const label = asOptionalString(input.label);
+  const createdAt = asOptionalString(input.createdAt);
+  const expiresAt = asOptionalString(input.expiresAt);
+  const ttlMs = asOptionalNumber(input.ttlMs);
+  const botSeatId = asOptionalString(input.botSeatId);
+  const botTeamId = asOptionalString(input.botTeamId);
+  const partnerSeatId = normalizeNullableStringField(input.partnerSeatId);
+  const reason = asOptionalString(input.reason);
+  const availableSignals = Array.isArray(input.availableSignals)
+    ? input.availableSignals.map((signal): PartnerSignalDebugSummaryPayload => {
+        const item = asObject(signal);
+
+        return {
+          signalId: asString(item.signalId),
+          fromSeatId: asString(item.fromSeatId),
+          toTeamId: asString(item.toTeamId),
+          kind: asString(item.kind),
+          ...(asOptionalString(item.scope) !== undefined ? { scope: asString(item.scope) } : {}),
+          expiresAt: asString(item.expiresAt),
+          ttlMs: asNumber(item.ttlMs),
+        };
+      })
+    : undefined;
+
+  return {
+    phase: asString(input.phase),
+    matchId: asString(input.matchId),
+    occurredAt: asString(input.occurredAt),
+    ...(signalId !== undefined ? { signalId } : {}),
+    ...(fromSeatId !== undefined ? { fromSeatId } : {}),
+    ...(toTeamId !== undefined ? { toTeamId } : {}),
+    ...(kind !== undefined ? { kind } : {}),
+    ...(scope !== undefined ? { scope } : {}),
+    ...(label !== undefined ? { label } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(ttlMs !== undefined ? { ttlMs } : {}),
+    ...(botSeatId !== undefined ? { botSeatId } : {}),
+    ...(botTeamId !== undefined ? { botTeamId } : {}),
+    ...(partnerSeatId !== undefined ? { partnerSeatId } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+    ...(availableSignals !== undefined ? { availableSignals } : {}),
   };
 }
 

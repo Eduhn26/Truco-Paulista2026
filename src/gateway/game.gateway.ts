@@ -371,9 +371,17 @@ type BotDecisionTelemetry = {
   actorTeamId?: 'T1' | 'T2';
   partnerSeatId?: string | null;
   partnerSignalKind?: string;
+  partnerSignalScope?: string;
+  partnerSignalFromSeatId?: string;
   partnerSignalStrengthHint?: string;
   partnerSignalIntent?: string;
+  partnerHandMemorySignalKind?: string;
+  partnerRoundTacticSignalKind?: string;
+  partnerBetIntentSignalKind?: string;
+  debugRole?: 'partner-bot' | 'rival-bot' | 'unknown';
   partnerSignalBoost?: number;
+  partnerSignalExpiresAt?: string;
+  partnerSignalTtlMs?: number;
   winningSeatIdBeforeDecision?: string | null;
   winningTeamIdBeforeDecision?: 'T1' | 'T2' | null;
   winningCardBeforeDecision?: string | null;
@@ -445,6 +453,9 @@ type CardPlayedActor = {
 // Gives the frontend enough room to finish the trick-resolution beat before the next bot action.
 const BOT_CHAINED_TURN_DELAY_MS = 2200;
 
+// Semantic communication window before a mixed-team partner bot resolves signals.
+const BOT_PARTNER_SIGNAL_WINDOW_MS = 2200;
+
 // Delays the authoritative follow-up state so clients can finish the visual resolution beat.
 const ROUND_RESOLUTION_STATE_SYNC_DELAY_MS = 2050;
 
@@ -511,12 +522,15 @@ type PartnerSignalKind =
   | 'pressure'
   | 'avoid-bet';
 
+type PartnerSignalScope = 'hand-memory' | 'round-tactic' | 'bet-intent';
+
 type PartnerSignalPayload = {
   signalId: string;
   matchId: string;
   fromSeatId: SeatId;
   toTeamId: 'T1' | 'T2';
   kind: PartnerSignalKind;
+  scope: PartnerSignalScope;
   label: string;
   createdAt: string;
   expiresAt: string;
@@ -524,6 +538,48 @@ type PartnerSignalPayload = {
 
 type PartnerSignalRecord = PartnerSignalPayload & {
   expiresAtMs: number;
+};
+
+type PartnerSignalDebugPhase =
+  | 'remembered'
+  | 'sent'
+  | 'superseded'
+  | 'expired'
+  | 'resolved-for-bot'
+  | 'missed-for-bot'
+  | 'consumed'
+  | 'cleared-hand'
+  | 'cleared-round'
+  | 'cleared-bet'
+  | 'window-opened'
+  | 'window-closed';
+
+type PartnerSignalDebugPayload = {
+  phase: PartnerSignalDebugPhase;
+  matchId: string;
+  occurredAt: string;
+  signalId?: string;
+  fromSeatId?: SeatId;
+  toTeamId?: 'T1' | 'T2';
+  kind?: PartnerSignalKind;
+  scope?: PartnerSignalScope;
+  label?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  ttlMs?: number;
+  botSeatId?: SeatId;
+  botTeamId?: 'T1' | 'T2';
+  partnerSeatId?: SeatId | null;
+  reason?: string;
+  availableSignals?: Array<{
+    signalId: string;
+    fromSeatId: SeatId;
+    toTeamId: 'T1' | 'T2';
+    kind: PartnerSignalKind;
+    scope: PartnerSignalScope;
+    expiresAt: string;
+    ttlMs: number;
+  }>;
 };
 
 const PARTNER_SIGNAL_KINDS = new Set<PartnerSignalKind>([
@@ -562,8 +618,36 @@ const PARTNER_SIGNAL_LABELS: Record<PartnerSignalKind, string> = {
   'avoid-bet': 'Não compra',
 };
 
+const HAND_MEMORY_PARTNER_SIGNALS = new Set<PartnerSignalKind>([
+  'manilha-zap',
+  'manilha-copas',
+  'manilha-espadilha',
+  'manilha-ouros',
+  'has-manilha',
+  'strong-manilha',
+  'weak-manilha',
+  'no-manilha',
+  'strong-hand',
+  'weak-hand',
+]);
+
+const ROUND_TACTIC_PARTNER_SIGNALS = new Set<PartnerSignalKind>(['hold', 'kill-round', 'low-card']);
+
+const BET_INTENT_PARTNER_SIGNALS = new Set<PartnerSignalKind>(['pressure', 'avoid-bet']);
+
+const BET_DECISION_ACTIONS = new Set<BotDecision['action']>([
+  'request-truco',
+  'accept-bet',
+  'decline-bet',
+  'raise-to-six',
+  'raise-to-nine',
+  'raise-to-twelve',
+]);
+
 const PARTNER_SIGNAL_COOLDOWN_MS = 3500;
-const PARTNER_SIGNAL_TTL_MS = 9000;
+const PARTNER_SIGNAL_TTL_MS = 25000;
+const INITIAL_BOT_SIGNAL_STRONG_HAND_THRESHOLD = 0.72;
+const INITIAL_BOT_SIGNAL_WEAK_HAND_THRESHOLD = 0.28;
 
 const MIXED_TEAM_BET_DECISION_TIMEOUT_MS = 18000;
 
@@ -589,6 +673,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   >();
   private readonly partnerSignalsByMatch = new Map<string, PartnerSignalRecord[]>();
   private readonly partnerSignalCooldownBySeat = new Map<string, number>();
+  private readonly initialBotPartnerSignalByHand = new Set<string>();
+  private readonly activePartnerSignalWindowByMatch = new Map<
+    string,
+    { botSeatId: SeatId; botTeamId: 'T1' | 'T2'; partnerSeatId: SeatId; durationMs: number }
+  >();
 
   constructor(
     private readonly createMatchUseCase: CreateMatchUseCase,
@@ -789,6 +878,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       : null;
   }
 
+
+  private resolvePartnerSignalScope(kind: PartnerSignalKind): PartnerSignalScope {
+    if (HAND_MEMORY_PARTNER_SIGNALS.has(kind)) {
+      return 'hand-memory';
+    }
+
+    if (ROUND_TACTIC_PARTNER_SIGNALS.has(kind)) {
+      return 'round-tactic';
+    }
+
+    if (BET_INTENT_PARTNER_SIGNALS.has(kind)) {
+      return 'bet-intent';
+    }
+
+    return 'hand-memory';
+  }
+
+  private isBetDecisionAction(action: BotDecision['action'] | undefined): boolean {
+    return action !== undefined && BET_DECISION_ACTIONS.has(action);
+  }
+
   private isManilhaPartnerSignal(kind: PartnerSignalKind): boolean {
     return (
       kind === 'manilha-zap' ||
@@ -889,6 +999,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const now = Date.now();
     const activeSignals = signals.filter((signal) => signal.expiresAtMs > now);
+    const expiredSignals = signals.filter((signal) => signal.expiresAtMs <= now);
+
+    expiredSignals.forEach((signal) => {
+      this.emitPartnerSignalDebugToTeam(signal.matchId, signal.toTeamId, {
+        phase: 'expired',
+        matchId: signal.matchId,
+        signalId: signal.signalId,
+        fromSeatId: signal.fromSeatId,
+        toTeamId: signal.toTeamId,
+        kind: signal.kind,
+        scope: signal.scope,
+        label: signal.label,
+        createdAt: signal.createdAt,
+        expiresAt: signal.expiresAt,
+        ttlMs: 0,
+        reason: 'signal ttl elapsed before a matching bot decision consumed it',
+      });
+    });
 
     if (activeSignals.length === 0) {
       this.partnerSignalsByMatch.delete(matchId);
@@ -899,25 +1027,133 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private clearPartnerSignals(matchId: string): void {
+    const existingSignals = this.partnerSignalsByMatch.get(matchId) ?? [];
+
+    existingSignals.forEach((signal) => {
+      this.emitPartnerSignalDebugToTeam(signal.matchId, signal.toTeamId, {
+        phase: 'cleared-hand',
+        matchId: signal.matchId,
+        signalId: signal.signalId,
+        fromSeatId: signal.fromSeatId,
+        toTeamId: signal.toTeamId,
+        kind: signal.kind,
+        scope: signal.scope,
+        label: signal.label,
+        createdAt: signal.createdAt,
+        expiresAt: signal.expiresAt,
+        ttlMs: Math.max(0, signal.expiresAtMs - Date.now()),
+        reason: 'new hand started',
+      });
+    });
+
     this.partnerSignalsByMatch.delete(matchId);
+    this.activePartnerSignalWindowByMatch.delete(matchId);
 
     for (const cooldownKey of [...this.partnerSignalCooldownBySeat.keys()]) {
       if (cooldownKey.startsWith(`${matchId}:`)) {
         this.partnerSignalCooldownBySeat.delete(cooldownKey);
       }
     }
+
+    for (const signalKey of [...this.initialBotPartnerSignalByHand.keys()]) {
+      if (signalKey.startsWith(`${matchId}:`)) {
+        this.initialBotPartnerSignalByHand.delete(signalKey);
+      }
+    }
+  }
+
+  private clearPartnerSignalsByScope(
+    matchId: string,
+    scopes: PartnerSignalScope[],
+    phase: Extract<PartnerSignalDebugPhase, 'cleared-round' | 'cleared-bet'>,
+    reason: string,
+  ): void {
+    this.clearExpiredPartnerSignals(matchId);
+
+    const currentSignals = this.partnerSignalsByMatch.get(matchId) ?? [];
+    const scopesToClear = new Set(scopes);
+    const clearedSignals = currentSignals.filter((signal) => scopesToClear.has(signal.scope));
+
+    if (clearedSignals.length === 0) {
+      return;
+    }
+
+    const remainingSignals = currentSignals.filter((signal) => !scopesToClear.has(signal.scope));
+
+    if (remainingSignals.length > 0) {
+      this.partnerSignalsByMatch.set(matchId, remainingSignals);
+    } else {
+      this.partnerSignalsByMatch.delete(matchId);
+    }
+
+    clearedSignals.forEach((signal) => {
+      this.emitPartnerSignalDebugToTeam(signal.matchId, signal.toTeamId, {
+        phase,
+        matchId: signal.matchId,
+        signalId: signal.signalId,
+        fromSeatId: signal.fromSeatId,
+        toTeamId: signal.toTeamId,
+        kind: signal.kind,
+        scope: signal.scope,
+        label: signal.label,
+        createdAt: signal.createdAt,
+        expiresAt: signal.expiresAt,
+        ttlMs: Math.max(0, signal.expiresAtMs - Date.now()),
+        reason,
+      });
+    });
   }
 
   private rememberPartnerSignal(signal: PartnerSignalRecord): void {
     this.clearExpiredPartnerSignals(signal.matchId);
 
     const currentSignals = this.partnerSignalsByMatch.get(signal.matchId) ?? [];
+    const supersededSignals = currentSignals.filter(
+      (currentSignal) =>
+        currentSignal.fromSeatId === signal.fromSeatId && currentSignal.scope === signal.scope,
+    );
     const nextSignals = [
-      ...currentSignals.filter((currentSignal) => currentSignal.fromSeatId !== signal.fromSeatId),
+      ...currentSignals.filter(
+        (currentSignal) =>
+          currentSignal.fromSeatId !== signal.fromSeatId || currentSignal.scope !== signal.scope,
+      ),
       signal,
     ];
 
     this.partnerSignalsByMatch.set(signal.matchId, nextSignals);
+
+    supersededSignals.forEach((supersededSignal) => {
+      this.emitPartnerSignalDebugToTeam(supersededSignal.matchId, supersededSignal.toTeamId, {
+        phase: 'superseded',
+        matchId: supersededSignal.matchId,
+        signalId: supersededSignal.signalId,
+        fromSeatId: supersededSignal.fromSeatId,
+        toTeamId: supersededSignal.toTeamId,
+        kind: supersededSignal.kind,
+        scope: supersededSignal.scope,
+        label: supersededSignal.label,
+        createdAt: supersededSignal.createdAt,
+        expiresAt: supersededSignal.expiresAt,
+        ttlMs: Math.max(0, supersededSignal.expiresAtMs - Date.now()),
+        reason: `new ${signal.scope} signal from same sender replaced it`,
+        availableSignals: this.buildPartnerSignalDebugSummaries(signal.matchId),
+      });
+    });
+
+    this.emitPartnerSignalDebugToTeam(signal.matchId, signal.toTeamId, {
+      phase: 'remembered',
+      matchId: signal.matchId,
+      signalId: signal.signalId,
+      fromSeatId: signal.fromSeatId,
+      toTeamId: signal.toTeamId,
+      kind: signal.kind,
+      scope: signal.scope,
+      label: signal.label,
+      createdAt: signal.createdAt,
+      expiresAt: signal.expiresAt,
+      ttlMs: Math.max(0, signal.expiresAtMs - Date.now()),
+      availableSignals: this.buildPartnerSignalDebugSummaries(signal.matchId),
+    });
   }
 
   private emitPartnerSignalToHumanPartners(signal: PartnerSignalRecord): void {
@@ -934,11 +1170,233 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           fromSeatId: signal.fromSeatId,
           toTeamId: signal.toTeamId,
           kind: signal.kind,
+          scope: signal.scope,
           label: signal.label,
           createdAt: signal.createdAt,
           expiresAt: signal.expiresAt,
         });
       });
+  }
+
+  private buildPartnerSignalDebugSummaries(
+    matchId: string,
+  ): NonNullable<PartnerSignalDebugPayload['availableSignals']> {
+    const now = Date.now();
+
+    return (this.partnerSignalsByMatch.get(matchId) ?? []).map((signal) => ({
+      signalId: signal.signalId,
+      fromSeatId: signal.fromSeatId,
+      toTeamId: signal.toTeamId,
+      kind: signal.kind,
+      scope: signal.scope,
+      expiresAt: signal.expiresAt,
+      ttlMs: Math.max(0, signal.expiresAtMs - now),
+    }));
+  }
+
+  private emitPartnerSignalDebugToTeam(
+    matchId: string,
+    teamId: 'T1' | 'T2',
+    payload: Omit<PartnerSignalDebugPayload, 'occurredAt'>,
+  ): void {
+    const eventPayload: PartnerSignalDebugPayload = {
+      occurredAt: new Date().toISOString(),
+      ...payload,
+    };
+
+    this.roomManager
+      .getHumanSessions(matchId)
+      .filter((session) => session.teamId === teamId)
+      .forEach((session) => {
+        this.server.to(session.socketId).emit('partner-signal-debug', eventPayload);
+      });
+  }
+
+  private emitPartnerSignalFromSeat({
+    matchId,
+    fromSeatId,
+    toTeamId,
+    kind,
+    createdAtMs,
+  }: {
+    matchId: string;
+    fromSeatId: SeatId;
+    toTeamId: 'T1' | 'T2';
+    kind: PartnerSignalKind;
+    createdAtMs: number;
+  }): PartnerSignalRecord {
+    const expiresAtMs = createdAtMs + PARTNER_SIGNAL_TTL_MS;
+    const createdAt = new Date(createdAtMs).toISOString();
+    const expiresAt = new Date(expiresAtMs).toISOString();
+    const scope = this.resolvePartnerSignalScope(kind);
+    const response: PartnerSignalPayload = {
+      signalId: `${matchId}:${fromSeatId}:${createdAtMs}`,
+      matchId,
+      fromSeatId,
+      toTeamId,
+      kind,
+      scope,
+      label: PARTNER_SIGNAL_LABELS[kind],
+      createdAt,
+      expiresAt,
+    };
+    const record: PartnerSignalRecord = {
+      ...response,
+      expiresAtMs,
+    };
+
+    this.rememberPartnerSignal(record);
+    this.emitPartnerSignalToHumanPartners(record);
+    this.emitPartnerSignalDebugToTeam(matchId, toTeamId, {
+      phase: 'sent',
+      matchId,
+      signalId: record.signalId,
+      fromSeatId,
+      toTeamId,
+      kind,
+      scope,
+      label: record.label,
+      createdAt,
+      expiresAt,
+      ttlMs: Math.max(0, expiresAtMs - Date.now()),
+    });
+
+    return record;
+  }
+
+  private emitInitialBotPartnerSignals(
+    matchId: string,
+    state: ViewMatchStateResponseDto,
+    roomState: {
+      mode?: MatchMode;
+      players: Array<{
+        seatId: SeatId;
+        teamId: string;
+        isBot?: boolean;
+      }>;
+    },
+  ): void {
+    const currentHand = state.currentHand;
+
+    if (!currentHand || roomState.mode !== '2v2') {
+      return;
+    }
+
+    for (const botSeat of roomState.players) {
+      if (!botSeat.isBot || !this.isTeamId(botSeat.teamId)) {
+        continue;
+      }
+
+      const partnerSeatId = this.resolveBotPartnerSeatId(botSeat.seatId, '2v2');
+      const partnerSeat = roomState.players.find((player) => player.seatId === partnerSeatId);
+
+      if (!partnerSeat || partnerSeat.teamId !== botSeat.teamId || partnerSeat.isBot) {
+        continue;
+      }
+
+      const signalKind = this.resolveInitialBotPartnerSignalKind(currentHand, botSeat.seatId);
+
+      if (!signalKind) {
+        continue;
+      }
+
+      const handKey = this.buildInitialBotPartnerSignalKey(matchId, currentHand, botSeat.seatId);
+
+      if (this.initialBotPartnerSignalByHand.has(handKey)) {
+        continue;
+      }
+
+      this.initialBotPartnerSignalByHand.add(handKey);
+      this.emitPartnerSignalFromSeat({
+        matchId,
+        fromSeatId: botSeat.seatId,
+        toTeamId: botSeat.teamId,
+        kind: signalKind,
+        createdAtMs: Date.now(),
+      });
+    }
+  }
+
+  private buildInitialBotPartnerSignalKey(
+    matchId: string,
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): string {
+    const handCards = this.resolveSeatCards(currentHand, seatId).join('|');
+
+    return [matchId, seatId, currentHand.viraRank, handCards].join(':');
+  }
+
+  private resolveInitialBotPartnerSignalKind(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): PartnerSignalKind | null {
+    const specificManilhaSignal = this.resolveStrongestSpecificManilhaSignal(currentHand, seatId);
+
+    if (specificManilhaSignal) {
+      return specificManilhaSignal;
+    }
+
+    const cards = this.resolveSeatCards(currentHand, seatId);
+    const handStrength = this.calculateInitialBotSignalHandStrength(
+      cards,
+      currentHand.viraRank as Rank,
+    );
+
+    if (handStrength >= INITIAL_BOT_SIGNAL_STRONG_HAND_THRESHOLD) {
+      return 'strong-hand';
+    }
+
+    if (handStrength <= INITIAL_BOT_SIGNAL_WEAK_HAND_THRESHOLD) {
+      return 'weak-hand';
+    }
+
+    return null;
+  }
+
+  private resolveStrongestSpecificManilhaSignal(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    seatId: SeatId,
+  ): PartnerSignalKind | null {
+    if (this.hasSeatSpecificManilha(currentHand, seatId, 'P')) return 'manilha-zap';
+    if (this.hasSeatSpecificManilha(currentHand, seatId, 'C')) return 'manilha-copas';
+    if (this.hasSeatSpecificManilha(currentHand, seatId, 'E')) return 'manilha-espadilha';
+    if (this.hasSeatSpecificManilha(currentHand, seatId, 'O')) return 'manilha-ouros';
+
+    return null;
+  }
+
+  private calculateInitialBotSignalHandStrength(cards: string[], viraRank: Rank): number {
+    if (cards.length === 0) {
+      return 0;
+    }
+
+    const orderedStrengths = cards
+      .map((card) => this.calculateInitialBotSignalCardStrength(card, viraRank))
+      .sort((left, right) => right - left);
+
+    const strongest = orderedStrengths[0] ?? 0;
+    const second = orderedStrengths[1] ?? 0;
+    const third = orderedStrengths[2] ?? 0;
+
+    return strongest * 0.6 + second * 0.3 + third * 0.1;
+  }
+
+  private calculateInitialBotSignalCardStrength(card: string, viraRank: Rank): number {
+    const rankOrder: Rank[] = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+    const rank = this.readCardRank(card) as Rank;
+
+    if (rank === manilhaRankFromVira(viraRank)) {
+      return 1;
+    }
+
+    const rankIndex = rankOrder.indexOf(rank);
+
+    return rankIndex >= 0 ? rankIndex / (rankOrder.length - 1) : 0;
+  }
+
+  private isTeamId(value: string): value is 'T1' | 'T2' {
+    return value === 'T1' || value === 'T2';
   }
 
   private resolvePartnerSignalStrengthHint(
@@ -995,31 +1453,55 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return {
       fromSeatId: signal.fromSeatId as BotPartnerSignalView['fromSeatId'],
       kind: signal.kind,
+      scope: signal.scope,
       strengthHint: this.resolvePartnerSignalStrengthHint(signal.kind),
       intent: this.resolvePartnerSignalIntent(signal.kind),
       expiresAt: signal.expiresAt,
     };
   }
 
-  private resolveBotPartnerSignalView(
+  private resolveBotPartnerSignalRecords(
     matchId: string,
     partnerSeatId: SeatId | null,
-  ): BotPartnerSignalView | null {
+  ): Partial<Record<PartnerSignalScope, PartnerSignalRecord>> {
     if (!partnerSeatId) {
-      return null;
+      return {};
     }
 
     this.clearExpiredPartnerSignals(matchId);
 
-    const signal = (this.partnerSignalsByMatch.get(matchId) ?? []).find(
-      (candidate) => candidate.fromSeatId === partnerSeatId,
-    );
+    return (this.partnerSignalsByMatch.get(matchId) ?? [])
+      .filter((candidate) => candidate.fromSeatId === partnerSeatId)
+      .reduce<Partial<Record<PartnerSignalScope, PartnerSignalRecord>>>(
+        (signalsByScope, signal) => {
+          signalsByScope[signal.scope] = signal;
+          return signalsByScope;
+        },
+        {},
+      );
+  }
 
-    if (!signal) {
-      return null;
+  private resolvePrimaryPartnerSignalRecord(
+    currentHand: NonNullable<ViewMatchStateResponseDto['currentHand']>,
+    signalRecords: Partial<Record<PartnerSignalScope, PartnerSignalRecord>>,
+  ): PartnerSignalRecord | null {
+    if (currentHand.nextDecisionType === 'play-card') {
+      return signalRecords['round-tactic'] ?? signalRecords['hand-memory'] ?? null;
     }
 
-    return this.toBotPartnerSignalView(signal);
+    if (
+      currentHand.nextDecisionType === 'respond-bet' ||
+      currentHand.betState === 'awaiting_response'
+    ) {
+      return signalRecords['bet-intent'] ?? signalRecords['hand-memory'] ?? null;
+    }
+
+    return (
+      signalRecords['hand-memory'] ??
+      signalRecords['round-tactic'] ??
+      signalRecords['bet-intent'] ??
+      null
+    );
   }
 
   private normalizePrivateFriendPlacement(value: unknown): PrivateFriendPlacement | null {
@@ -1611,6 +2093,59 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
+  private resolveBotDebugRole(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+  ): 'partner-bot' | 'rival-bot' | 'unknown' {
+    const roomState = this.roomManager.getState(matchId);
+    const botTeamHasHuman = this.hasHumanSeatOnTeam(roomState, botTurnContext.teamId);
+
+    if (botTeamHasHuman) {
+      return 'partner-bot';
+    }
+
+    const otherTeamId = botTurnContext.teamId === 'T1' ? 'T2' : 'T1';
+
+    return this.hasHumanSeatOnTeam(roomState, otherTeamId) ? 'rival-bot' : 'unknown';
+  }
+
+  private buildPartnerSignalTelemetry(
+    botTurnContext: BotTurnDecisionContext,
+  ): Pick<
+    BotDecisionTelemetry,
+    | 'partnerSignalKind'
+    | 'partnerSignalScope'
+    | 'partnerSignalFromSeatId'
+    | 'partnerSignalStrengthHint'
+    | 'partnerSignalIntent'
+    | 'partnerSignalExpiresAt'
+    | 'partnerSignalTtlMs'
+    | 'partnerHandMemorySignalKind'
+    | 'partnerRoundTacticSignalKind'
+    | 'partnerBetIntentSignalKind'
+  > {
+    const partnerSignal = botTurnContext.context.partnerSignal ?? null;
+    const partnerSignals = botTurnContext.context.partnerSignals;
+    const partnerSignalExpiresAtMs = partnerSignal ? Date.parse(partnerSignal.expiresAt) : Number.NaN;
+    const partnerSignalTtlMs =
+      partnerSignal && Number.isFinite(partnerSignalExpiresAtMs)
+        ? Math.max(0, partnerSignalExpiresAtMs - Date.now())
+        : undefined;
+
+    return {
+      ...(partnerSignal ? { partnerSignalKind: partnerSignal.kind } : {}),
+      ...(partnerSignal ? { partnerSignalScope: partnerSignal.scope } : {}),
+      ...(partnerSignal ? { partnerSignalFromSeatId: partnerSignal.fromSeatId } : {}),
+      ...(partnerSignal ? { partnerSignalStrengthHint: partnerSignal.strengthHint } : {}),
+      ...(partnerSignal ? { partnerSignalIntent: partnerSignal.intent } : {}),
+      ...(partnerSignal ? { partnerSignalExpiresAt: partnerSignal.expiresAt } : {}),
+      ...(partnerSignalTtlMs !== undefined ? { partnerSignalTtlMs } : {}),
+      ...(partnerSignals?.handMemory ? { partnerHandMemorySignalKind: partnerSignals.handMemory.kind } : {}),
+      ...(partnerSignals?.roundTactic ? { partnerRoundTacticSignalKind: partnerSignals.roundTactic.kind } : {}),
+      ...(partnerSignals?.betIntent ? { partnerBetIntentSignalKind: partnerSignals.betIntent.kind } : {}),
+    };
+  }
+
   private rememberBotDecision(
     matchId: string,
     botTurnContext: BotTurnDecisionContext,
@@ -1619,7 +2154,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const metadata = decision.metadata;
     const tactical = metadata?.rationale?.tactical;
     const betAudit = metadata?.rationale?.betAudit;
-    const partnerSignal = botTurnContext.context.partnerSignal ?? null;
+    const partnerSignalTelemetry = this.buildPartnerSignalTelemetry(botTurnContext);
     const selectedCard =
       tactical?.selectedCard ?? (decision.action === 'play-card' ? decision.card : undefined);
 
@@ -1641,9 +2176,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ...(tactical && 'partnerSeatId' in tactical
         ? { partnerSeatId: tactical.partnerSeatId ?? null }
         : {}),
-      ...(partnerSignal ? { partnerSignalKind: partnerSignal.kind } : {}),
-      ...(partnerSignal ? { partnerSignalStrengthHint: partnerSignal.strengthHint } : {}),
-      ...(partnerSignal ? { partnerSignalIntent: partnerSignal.intent } : {}),
+      ...partnerSignalTelemetry,
+      debugRole: this.resolveBotDebugRole(matchId, botTurnContext),
       ...(betAudit?.partnerSignalBoost !== undefined
         ? { partnerSignalBoost: betAudit.partnerSignalBoost }
         : {}),
@@ -1720,6 +2254,68 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  private consumePartnerSignalForExecutedDecision(
+    matchId: string,
+    decision: BotDecisionTelemetry,
+  ): void {
+    const status = decision.executionStatus;
+    const executedAction = decision.executedAction;
+    const fromSeatId = decision.partnerSignalFromSeatId as SeatId | undefined;
+
+    if (!fromSeatId || !executedAction) {
+      return;
+    }
+
+    const shouldConsumeRoundTactic =
+      executedAction === 'play-card' && (status === 'succeeded' || status === 'fallback-card');
+    const shouldConsumeBetIntent =
+      this.isBetDecisionAction(executedAction) && status === 'succeeded';
+    const scopeToConsume: PartnerSignalScope | null = shouldConsumeRoundTactic
+      ? 'round-tactic'
+      : shouldConsumeBetIntent
+        ? 'bet-intent'
+        : null;
+
+    if (!scopeToConsume) {
+      return;
+    }
+
+    const currentSignals = this.partnerSignalsByMatch.get(matchId) ?? [];
+    const signal = currentSignals.find(
+      (candidate) => candidate.fromSeatId === fromSeatId && candidate.scope === scopeToConsume,
+    );
+
+    if (!signal) {
+      return;
+    }
+
+    const remainingSignals = currentSignals.filter(
+      (candidate) => !(candidate.fromSeatId === fromSeatId && candidate.scope === scopeToConsume),
+    );
+
+    if (remainingSignals.length > 0) {
+      this.partnerSignalsByMatch.set(matchId, remainingSignals);
+    } else {
+      this.partnerSignalsByMatch.delete(matchId);
+    }
+
+    this.emitPartnerSignalDebugToTeam(signal.matchId, signal.toTeamId, {
+      phase: 'consumed',
+      matchId: signal.matchId,
+      signalId: signal.signalId,
+      fromSeatId: signal.fromSeatId,
+      toTeamId: signal.toTeamId,
+      kind: signal.kind,
+      scope: signal.scope,
+      label: signal.label,
+      createdAt: signal.createdAt,
+      expiresAt: signal.expiresAt,
+      ttlMs: Math.max(0, signal.expiresAtMs - Date.now()),
+      reason: `${executedAction} ${status}`,
+      availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+    });
+  }
+
   private markBotDecisionExecution(
     matchId: string,
     execution: {
@@ -1736,14 +2332,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    this.lastBotDecisionByMatch.set(matchId, {
+    const nextDecision: BotDecisionTelemetry = {
       ...current,
       executionStatus: execution.status,
       ...(execution.executedAction ? { executedAction: execution.executedAction } : {}),
       ...(execution.reason ? { executionReason: execution.reason } : {}),
       ...(execution.error ? { executionError: execution.error } : {}),
       ...(execution.selectedCard ? { selectedCard: execution.selectedCard } : {}),
-    });
+    };
+
+    this.lastBotDecisionByMatch.set(matchId, nextDecision);
+    this.consumePartnerSignalForExecutedDecision(matchId, nextDecision);
+    this.server.to(matchId).emit('bot-decision', nextDecision);
   }
 
   private async emitSyncedMatchState(matchId: string): Promise<ViewMatchStateResponseDto> {
@@ -1766,7 +2366,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return state;
     }
 
-    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state));
+    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }));
 
     if (!hasPendingBotAction) {
       return state;
@@ -1785,7 +2385,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state));
+    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }));
 
     if (!hasPendingBotAction) {
       return;
@@ -1835,6 +2435,91 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     clearTimeout(timeout);
     this.scheduledBotTurns.delete(matchId);
+    this.closePartnerSignalWindow(matchId);
+  }
+
+  private isPartnerSignalWindowEligible(
+    state: ViewMatchStateResponseDto,
+    botTurnContext: BotTurnDecisionContext,
+  ): boolean {
+    const currentHand = state.currentHand;
+
+    if (!currentHand || currentHand.mode !== '2v2') {
+      return false;
+    }
+
+    const partnerSeatId = botTurnContext.context.partnerSeatId;
+
+    if (!partnerSeatId) {
+      return false;
+    }
+
+    const roomState = this.roomManager.getState(state.matchId);
+    const partnerSeat = roomState.players.find((player) => player.seatId === partnerSeatId);
+
+    if (!partnerSeat || partnerSeat.isBot || partnerSeat.teamId !== botTurnContext.teamId) {
+      return false;
+    }
+
+    return (
+      currentHand.nextDecisionType === 'play-card' ||
+      currentHand.nextDecisionType === 'respond-bet' ||
+      currentHand.betState === 'awaiting_response'
+    );
+  }
+
+  private async openPartnerSignalWindow(matchId: string, durationMs: number): Promise<boolean> {
+    const state = await this.getAuthoritativeMatchState(matchId);
+    const botTurnContext = await this.buildBotDecisionContext(matchId, state, {
+      emitSignalDebug: false,
+    });
+
+    if (!botTurnContext || !this.isPartnerSignalWindowEligible(state, botTurnContext)) {
+      this.activePartnerSignalWindowByMatch.delete(matchId);
+      return false;
+    }
+
+    const partnerSeatId = botTurnContext.context.partnerSeatId as SeatId;
+    const windowState = {
+      botSeatId: botTurnContext.seatId,
+      botTeamId: botTurnContext.teamId,
+      partnerSeatId,
+      durationMs,
+    };
+
+    this.activePartnerSignalWindowByMatch.set(matchId, windowState);
+    this.emitPartnerSignalDebugToTeam(matchId, botTurnContext.teamId, {
+      phase: 'window-opened',
+      matchId,
+      botSeatId: botTurnContext.seatId,
+      botTeamId: botTurnContext.teamId,
+      partnerSeatId,
+      ttlMs: durationMs,
+      reason: 'waiting for a possible human partner signal before bot decision',
+      availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+    });
+
+    return true;
+  }
+
+  private closePartnerSignalWindow(matchId: string): void {
+    const windowState = this.activePartnerSignalWindowByMatch.get(matchId);
+
+    if (!windowState) {
+      return;
+    }
+
+    this.activePartnerSignalWindowByMatch.delete(matchId);
+    this.emitPartnerSignalDebugToTeam(matchId, windowState.botTeamId, {
+      phase: 'window-closed',
+      matchId,
+      botSeatId: windowState.botSeatId,
+      botTeamId: windowState.botTeamId,
+      partnerSeatId: windowState.partnerSeatId,
+      ttlMs: 0,
+      reason: 'bot partner signal window closed before resolving current active signals',
+      availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+    });
   }
 
   private scheduleDeferredBotTurn(matchId: string, delayMs?: number): void {
@@ -1842,14 +2527,27 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const resolvedDelay = delayMs ?? BOT_CHAINED_TURN_DELAY_MS;
+    const baseDelayMs = Math.max(0, delayMs ?? BOT_CHAINED_TURN_DELAY_MS);
 
     const timeout = setTimeout(() => {
       this.scheduledBotTurns.delete(matchId);
 
-      void this.processBotTurns(matchId).catch((error: unknown) => {
+      void (async () => {
+        const openedSignalWindow = await this.openPartnerSignalWindow(
+          matchId,
+          BOT_PARTNER_SIGNAL_WINDOW_MS,
+        );
+
+        if (openedSignalWindow) {
+          await this.delay(BOT_PARTNER_SIGNAL_WINDOW_MS);
+          this.closePartnerSignalWindow(matchId);
+        }
+
+        await this.processBotTurns(matchId);
+      })().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Unknown deferred bot turn error';
 
+        this.closePartnerSignalWindow(matchId);
         this.logGateway('warn', {
           layer: 'gateway',
           event: 'play_card_rejected',
@@ -1859,7 +2557,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           errorMessage: message,
         });
       });
-    }, resolvedDelay);
+    }, baseDelayMs);
 
     this.scheduledBotTurns.set(matchId, timeout);
   }
@@ -2328,6 +3026,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async buildBotDecisionContext(
     matchId: string,
     state: ViewMatchStateResponseDto,
+    options: { emitSignalDebug?: boolean } = {},
   ): Promise<BotTurnDecisionContext | null> {
     const actor = this.resolveBotTurnDecisionActor(matchId, state);
 
@@ -2348,13 +3047,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const seatHand = currentHand.seatHands?.[actor.seatId] ?? null;
     const hand =
-      seatHand ?? (actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand);
+      seatHand ??
+      (actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand);
 
     const betView = this.buildBotBetView(currentHand);
     const handProgress = this.buildBotHandProgressView(viewerState, actor.playerId);
     const pointsToWin = this.resolvePointsToWin(viewerState);
     const partnerSeatId = this.resolveBotPartnerSeatId(actor.seatId, currentHand.mode ?? '1v1');
-    const partnerSignal = this.resolveBotPartnerSignalView(matchId, partnerSeatId);
+    const partnerSignalRecords = this.resolveBotPartnerSignalRecords(matchId, partnerSeatId);
+    const partnerSignalRecord = this.resolvePrimaryPartnerSignalRecord(
+      currentHand,
+      partnerSignalRecords,
+    );
+    const partnerSignal = partnerSignalRecord
+      ? this.toBotPartnerSignalView(partnerSignalRecord)
+      : null;
+    const partnerSignals = {
+      handMemory: partnerSignalRecords['hand-memory']
+        ? this.toBotPartnerSignalView(partnerSignalRecords['hand-memory'])
+        : null,
+      roundTactic: partnerSignalRecords['round-tactic']
+        ? this.toBotPartnerSignalView(partnerSignalRecords['round-tactic'])
+        : null,
+      betIntent: partnerSignalRecords['bet-intent']
+        ? this.toBotPartnerSignalView(partnerSignalRecords['bet-intent'])
+        : null,
+    };
+
+    if (currentHand.mode === '2v2' && options.emitSignalDebug !== false) {
+      this.emitPartnerSignalResolutionDebug({
+        matchId,
+        actor,
+        partnerSeatId,
+        signal: partnerSignalRecord,
+      });
+    }
 
     return {
       ...actor,
@@ -2366,6 +3093,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         actorTeamId: actor.teamId,
         partnerSeatId,
         ...(partnerSignal ? { partnerSignal } : {}),
+        partnerSignals,
         viraRank: currentHand.viraRank,
         currentRound: this.getCurrentBotRoundView(viewerState),
         player: {
@@ -2381,6 +3109,51 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         handProgress,
       },
     };
+  }
+
+  private emitPartnerSignalResolutionDebug({
+    matchId,
+    actor,
+    partnerSeatId,
+    signal,
+  }: {
+    matchId: string;
+    actor: BotTurnDecisionActor;
+    partnerSeatId: SeatId | null;
+    signal: PartnerSignalRecord | null;
+  }): void {
+    const basePayload = {
+      matchId,
+      botSeatId: actor.seatId,
+      botTeamId: actor.teamId,
+      partnerSeatId,
+      availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+    };
+
+    if (!signal) {
+      this.emitPartnerSignalDebugToTeam(matchId, actor.teamId, {
+        ...basePayload,
+        phase: 'missed-for-bot',
+        reason: partnerSeatId
+          ? 'no active signal from the resolved partner seat when this bot context was built'
+          : 'this bot decision has no 2v2 partner seat',
+      });
+      return;
+    }
+
+    this.emitPartnerSignalDebugToTeam(matchId, actor.teamId, {
+      ...basePayload,
+      phase: 'resolved-for-bot',
+      signalId: signal.signalId,
+      fromSeatId: signal.fromSeatId,
+      toTeamId: signal.toTeamId,
+      kind: signal.kind,
+      scope: signal.scope,
+      label: signal.label,
+      createdAt: signal.createdAt,
+      expiresAt: signal.expiresAt,
+      ttlMs: Math.max(0, signal.expiresAtMs - Date.now()),
+    });
   }
 
   private buildBotHandProgressView(
@@ -2725,6 +3498,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.emitRoundTransition(resolvedPayload);
+    this.clearPartnerSignalsByScope(
+      matchId,
+      ['round-tactic'],
+      'cleared-round',
+      'round resolved before the tactical signal was consumed',
+    );
     await this.delay(ROUND_RESOLUTION_STATE_SYNC_DELAY_MS);
 
     this.server.to(matchId).emit('match-state', this.toPublicMatchState(updatedState));
@@ -3133,7 +3912,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
+    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState, {
+      emitSignalDebug: false,
+    });
 
     return Boolean(nextBotTurnContext);
   }
@@ -3233,7 +4014,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return false;
       }
 
-      const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
+      const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState, {
+      emitSignalDebug: false,
+    });
 
       return Boolean(nextBotTurnContext);
     }
@@ -3379,7 +4162,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState);
+    const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState, {
+      emitSignalDebug: false,
+    });
 
     if (!nextBotTurnContext) {
       return false;
@@ -3438,6 +4223,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         viraCard: startedViraCard,
         currentTurnSeatId: roomState.currentTurnSeatId,
       });
+
+      this.emitInitialBotPartnerSignals(matchId, startedMatchState, roomState);
 
       this.clearScheduledBotTurn(matchId);
       await this.continueAutomaticGameFlow(matchId);
@@ -4714,6 +5501,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           currentTurnSeatId: roomState.currentTurnSeatId,
         });
 
+      this.emitInitialBotPartnerSignals(matchId, startedMatchState, roomState);
+
         this.clearScheduledBotTurn(matchId);
         await this.continueAutomaticGameFlow(matchId);
 
@@ -5622,7 +6411,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.finalizeMatchIfFinished(matchId, state);
 
       if (state.state === 'in_progress' && state.currentHand?.nextDecisionType === 'play-card') {
-        await this.processBotTurns(matchId);
+        this.clearScheduledBotTurn(matchId);
+        this.scheduleDeferredBotTurn(matchId);
       }
 
       this.logGateway('log', {
@@ -5814,7 +6604,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const now = Date.now();
-      const cooldownKey = `${matchId}:${session.seatId}`;
+      const signalScope = this.resolvePartnerSignalScope(kind);
+      const cooldownKey = `${matchId}:${session.seatId}:${signalScope}:${kind}`;
       const nextAllowedAt = this.partnerSignalCooldownBySeat.get(cooldownKey) ?? 0;
 
       if (nextAllowedAt > now) {
@@ -5874,29 +6665,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      const createdAtMs = now;
-      const expiresAtMs = createdAtMs + PARTNER_SIGNAL_TTL_MS;
-      const createdAt = new Date(createdAtMs).toISOString();
-      const expiresAt = new Date(expiresAtMs).toISOString();
-      const response: PartnerSignalPayload = {
-        signalId: `${matchId}:${session.seatId}:${createdAtMs}`,
+      const response = this.emitPartnerSignalFromSeat({
         matchId,
         fromSeatId: session.seatId,
         toTeamId: session.teamId,
         kind,
-        label: PARTNER_SIGNAL_LABELS[kind],
-        createdAt,
-        expiresAt,
-      };
-
-      const record: PartnerSignalRecord = {
-        ...response,
-        expiresAtMs,
-      };
+        createdAtMs: now,
+      });
 
       this.partnerSignalCooldownBySeat.set(cooldownKey, now + PARTNER_SIGNAL_COOLDOWN_MS);
-      this.rememberPartnerSignal(record);
-      this.emitPartnerSignalToHumanPartners(record);
 
       this.logGateway('log', {
         layer: 'gateway',

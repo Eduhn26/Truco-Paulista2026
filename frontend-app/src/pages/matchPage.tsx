@@ -36,6 +36,7 @@ import type {
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
+  PartnerSignalDebugPayload,
   PartnerSignalKind,
   PartnerSignalPayload,
   Rank,
@@ -164,62 +165,91 @@ function cardPayloadToString(card: CardPayload): string {
   return `${card.rank}${card.suit}`;
 }
 
-function formatBotDecisionTelemetryValue(
-  value: string | number | boolean | null | undefined,
-): string {
-  if (value === null || value === undefined || value === '') {
-    return '-';
-  }
-
-  return String(value);
-}
-
-function formatBotDecisionTelemetryList(values: string[] | undefined): string {
-  return values && values.length > 0 ? values.join(',') : '-';
-}
-
-function formatBotDecisionTelemetryNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined) {
-    return '-';
-  }
-
-  return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-
 function buildBotDecisionLogKey(decision: BotDecisionTelemetryPayload): string {
   return [
     decision.occurredAt ?? 'no-time',
-    decision.seatId,
+    decision.actorSeatId ?? decision.seatId,
     decision.action,
     decision.selectedCard ?? 'no-card',
-    decision.strategy ?? 'no-strategy',
     decision.executionStatus ?? 'no-execution',
     decision.executedAction ?? 'no-executed-action',
+    decision.partnerSignalKind ?? 'no-signal',
+    decision.partnerSignalScope ?? 'no-scope',
+    decision.partnerSignalFromSeatId ?? 'no-sender',
+    decision.debugRole ?? 'unknown-role',
   ].join('|');
 }
 
-function formatBotDecisionEventLog(decision: BotDecisionTelemetryPayload): string {
-  return [
-    'Bot decision',
-    `seat=${decision.actorSeatId ?? decision.seatId}`,
-    `team=${decision.actorTeamId ?? decision.teamId}`,
-    `profile=${formatBotDecisionTelemetryValue(decision.profile)}`,
-    `action=${decision.action}`,
-    `card=${formatBotDecisionTelemetryValue(decision.selectedCard)}`,
-    `strategy=${formatBotDecisionTelemetryValue(decision.strategy)}`,
-    `winningSeat=${formatBotDecisionTelemetryValue(decision.winningSeatIdBeforeDecision)}`,
-    `winningCard=${formatBotDecisionTelemetryValue(decision.winningCardBeforeDecision)}`,
-    `partner=${formatBotDecisionTelemetryValue(decision.partnerSeatId)}`,
-    `partnerWinning=${formatBotDecisionTelemetryValue(decision.partnerWasWinning)}`,
-    `hand=${formatBotDecisionTelemetryList(decision.actorHandBefore)}`,
-    `exec=${formatBotDecisionTelemetryValue(decision.executionStatus)}`,
-    `executed=${formatBotDecisionTelemetryValue(decision.executedAction)}`,
-    `execReason=${formatBotDecisionTelemetryValue(decision.executionReason)}`,
-    `betStrength=${formatBotDecisionTelemetryNumber(decision.handStrength)}`,
-    `effective=${formatBotDecisionTelemetryNumber(decision.betEffectiveStrength)}`,
-    `acceptRisk=${formatBotDecisionTelemetryValue(decision.betAcceptRisksMatch)}`,
-    `declineLoses=${formatBotDecisionTelemetryValue(decision.betDeclineLosesMatch)}`,
-  ].join(' | ');
+function buildPartnerSignalDebugConsolePayload(
+  payload: PartnerSignalDebugPayload,
+): Record<string, unknown> {
+  return {
+    phase: payload.phase,
+    matchId: payload.matchId,
+    kind: payload.kind ?? null,
+    label: payload.label ?? null,
+    scope: payload.scope ?? null,
+    fromSeatId: payload.fromSeatId ?? null,
+    toTeamId: payload.toTeamId ?? null,
+    botSeatId: payload.botSeatId ?? null,
+    botTeamId: payload.botTeamId ?? null,
+    partnerSeatId: payload.partnerSeatId ?? null,
+    ttlMs: payload.ttlMs ?? null,
+    reason: payload.reason ?? null,
+    availableSignals: payload.availableSignals ?? [],
+    signalId: payload.signalId ?? null,
+    createdAt: payload.createdAt ?? null,
+    expiresAt: payload.expiresAt ?? null,
+    occurredAt: payload.occurredAt,
+  };
+}
+
+function buildBotDecisionConsolePayload(
+  decision: BotDecisionTelemetryPayload,
+): Record<string, unknown> {
+  return {
+    seat: decision.actorSeatId ?? decision.seatId,
+    teamId: decision.actorTeamId ?? decision.teamId,
+    playerId: decision.playerId,
+    profile: decision.profile,
+    action: decision.action,
+    source: decision.source,
+    debugRole: decision.debugRole ?? 'unknown',
+    signalReceived: decision.partnerSignalKind ?? null,
+    signalScope: decision.partnerSignalScope ?? null,
+    signalFromSeat: decision.partnerSignalFromSeatId ?? null,
+    signalIntent: decision.partnerSignalIntent ?? null,
+    signalStrengthHint: decision.partnerSignalStrengthHint ?? null,
+    handMemorySignal: decision.partnerHandMemorySignalKind ?? null,
+    roundTacticSignal: decision.partnerRoundTacticSignalKind ?? null,
+    betIntentSignal: decision.partnerBetIntentSignalKind ?? null,
+    partnerSignalBoost: decision.partnerSignalBoost ?? null,
+    partnerSignalExpiresAt: decision.partnerSignalExpiresAt ?? null,
+    partnerSignalTtlMs: decision.partnerSignalTtlMs ?? null,
+    strategy: decision.strategy ?? null,
+    selectedCard: decision.selectedCard ?? null,
+    executionStatus: decision.executionStatus ?? null,
+    executedAction: decision.executedAction ?? null,
+    executionReason: decision.executionReason ?? null,
+    reason: decision.reason ?? null,
+    winningSeatIdBeforeDecision: decision.winningSeatIdBeforeDecision ?? null,
+    winningTeamIdBeforeDecision: decision.winningTeamIdBeforeDecision ?? null,
+    winningCardBeforeDecision: decision.winningCardBeforeDecision ?? null,
+    partnerWasWinning: decision.partnerWasWinning ?? null,
+    actorHandBefore: decision.actorHandBefore ?? [],
+    bet: {
+      currentValue: decision.betCurrentValue ?? null,
+      pendingValue: decision.betPendingValue ?? null,
+      state: decision.betState ?? null,
+      selectedAction: decision.betSelectedAction ?? null,
+      effectiveStrength: decision.betEffectiveStrength ?? null,
+      acceptThreshold: decision.betAcceptThreshold ?? null,
+      raiseThreshold: decision.betRaiseThreshold ?? null,
+      initiativeThreshold: decision.betInitiativeThreshold ?? null,
+      declineFloor: decision.betDeclineFloor ?? null,
+    },
+    occurredAt: decision.occurredAt ?? null,
+  };
 }
 
 function addVisibleCardToSet(cards: Set<string>, card: string | null | undefined): void {
@@ -1786,6 +1816,26 @@ export function MatchPage() {
     setLastPartnerSignal(payload);
   }, []);
 
+  const handleRealtimePartnerSignalDebug = useCallback((payload: PartnerSignalDebugPayload) => {
+    if (shouldLogMatchPageDebug()) {
+      console.info('[PARTNER_SIGNAL]', buildPartnerSignalDebugConsolePayload(payload));
+    }
+  }, []);
+
+  const handleRealtimeBotDecision = useCallback((decision: BotDecisionTelemetryPayload) => {
+    const logKey = buildBotDecisionLogKey(decision);
+
+    if (lastBotDecisionLogKeyRef.current === logKey) {
+      return;
+    }
+
+    lastBotDecisionLogKeyRef.current = logKey;
+
+    if (shouldLogMatchPageDebug()) {
+      console.info('[BOT_DECISION]', buildBotDecisionConsolePayload(decision));
+    }
+  }, []);
+
   useEffect(() => {
     if (!lastPartnerSignal) {
       return undefined;
@@ -1842,6 +1892,8 @@ export function MatchPage() {
     onCardPlayed: handleRealtimeCardPlayed,
     onRoundTransition: handleRealtimeRoundTransition,
     onPartnerSignal: handleRealtimePartnerSignal,
+    onPartnerSignalDebug: handleRealtimePartnerSignalDebug,
+    onBotDecision: handleRealtimeBotDecision,
     onServerError: () => {
       setIsStartHandPending(false);
 
@@ -1864,6 +1916,17 @@ export function MatchPage() {
       }
 
       const createdAt = Date.now();
+
+      if (shouldLogMatchPageDebug()) {
+        console.info('[PARTNER_SIGNAL]', {
+          phase: 'sent',
+          source: 'frontend-local',
+          matchId: effectiveMatchId,
+          kind,
+          label: resolvePartnerSignalFeedbackLabel(kind),
+          occurredAt: new Date(createdAt).toISOString(),
+        });
+      }
 
       emitSendPartnerSignal(effectiveMatchId, kind);
       setLastSentPartnerSignal({
@@ -2561,23 +2624,6 @@ export function MatchPage() {
     visualPublicMatchState,
     visualRoomState,
   ]);
-
-  useEffect(() => {
-    const decision = viewModel.lastBotDecision;
-
-    if (!decision) {
-      return;
-    }
-
-    const logKey = buildBotDecisionLogKey(decision);
-
-    if (lastBotDecisionLogKeyRef.current === logKey) {
-      return;
-    }
-
-    lastBotDecisionLogKeyRef.current = logKey;
-    appendLog(formatBotDecisionEventLog(decision));
-  }, [appendLog, viewModel.lastBotDecision]);
 
   useEffect(() => {
     const hand = viewModel.currentPrivateHand ?? viewModel.currentPublicHand;

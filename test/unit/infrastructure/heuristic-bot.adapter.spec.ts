@@ -113,6 +113,25 @@ describe('HeuristicBotAdapter', () => {
     );
   }
 
+
+  function resolvePartnerSignalScope(
+    kind: NonNullable<BotDecisionContext['partnerSignal']>['kind'],
+  ): NonNullable<BotDecisionContext['partnerSignal']>['scope'] {
+    if (
+      kind === 'hold' ||
+      kind === 'kill-round' ||
+      kind === 'low-card'
+    ) {
+      return 'round-tactic';
+    }
+
+    if (kind === 'pressure' || kind === 'avoid-bet') {
+      return 'bet-intent';
+    }
+
+    return 'hand-memory';
+  }
+
   function createPartnerSignal(
     kind: NonNullable<BotDecisionContext['partnerSignal']>['kind'],
     overrides: Partial<NonNullable<BotDecisionContext['partnerSignal']>> = {},
@@ -120,6 +139,7 @@ describe('HeuristicBotAdapter', () => {
     return {
       fromSeatId: 'T1A',
       kind,
+      scope: resolvePartnerSignalScope(kind),
       strengthHint:
         kind === 'manilha-zap' || kind === 'manilha-copas' || kind === 'strong-manilha'
           ? 'strong'

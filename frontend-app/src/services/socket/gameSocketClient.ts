@@ -1,9 +1,11 @@
 import { io, type Socket } from 'socket.io-client';
 
 import {
+  normalizeBotDecisionTelemetryPayload,
   normalizeCardPlayedPayload,
   normalizeHandStartedPayload,
   normalizeMatchFoundPayload,
+  normalizePartnerSignalDebugPayload,
   normalizePartnerSignalPayload,
   normalizeMatchStatePayload,
   normalizePlayerAssignedPayload,
@@ -121,6 +123,18 @@ export class GameSocketClient {
 
     socket.on('partner-signal', (payload: unknown) => {
       events.onPartnerSignal?.(normalizePartnerSignalPayload(payload));
+    });
+
+    socket.on('partner-signal-debug', (payload: unknown) => {
+      events.onPartnerSignalDebug?.(normalizePartnerSignalDebugPayload(payload));
+    });
+
+    socket.on('bot-decision', (payload: unknown) => {
+      const decision = normalizeBotDecisionTelemetryPayload(payload);
+
+      if (decision) {
+        events.onBotDecision?.(decision);
+      }
     });
 
     return socket;
