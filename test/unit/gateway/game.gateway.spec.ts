@@ -824,6 +824,1044 @@ describe('GameGateway bot profile flow', () => {
     }
   });
 
+  it('emits pressure advice when a mixed-team bot wants to request truco', async () => {
+    const { gateway, gatewayBotTurnAccess, deps, server } = createGateway();
+    const gatewaySignalAccess = gateway as unknown as GameGatewayPartnerSignalTelemetryAccess;
+    const emitsByTarget = new Map<string, jest.Mock>();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1B',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 4,
+        playerTwo: 2,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'respond-bet',
+        availableActions: {
+          canRequestTruco: true,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: true,
+        },
+        playerOneHand: ['7O', '4O', 'AO'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['7O', '4O', 'AO'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+            seatPlays: {
+              T2A: '5O',
+            },
+            orderedPlays: [
+              {
+                ownerId: 'T2A',
+                seatId: 'T2A',
+                playerId: 'P2',
+                card: '5O',
+              },
+            ],
+            winningSeatId: 'T2A',
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+      {
+        socketId: 'socket-rival-human',
+        matchId: 'match-1',
+        seatId: 'T2A',
+        teamId: 'T2',
+        domainPlayerId: 'P2',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('balanced');
+    deps.roomManager.advanceTurn.mockReturnValue({
+      ...roomState,
+      currentTurnSeatId: 'T2A',
+    });
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide
+      .mockReturnValueOnce({
+        action: 'request-truco',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'bet-initiative-value',
+            handStrength: 0.76,
+            betAudit: {
+              selectedBetAction: 'request-truco',
+              effectiveStrength: 0.82,
+            },
+          },
+        },
+      })
+      .mockReturnValueOnce({
+        action: 'play-card',
+        card: '7O',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'two-versus-two-response-losing-save-weakest',
+          },
+        },
+      });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(deps.requestTrucoUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-1',
+      playerId: 'P1',
+      card: '7O',
+      seatId: 'T1B',
+    });
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'pressure',
+        scope: 'bet-intent',
+        label: 'Pressiona',
+      }),
+    );
+    const rivalEmit = emitsByTarget.get('socket-rival-human');
+
+    if (rivalEmit) {
+      expect(rivalEmit).not.toHaveBeenCalledWith(
+        'partner-signal',
+        expect.objectContaining({
+          fromSeatId: 'T1B',
+        }),
+      );
+    }
+    expect(gatewaySignalAccess.partnerSignalsByMatch.get('match-1')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromSeatId: 'T1B',
+          kind: 'pressure',
+          scope: 'bet-intent',
+        }),
+      ]),
+    );
+    expect(emitsByTarget.get('match-1')).toHaveBeenCalledWith(
+      'bot-decision',
+      expect.objectContaining({
+        action: 'request-truco',
+        executionStatus: 'fallback-card',
+        executedAction: 'play-card',
+        executionReason: 'human_partner_owns_bet',
+        selectedCard: '7O',
+        actorHandBefore: ['7O', '4O', 'AO'],
+      }),
+    );
+  });
+
+  it('uses a card-only fallback decision when blocked bet initiative would burn a manilha', async () => {
+    const { gatewayBotTurnAccess, deps, server } = createGateway();
+    const emitsByTarget = new Map<string, jest.Mock>();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1B',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 1,
+        playerTwo: 0,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: 'Q',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'play-card',
+        availableActions: {
+          canRequestTruco: true,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: true,
+        },
+        playerOneHand: ['JP', '3E', 'KC'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['JP', '3E', 'KC'],
+        },
+        rounds: [
+          {
+            playerOneCard: '3P',
+            playerTwoCard: '4C',
+            result: null,
+            finished: false,
+            seatPlays: {
+              T1A: '3P',
+              T2A: '4C',
+            },
+            orderedPlays: [
+              {
+                ownerId: 'T1A',
+                seatId: 'T1A',
+                playerId: 'P1',
+                card: '3P',
+              },
+              {
+                ownerId: 'T2A',
+                seatId: 'T2A',
+                playerId: 'P2',
+                card: '4C',
+              },
+            ],
+            winningSeatId: 'T1A',
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('aggressive');
+    deps.roomManager.advanceTurn.mockReturnValue({
+      ...roomState,
+      currentTurnSeatId: 'T2B',
+    });
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide
+      .mockReturnValueOnce({
+        action: 'request-truco',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'bet-initiative-value',
+            betAudit: {
+              selectedBetAction: 'request-truco',
+              effectiveStrength: 0.99,
+            },
+          },
+        },
+      })
+      .mockReturnValueOnce({
+        action: 'play-card',
+        card: 'KC',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'two-versus-two-partner-winning-save-weakest',
+          },
+        },
+      });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(deps.botDecisionPort.decide).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        bet: expect.objectContaining({
+          availableActions: expect.objectContaining({
+            canRequestTruco: false,
+            canRaiseToSix: false,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+          }),
+        }),
+        player: {
+          playerId: 'P1',
+          hand: ['JP', '3E', 'KC'],
+        },
+      }),
+    );
+    expect(deps.requestTrucoUseCase.execute).not.toHaveBeenCalled();
+    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
+      matchId: 'match-1',
+      playerId: 'P1',
+      card: 'KC',
+      seatId: 'T1B',
+    });
+    expect(deps.playCardUseCase.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: 'JP',
+      }),
+    );
+    expect(emitsByTarget.get('match-1')).toHaveBeenCalledWith(
+      'bot-decision',
+      expect.objectContaining({
+        action: 'request-truco',
+        executionStatus: 'fallback-card',
+        executedAction: 'play-card',
+        executionReason: 'human_partner_owns_bet',
+        selectedCard: 'KC',
+        actorHandBefore: ['JP', '3E', 'KC'],
+      }),
+    );
+  });
+
+  it('emits avoid-bet advice when a mixed-team bot wants to decline a risky bet', async () => {
+    jest.useFakeTimers();
+
+    try {
+      const { gatewayBotTurnAccess, deps, server } = createGateway();
+      const emitsByTarget = new Map<string, jest.Mock>();
+
+      server.to.mockImplementation((target: string) => {
+        const existingEmit = emitsByTarget.get(target);
+
+        if (existingEmit) {
+          return { emit: existingEmit };
+        }
+
+        const emit = jest.fn();
+        emitsByTarget.set(target, emit);
+
+        return { emit };
+      });
+
+      const roomState = {
+        mode: '2v2',
+        currentTurnSeatId: 'T1A',
+        players: [
+          {
+            seatId: 'T1A',
+            teamId: 'T1',
+            ready: true,
+            isBot: false,
+            domainPlayerId: 'P1',
+          },
+          {
+            seatId: 'T1B',
+            teamId: 'T1',
+            ready: true,
+            isBot: true,
+            domainPlayerId: 'P1',
+          },
+          {
+            seatId: 'T2A',
+            teamId: 'T2',
+            ready: true,
+            isBot: false,
+            domainPlayerId: 'P2',
+          },
+          {
+            seatId: 'T2B',
+            teamId: 'T2',
+            ready: true,
+            isBot: true,
+            domainPlayerId: 'P2',
+          },
+        ],
+      };
+      const state = {
+        matchId: 'match-1',
+        state: 'in_progress',
+        score: {
+          playerOne: 6,
+          playerTwo: 8,
+        },
+        currentHand: {
+          mode: '2v2',
+          viraRank: '4',
+          finished: false,
+          viewerPlayerId: 'P1',
+          currentValue: 3,
+          betState: 'awaiting_response',
+          pendingValue: 6,
+          requestedBy: 'P2',
+          specialState: 'normal',
+          specialDecisionPending: false,
+          nextDecisionType: 'respond-bet',
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: true,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: true,
+            canDeclineBet: true,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: false,
+          },
+          playerOneHand: ['6O', '7C', 'QO'],
+          playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+          seatHands: {
+            T1B: ['6O', '7C', 'QO'],
+          },
+          rounds: [
+            {
+              playerOneCard: null,
+              playerTwoCard: null,
+              result: null,
+              finished: false,
+            },
+          ],
+        },
+      };
+
+      deps.roomManager.getState.mockReturnValue(roomState);
+      deps.roomManager.getHumanSessions.mockReturnValue([
+        {
+          socketId: 'socket-human-partner',
+          matchId: 'match-1',
+          seatId: 'T1A',
+          teamId: 'T1',
+          domainPlayerId: 'P1',
+        },
+      ]);
+      deps.roomManager.getBotProfile.mockReturnValue('cautious');
+      deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+      deps.botDecisionPort.decide.mockReturnValue({
+        action: 'decline-bet',
+        metadata: {
+          source: 'heuristic',
+          rationale: {
+            strategy: 'bet-decline',
+            handStrength: 0.22,
+            betAudit: {
+              selectedBetAction: 'decline-bet',
+              effectiveStrength: 0.24,
+              pendingValue: 6,
+              acceptRisksMatch: true,
+            },
+          },
+        },
+      });
+
+      await gatewayBotTurnAccess.processBotTurns('match-1');
+
+      expect(deps.declineBetUseCase.execute).not.toHaveBeenCalled();
+      expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+        'partner-signal',
+        expect.objectContaining({
+          matchId: 'match-1',
+          fromSeatId: 'T1B',
+          toTeamId: 'T1',
+          kind: 'avoid-bet',
+          scope: 'bet-intent',
+          label: 'Não compra',
+        }),
+      );
+      expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+        'match-state:private',
+        expect.objectContaining({
+          currentHand: expect.objectContaining({
+            partnerAdvice: expect.objectContaining({
+              seatId: 'T1B',
+              action: 'decline',
+              reason: 'weak-hand',
+            }),
+          }),
+        }),
+      );
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  });
+
+  it('emits eu-pago advice when a mixed-team bot wants to accept a bet', async () => {
+    const { gateway, gatewayBotTurnAccess, deps, server } = createGateway();
+    const gatewaySignalAccess = gateway as unknown as GameGatewayPartnerSignalTelemetryAccess;
+    const emitsByTarget = new Map<string, jest.Mock>();
+    const now = Date.now();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    gatewaySignalAccess.partnerSignalsByMatch.set('match-1', [
+      {
+        signalId: 'signal-existing-pressure',
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'pressure',
+        scope: 'bet-intent',
+        label: 'Pressiona',
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 9000).toISOString(),
+        expiresAtMs: now + 9000,
+      },
+    ]);
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 5,
+        playerTwo: 4,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 1,
+        betState: 'awaiting_response',
+        pendingValue: 3,
+        requestedBy: 'P2',
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'respond-bet',
+        availableActions: {
+          canRequestTruco: false,
+          canRaiseToSix: true,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: true,
+          canDeclineBet: true,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: false,
+        },
+        playerOneHand: ['3C', '2C'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['3C', '2C'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('aggressive');
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'accept-bet',
+      metadata: {
+        source: 'heuristic',
+        rationale: {
+          strategy: 'bet-accept',
+          handStrength: 0.65,
+          betAudit: {
+            selectedBetAction: 'accept-bet',
+            effectiveStrength: 0.65,
+            pendingValue: 3,
+          },
+        },
+      },
+    });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(deps.acceptBetUseCase.execute).not.toHaveBeenCalled();
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'pressure',
+        scope: 'bet-intent',
+        label: 'Eu pago',
+      }),
+    );
+    expect(gatewaySignalAccess.partnerSignalsByMatch.get('match-1')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromSeatId: 'T1B',
+          kind: 'pressure',
+          scope: 'bet-intent',
+          label: 'Eu pago',
+        }),
+      ]),
+    );
+    expect(emitsByTarget.get('match-1')).toHaveBeenCalledWith(
+      'bot-decision',
+      expect.objectContaining({
+        action: 'accept-bet',
+        executionStatus: 'blocked',
+        executedAction: 'accept-bet',
+        executionReason: 'human_partner_owns_bet',
+        actorHandBefore: ['3C', '2C'],
+      }),
+    );
+  });
+
+  it('does not resend equivalent bot avoid-bet advice while it is active', async () => {
+    const { gateway, gatewayBotTurnAccess, deps, server } = createGateway();
+    const gatewaySignalAccess = gateway as unknown as GameGatewayPartnerSignalTelemetryAccess;
+    const emitsByTarget = new Map<string, jest.Mock>();
+    const now = Date.now();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    gatewaySignalAccess.partnerSignalsByMatch.set('match-1', [
+      {
+        signalId: 'signal-existing-avoid-bet',
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'avoid-bet',
+        scope: 'bet-intent',
+        label: 'Não compra',
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 9000).toISOString(),
+        expiresAtMs: now + 9000,
+      },
+    ]);
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 6,
+        playerTwo: 8,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 3,
+        betState: 'awaiting_response',
+        pendingValue: 6,
+        requestedBy: 'P2',
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'respond-bet',
+        availableActions: {
+          canRequestTruco: false,
+          canRaiseToSix: true,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: true,
+          canDeclineBet: true,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: false,
+        },
+        playerOneHand: ['6O', '7C', 'QO'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['6O', '7C', 'QO'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('cautious');
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'decline-bet',
+      metadata: {
+        source: 'heuristic',
+        rationale: {
+          strategy: 'bet-decline',
+        },
+      },
+    });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(deps.declineBetUseCase.execute).not.toHaveBeenCalled();
+    expect(emitsByTarget.get('socket-human-partner')).not.toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        kind: 'avoid-bet',
+      }),
+    );
+    expect(gatewaySignalAccess.partnerSignalsByMatch.get('match-1')).toHaveLength(1);
+  });
+
+  it('does not resend equivalent bot pressure advice while it is active', async () => {
+    const { gateway, gatewayBotTurnAccess, deps, server } = createGateway();
+    const gatewaySignalAccess = gateway as unknown as GameGatewayPartnerSignalTelemetryAccess;
+    const emitsByTarget = new Map<string, jest.Mock>();
+    const now = Date.now();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    gatewaySignalAccess.partnerSignalsByMatch.set('match-1', [
+      {
+        signalId: 'signal-existing-pressure',
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'pressure',
+        scope: 'bet-intent',
+        label: 'Pressiona',
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 9000).toISOString(),
+        expiresAtMs: now + 9000,
+      },
+    ]);
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1B',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 4,
+        playerTwo: 2,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: '4',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 1,
+        betState: 'idle',
+        pendingValue: null,
+        requestedBy: null,
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'respond-bet',
+        availableActions: {
+          canRequestTruco: true,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: false,
+          canDeclineBet: false,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: true,
+        },
+        playerOneHand: ['7O', '4O', 'AO'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['7O', '4O', 'AO'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('balanced');
+    deps.roomManager.advanceTurn.mockReturnValue({
+      ...roomState,
+      currentTurnSeatId: 'T2A',
+    });
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'request-truco',
+      metadata: {
+        source: 'heuristic',
+        rationale: {
+          strategy: 'bet-initiative-value',
+        },
+      },
+    });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(emitsByTarget.get('socket-human-partner')).not.toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        kind: 'pressure',
+      }),
+    );
+    expect(gatewaySignalAccess.partnerSignalsByMatch.get('match-1')).toHaveLength(1);
+  });
+
   it('falls back to balanced when no bot profile is found for the seat', async () => {
     const { gatewayBotTurnAccess, deps } = createGateway();
 

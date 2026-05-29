@@ -878,7 +878,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       : null;
   }
 
-
   private resolvePartnerSignalScope(kind: PartnerSignalKind): PartnerSignalScope {
     if (HAND_MEMORY_PARTNER_SIGNALS.has(kind)) {
       return 'hand-memory';
@@ -895,8 +894,42 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return 'hand-memory';
   }
 
-  private isBetDecisionAction(action: BotDecision['action'] | undefined): boolean {
+  private isBetDecisionAction(action: BotDecision['action'] | undefined): action is BotBetAction {
     return action !== undefined && BET_DECISION_ACTIONS.has(action);
+  }
+
+  private buildCardOnlyBotDecisionContext(context: BotDecisionContext): BotDecisionContext {
+    if (!context.bet) {
+      return context;
+    }
+
+    return {
+      ...context,
+      bet: {
+        ...context.bet,
+        availableActions: {
+          ...context.bet.availableActions,
+          canRequestTruco: false,
+          canRaiseToSix: false,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+        },
+      },
+    };
+  }
+
+  private resolveMixedTeamFallbackCard(botTurnContext: BotTurnDecisionContext): string | null {
+    const cardOnlyDecision = this.botDecisionPort.decide(
+      this.buildCardOnlyBotDecisionContext(botTurnContext.context),
+    );
+
+    if (cardOnlyDecision.action === 'play-card' && cardOnlyDecision.card) {
+      return cardOnlyDecision.card;
+    }
+
+    // NOTE: This path should be rare. It keeps the game flowing if a custom bot adapter
+    // still returns a non-card decision after betting actions were disabled.
+    return botTurnContext.context.player.hand[0] ?? null;
   }
 
   private isManilhaPartnerSignal(kind: PartnerSignalKind): boolean {
@@ -1218,17 +1251,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     toTeamId,
     kind,
     createdAtMs,
+    labelOverride,
   }: {
     matchId: string;
     fromSeatId: SeatId;
     toTeamId: 'T1' | 'T2';
     kind: PartnerSignalKind;
     createdAtMs: number;
+    labelOverride?: string;
   }): PartnerSignalRecord {
     const expiresAtMs = createdAtMs + PARTNER_SIGNAL_TTL_MS;
     const createdAt = new Date(createdAtMs).toISOString();
     const expiresAt = new Date(expiresAtMs).toISOString();
     const scope = this.resolvePartnerSignalScope(kind);
+    const label = labelOverride ?? PARTNER_SIGNAL_LABELS[kind];
     const response: PartnerSignalPayload = {
       signalId: `${matchId}:${fromSeatId}:${createdAtMs}`,
       matchId,
@@ -1236,7 +1272,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       toTeamId,
       kind,
       scope,
-      label: PARTNER_SIGNAL_LABELS[kind],
+      label,
       createdAt,
       expiresAt,
     };
@@ -1262,6 +1298,122 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     return record;
+  }
+
+  private resolvePartnerBetAdviceSignalKind(action: BotBetAction): PartnerSignalKind {
+    return action === 'decline-bet' ? 'avoid-bet' : 'pressure';
+  }
+
+  private resolvePartnerBetAdviceSignalLabel(action: BotBetAction): string {
+    if (action === 'accept-bet') {
+      return 'Eu pago';
+    }
+
+    if (action === 'decline-bet') {
+      return 'Não compra';
+    }
+
+    if (action === 'raise-to-six' || action === 'raise-to-nine' || action === 'raise-to-twelve') {
+      return 'Dá para aumentar';
+    }
+
+    return 'Pressiona';
+  }
+
+  private hasActiveEquivalentPartnerSignal(
+    matchId: string,
+    fromSeatId: SeatId,
+    kind: PartnerSignalKind,
+    label?: string,
+  ): boolean {
+    const scope = this.resolvePartnerSignalScope(kind);
+    const now = Date.now();
+
+    return (this.partnerSignalsByMatch.get(matchId) ?? []).some(
+      (signal) =>
+        signal.fromSeatId === fromSeatId &&
+        signal.kind === kind &&
+        signal.scope === scope &&
+        (label === undefined || signal.label === label) &&
+        signal.expiresAtMs > now,
+    );
+  }
+
+  private tryEmitBotPartnerBetAdviceSignal(
+    matchId: string,
+    botTurnContext: BotTurnDecisionContext,
+    action: BotBetAction,
+  ): void {
+    if (botTurnContext.context.mode !== '2v2') {
+      return;
+    }
+
+    const roomState = this.roomManager.getState(matchId);
+    const partnerSeatId = this.resolveBotPartnerSeatId(botTurnContext.seatId, '2v2');
+    const humanPartner = roomState.players.find(
+      (player) =>
+        player.seatId === partnerSeatId && player.teamId === botTurnContext.teamId && !player.isBot,
+    );
+
+    if (!humanPartner) {
+      return;
+    }
+
+    const kind = this.resolvePartnerBetAdviceSignalKind(action);
+    const label = this.resolvePartnerBetAdviceSignalLabel(action);
+    const scope = this.resolvePartnerSignalScope(kind);
+    const now = Date.now();
+
+    this.clearExpiredPartnerSignals(matchId);
+
+    if (this.hasActiveEquivalentPartnerSignal(matchId, botTurnContext.seatId, kind, label)) {
+      this.emitPartnerSignalDebugToTeam(matchId, botTurnContext.teamId, {
+        phase: 'missed-for-bot',
+        matchId,
+        fromSeatId: botTurnContext.seatId,
+        toTeamId: botTurnContext.teamId,
+        kind,
+        scope,
+        label,
+        botSeatId: botTurnContext.seatId,
+        botTeamId: botTurnContext.teamId,
+        partnerSeatId,
+        reason: 'equivalent bot advice signal already active',
+        availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+      });
+      return;
+    }
+
+    const cooldownKey = `${matchId}:${botTurnContext.seatId}:${scope}:${kind}:${label}`;
+    const nextAllowedAt = this.partnerSignalCooldownBySeat.get(cooldownKey) ?? 0;
+
+    if (nextAllowedAt > now) {
+      this.emitPartnerSignalDebugToTeam(matchId, botTurnContext.teamId, {
+        phase: 'missed-for-bot',
+        matchId,
+        fromSeatId: botTurnContext.seatId,
+        toTeamId: botTurnContext.teamId,
+        kind,
+        scope,
+        label,
+        botSeatId: botTurnContext.seatId,
+        botTeamId: botTurnContext.teamId,
+        partnerSeatId,
+        reason: 'bot advice signal cooldown active',
+        availableSignals: this.buildPartnerSignalDebugSummaries(matchId),
+      });
+      return;
+    }
+
+    this.emitPartnerSignalFromSeat({
+      matchId,
+      fromSeatId: botTurnContext.seatId,
+      toTeamId: botTurnContext.teamId,
+      kind,
+      createdAtMs: now,
+      labelOverride: label,
+    });
+    this.partnerSignalCooldownBySeat.set(cooldownKey, now + PARTNER_SIGNAL_COOLDOWN_MS);
   }
 
   private emitInitialBotPartnerSignals(
@@ -2126,7 +2278,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   > {
     const partnerSignal = botTurnContext.context.partnerSignal ?? null;
     const partnerSignals = botTurnContext.context.partnerSignals;
-    const partnerSignalExpiresAtMs = partnerSignal ? Date.parse(partnerSignal.expiresAt) : Number.NaN;
+    const partnerSignalExpiresAtMs = partnerSignal
+      ? Date.parse(partnerSignal.expiresAt)
+      : Number.NaN;
     const partnerSignalTtlMs =
       partnerSignal && Number.isFinite(partnerSignalExpiresAtMs)
         ? Math.max(0, partnerSignalExpiresAtMs - Date.now())
@@ -2140,9 +2294,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ...(partnerSignal ? { partnerSignalIntent: partnerSignal.intent } : {}),
       ...(partnerSignal ? { partnerSignalExpiresAt: partnerSignal.expiresAt } : {}),
       ...(partnerSignalTtlMs !== undefined ? { partnerSignalTtlMs } : {}),
-      ...(partnerSignals?.handMemory ? { partnerHandMemorySignalKind: partnerSignals.handMemory.kind } : {}),
-      ...(partnerSignals?.roundTactic ? { partnerRoundTacticSignalKind: partnerSignals.roundTactic.kind } : {}),
-      ...(partnerSignals?.betIntent ? { partnerBetIntentSignalKind: partnerSignals.betIntent.kind } : {}),
+      ...(partnerSignals?.handMemory
+        ? { partnerHandMemorySignalKind: partnerSignals.handMemory.kind }
+        : {}),
+      ...(partnerSignals?.roundTactic
+        ? { partnerRoundTacticSignalKind: partnerSignals.roundTactic.kind }
+        : {}),
+      ...(partnerSignals?.betIntent
+        ? { partnerBetIntentSignalKind: partnerSignals.betIntent.kind }
+        : {}),
     };
   }
 
@@ -2324,6 +2484,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       reason?: string;
       error?: string;
       selectedCard?: string;
+      actorHandBefore?: string[];
     },
   ): void {
     const current = this.lastBotDecisionByMatch.get(matchId);
@@ -2339,6 +2500,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ...(execution.reason ? { executionReason: execution.reason } : {}),
       ...(execution.error ? { executionError: execution.error } : {}),
       ...(execution.selectedCard ? { selectedCard: execution.selectedCard } : {}),
+      ...(execution.actorHandBefore ? { actorHandBefore: execution.actorHandBefore } : {}),
     };
 
     this.lastBotDecisionByMatch.set(matchId, nextDecision);
@@ -2366,7 +2528,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return state;
     }
 
-    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }));
+    const hasPendingBotAction = Boolean(
+      await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }),
+    );
 
     if (!hasPendingBotAction) {
       return state;
@@ -2385,7 +2549,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const hasPendingBotAction = Boolean(await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }));
+    const hasPendingBotAction = Boolean(
+      await this.buildBotDecisionContext(matchId, state, { emitSignalDebug: false }),
+    );
 
     if (!hasPendingBotAction) {
       return;
@@ -3047,8 +3213,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const seatHand = currentHand.seatHands?.[actor.seatId] ?? null;
     const hand =
-      seatHand ??
-      (actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand);
+      seatHand ?? (actor.playerId === 'P1' ? currentHand.playerOneHand : currentHand.playerTwoHand);
 
     const betView = this.buildBotBetView(currentHand);
     const handProgress = this.buildBotHandProgressView(viewerState, actor.playerId);
@@ -3785,12 +3950,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (botTeamHasHumanSeat) {
       await this.ensureMixedTeamBetDecision(matchId);
       this.rememberPartnerBetAdvice(matchId, botTurnContext, action, decision);
+      this.tryEmitBotPartnerBetAdviceSignal(matchId, botTurnContext, action);
 
       // Bots on mixed teams may play cards, but the human partner owns all betting decisions.
       this.markBotDecisionExecution(matchId, {
         status: 'blocked',
         executedAction: action,
         reason: 'human_partner_owns_bet',
+        actorHandBefore: [...botTurnContext.context.player.hand],
       });
       this.emitRoomState(matchId);
       await this.emitPrivateMatchState(matchId);
@@ -4015,8 +4182,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState, {
-      emitSignalDebug: false,
-    });
+        emitSignalDebug: false,
+      });
 
       return Boolean(nextBotTurnContext);
     }
@@ -4049,10 +4216,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const isMixedTeamBetInitiativeFallback = isInitiativeBet && botTeamHasHumanSeat;
 
-    // Mixed-team bots fall back to card play when their policy asks to open or escalate Truco.
-    const fallbackCard = botTurnContext.context.player.hand[0] ?? null;
+    // Mixed-team bots fall back to a fresh card-only decision after betting is blocked.
     const resolvedCard =
-      decision.action === 'play-card' && decision.card ? decision.card : fallbackCard;
+      decision.action === 'play-card' && decision.card
+        ? decision.card
+        : isMixedTeamBetInitiativeFallback
+          ? this.resolveMixedTeamFallbackCard(botTurnContext)
+          : (botTurnContext.context.player.hand[0] ?? null);
 
     if (!resolvedCard) {
       this.markBotDecisionExecution(matchId, {
@@ -4076,12 +4246,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
+    if (isMixedTeamBetInitiativeFallback && this.isBetDecisionAction(decision.action)) {
+      this.tryEmitBotPartnerBetAdviceSignal(matchId, botTurnContext, decision.action);
+    }
+
     if (isMixedTeamBetInitiativeFallback) {
       this.markBotDecisionExecution(matchId, {
         status: 'fallback-card',
         executedAction: 'play-card',
         reason: 'human_partner_owns_bet',
         selectedCard: resolvedCard,
+        actorHandBefore: [...botTurnContext.context.player.hand],
       });
     }
 
@@ -5501,7 +5676,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           currentTurnSeatId: roomState.currentTurnSeatId,
         });
 
-      this.emitInitialBotPartnerSignals(matchId, startedMatchState, roomState);
+        this.emitInitialBotPartnerSignals(matchId, startedMatchState, roomState);
 
         this.clearScheduledBotTurn(matchId);
         await this.continueAutomaticGameFlow(matchId);
