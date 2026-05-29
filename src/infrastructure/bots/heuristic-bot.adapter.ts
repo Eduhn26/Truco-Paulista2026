@@ -80,6 +80,23 @@ type PartnerSignalBetAdjustment = {
   betIntentKind?: BotPartnerSignalKind;
 };
 
+type PublicThreatLevel = 'moderate' | 'high' | 'severe' | 'lethal';
+
+type PublicBetThreat = {
+  level: PublicThreatLevel;
+  card: string;
+  suit: 'P' | 'C' | 'E' | 'O';
+  winningTeamId: BotTeamId;
+  isDecisiveRound: boolean;
+  canBeatThreat: boolean;
+};
+
+type PublicThreatBetAdjustment = {
+  penalty: number;
+  bluffProbabilityMultiplier: number;
+  threat?: PublicBetThreat;
+};
+
 const FULL_DECK_SUITS = ['C', 'O', 'P', 'E'] as const;
 const FULL_DECK_RANKS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'] as const;
 const FULL_DECK = FULL_DECK_RANKS.flatMap((rank) =>
@@ -438,8 +455,13 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const handStrength = this.calculateHandStrength(context.player.hand, context.viraRank);
     const progressBoost = this.computeProgressBoost(context.handProgress);
     const partnerSignalAdjustment = this.computePartnerSignalBetAdjustment(context, 'response');
+    const publicThreatAdjustment = this.computePublicThreatBetAdjustment(context);
     const effectiveStrength = this.clamp01(
-      handStrength + progressBoost + partnerSignalAdjustment.boost,
+      handStrength + progressBoost + partnerSignalAdjustment.boost + publicThreatAdjustment.penalty,
+    );
+    const effectiveBluffProbability = this.resolveEffectiveBluffProbability(
+      context,
+      publicThreatAdjustment,
     );
 
     const thresholds = this.resolveBetThresholds(context.profile);
@@ -463,6 +485,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -486,6 +510,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -509,6 +535,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -531,6 +559,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -553,6 +583,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -576,6 +608,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost: 0,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -613,8 +647,17 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     const progressBoost = this.computeProgressBoost(context.handProgress);
     const scoreBoost = this.computeScoreInitiativeBoost(context);
     const partnerSignalAdjustment = this.computePartnerSignalBetAdjustment(context, 'initiative');
+    const publicThreatAdjustment = this.computePublicThreatBetAdjustment(context);
     const effectiveStrength = this.clamp01(
-      handStrength + progressBoost + scoreBoost + partnerSignalAdjustment.boost,
+      handStrength +
+        progressBoost +
+        scoreBoost +
+        partnerSignalAdjustment.boost +
+        publicThreatAdjustment.penalty,
+    );
+    const effectiveBluffProbability = this.resolveEffectiveBluffProbability(
+      context,
+      publicThreatAdjustment,
     );
 
     const pressure = this.computeScorePressure(context, bet);
@@ -632,6 +675,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -655,6 +700,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -665,7 +712,7 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     }
 
     // Bluffing is deterministic per hand so tests stay stable and repeated calls do not spam.
-    if (this.shouldBluff(context, thresholds, handStrength)) {
+    if (this.shouldBluff(context, thresholds, handStrength, publicThreatAdjustment)) {
       return {
         action: initiativeAction,
         metadata: this.buildMetadata(
@@ -678,6 +725,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             progressBoost,
             scoreBoost,
             partnerSignalAdjustment,
+            publicThreatAdjustment,
+            effectiveBluffProbability,
             effectiveStrength,
             thresholds,
             pressure,
@@ -722,18 +771,25 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     context: BotDecisionContext,
     thresholds: BotBetThresholds,
     handStrength: number,
+    publicThreatAdjustment: PublicThreatBetAdjustment,
   ): boolean {
-    if (thresholds.bluffProbability <= 0) return false;
+    const effectiveBluffProbability = this.resolveEffectiveBluffProbability(
+      context,
+      publicThreatAdjustment,
+    );
 
-    // Do not bluff when the visible table card already beats every available response.
-    if (this.isLosingCurrentRoundVisibly(context)) return false;
+    if (effectiveBluffProbability <= 0) return false;
+
+    // Preserve the conservative old guard for ordinary visible losses, but let public-manilha
+    // scenarios use their own profile-aware bluff multiplier.
+    if (!publicThreatAdjustment.threat && this.isLosingCurrentRoundVisibly(context)) return false;
 
     // Require a minimum baseline so bluffing remains intentional instead of random noise.
     if (handStrength < 0.18) return false;
 
     const seed = this.deterministicSeed(context);
     const roll = this.mulberry32(seed);
-    return roll < thresholds.bluffProbability;
+    return roll < effectiveBluffProbability;
   }
 
   private isLosingCurrentRoundVisibly(context: BotDecisionContext): boolean {
@@ -777,6 +833,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     progressBoost,
     scoreBoost,
     partnerSignalAdjustment,
+    publicThreatAdjustment,
+    effectiveBluffProbability,
     effectiveStrength,
     thresholds,
     pressure,
@@ -787,6 +845,8 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     progressBoost: number;
     scoreBoost: number;
     partnerSignalAdjustment?: PartnerSignalBetAdjustment;
+    publicThreatAdjustment?: PublicThreatBetAdjustment;
+    effectiveBluffProbability?: number;
     effectiveStrength: number;
     thresholds: BotBetThresholds;
     pressure: ScorePressure;
@@ -811,13 +871,33 @@ export class HeuristicBotAdapter implements BotDecisionPort {
       raiseThreshold: thresholds.raise,
       initiativeThreshold: thresholds.initiative,
       bluffProbability: thresholds.bluffProbability,
+      ...(effectiveBluffProbability !== undefined
+        ? {
+            effectiveBluffProbability: this.roundStrength(effectiveBluffProbability),
+          }
+        : {}),
+      ...(publicThreatAdjustment?.threat
+        ? {
+            publicThreatLevel: publicThreatAdjustment.threat.level,
+            publicThreatCard: publicThreatAdjustment.threat.card,
+            publicThreatSuit: publicThreatAdjustment.threat.suit,
+            publicThreatIsDecisive: publicThreatAdjustment.threat.isDecisiveRound,
+            publicThreatCanBeat: publicThreatAdjustment.threat.canBeatThreat,
+            publicThreatPenalty: this.roundStrength(publicThreatAdjustment.penalty),
+            publicThreatBluffMultiplier: this.roundStrength(
+              publicThreatAdjustment.bluffProbabilityMultiplier,
+            ),
+          }
+        : {}),
       declineFloor: this.declineFloor(context.profile),
       myPointsToWin: pressure.myPointsToWin,
       opponentPointsToWin: pressure.opponentPointsToWin,
       declineLosesMatch: pressure.declineLosesMatch,
       acceptRisksMatch: pressure.acceptRisksMatch,
       ...(partnerSignalAdjustment?.kind ? { partnerSignalKind: partnerSignalAdjustment.kind } : {}),
-      ...(partnerSignalAdjustment?.scope ? { partnerSignalScope: partnerSignalAdjustment.scope } : {}),
+      ...(partnerSignalAdjustment?.scope
+        ? { partnerSignalScope: partnerSignalAdjustment.scope }
+        : {}),
       ...(partnerSignalAdjustment?.strengthHint
         ? { partnerSignalStrengthHint: partnerSignalAdjustment.strengthHint }
         : {}),
@@ -825,7 +905,9 @@ export class HeuristicBotAdapter implements BotDecisionPort {
         ? { partnerSignalIntent: partnerSignalAdjustment.intent }
         : {}),
       ...(partnerSignalAdjustment?.handMemoryKind
-        ? { partnerHandMemorySignalKind: partnerSignalAdjustment.handMemoryKind }
+        ? {
+            partnerHandMemorySignalKind: partnerSignalAdjustment.handMemoryKind,
+          }
         : {}),
       ...(partnerSignalAdjustment?.betIntentKind
         ? { partnerBetIntentSignalKind: partnerSignalAdjustment.betIntentKind }
@@ -885,7 +967,9 @@ export class HeuristicBotAdapter implements BotDecisionPort {
     };
   }
 
-  private isActivePartnerSignal(signal: BotPartnerSignalView | null | undefined): signal is BotPartnerSignalView {
+  private isActivePartnerSignal(
+    signal: BotPartnerSignalView | null | undefined,
+  ): signal is BotPartnerSignalView {
     if (!signal) {
       return false;
     }
@@ -976,6 +1060,201 @@ export class HeuristicBotAdapter implements BotDecisionPort {
 
   private getActiveCardTacticSignal(context: BotDecisionContext): BotPartnerSignalView | null {
     return this.getActiveScopedPartnerSignal(context, 'roundTactic');
+  }
+
+  private computePublicThreatBetAdjustment(context: BotDecisionContext): PublicThreatBetAdjustment {
+    const threat = this.resolvePublicBetThreat(context);
+
+    if (!threat) {
+      return { penalty: 0, bluffProbabilityMultiplier: 1 };
+    }
+
+    return {
+      penalty: this.resolvePublicThreatPenalty(threat),
+      bluffProbabilityMultiplier: this.resolvePublicThreatBluffMultiplier(context, threat),
+      threat,
+    };
+  }
+
+  private resolvePublicBetThreat(context: BotDecisionContext): PublicBetThreat | null {
+    const round = context.currentRound;
+
+    if (!round) {
+      return null;
+    }
+
+    const visibleThreat = this.resolveVisibleWinningOpponentCard(context, round);
+
+    if (!visibleThreat) {
+      return null;
+    }
+
+    const suit = this.resolveManilhaSuit(visibleThreat.card, context.viraRank);
+
+    if (!suit) {
+      return null;
+    }
+
+    return {
+      level: this.resolvePublicThreatLevel(suit),
+      card: visibleThreat.card,
+      suit,
+      winningTeamId: visibleThreat.winningTeamId,
+      isDecisiveRound: this.isDecisiveRound(context),
+      canBeatThreat: context.player.hand.some((candidate) =>
+        this.beats(candidate, visibleThreat.card, context.viraRank),
+      ),
+    };
+  }
+
+  private resolveVisibleWinningOpponentCard(
+    context: BotDecisionContext,
+    round: BotRoundView,
+  ): { card: string; winningTeamId: BotTeamId } | null {
+    const actorTeamId = this.resolveActorTeamId(context);
+
+    if (context.mode === '2v2') {
+      const roundState = this.resolveTwoVersusTwoRoundState(round, context.viraRank);
+
+      if (!roundState?.winningCard || !roundState.winningTeamId) {
+        return null;
+      }
+
+      if (roundState.winningTeamId === actorTeamId) {
+        return null;
+      }
+
+      return {
+        card: roundState.winningCard,
+        winningTeamId: roundState.winningTeamId,
+      };
+    }
+
+    const myCard = context.player.playerId === 'P1' ? round.playerOneCard : round.playerTwoCard;
+    const opponentCard = this.getOpponentCard(round, context.player.playerId);
+
+    if (!opponentCard) {
+      return null;
+    }
+
+    if (myCard && !this.beats(opponentCard, myCard, context.viraRank)) {
+      return null;
+    }
+
+    return {
+      card: opponentCard,
+      winningTeamId: context.player.playerId === 'P1' ? 'T2' : 'T1',
+    };
+  }
+
+  private resolveActorTeamId(context: BotDecisionContext): BotTeamId {
+    if (context.actorTeamId) {
+      return context.actorTeamId;
+    }
+
+    if (context.actorSeatId) {
+      return TEAM_BY_SEAT[context.actorSeatId];
+    }
+
+    return context.player.playerId === 'P1' ? 'T1' : 'T2';
+  }
+
+  private isDecisiveRound(context: BotDecisionContext): boolean {
+    const progress = context.handProgress;
+
+    if (!progress) {
+      return false;
+    }
+
+    if (progress.currentRoundIndex >= 2) {
+      return true;
+    }
+
+    if (progress.roundsWonByMe > 0 && progress.roundsWonByOpponent > 0) {
+      return true;
+    }
+
+    return progress.roundsTied > 0 && progress.currentRoundIndex >= 1;
+  }
+
+  private resolveManilhaSuit(card: string, viraRank: Rank): 'P' | 'C' | 'E' | 'O' | null {
+    if (this.readCardRank(card) !== manilhaRankFromVira(viraRank)) {
+      return null;
+    }
+
+    const suit = this.readCardSuit(card);
+
+    if (suit === 'P' || suit === 'C' || suit === 'E' || suit === 'O') {
+      return suit;
+    }
+
+    return null;
+  }
+
+  private resolvePublicThreatLevel(suit: 'P' | 'C' | 'E' | 'O'): PublicThreatLevel {
+    if (suit === 'P') return 'lethal';
+    if (suit === 'C') return 'severe';
+    if (suit === 'E') return 'high';
+    return 'moderate';
+  }
+
+  private resolvePublicThreatPenalty(threat: PublicBetThreat): number {
+    const decisiveMultiplier = threat.isDecisiveRound ? 1 : 0.5;
+
+    if (threat.canBeatThreat) {
+      if (threat.level === 'lethal') return -1;
+      if (threat.level === 'severe') return -0.05 * decisiveMultiplier;
+      if (threat.level === 'high') return -0.03 * decisiveMultiplier;
+      return -0.02 * decisiveMultiplier;
+    }
+
+    if (threat.level === 'lethal') return -1 * decisiveMultiplier;
+    if (threat.level === 'severe') return -0.55 * decisiveMultiplier;
+    if (threat.level === 'high') return -0.38 * decisiveMultiplier;
+    return -0.22 * decisiveMultiplier;
+  }
+
+  private resolvePublicThreatBluffMultiplier(
+    context: BotDecisionContext,
+    threat: PublicBetThreat,
+  ): number {
+    if (threat.canBeatThreat) {
+      return 1;
+    }
+
+    if (threat.level === 'lethal') {
+      return threat.isDecisiveRound ? 0 : 0.05;
+    }
+
+    const profileMultipliers: Record<
+      Exclude<PublicThreatLevel, 'lethal'>,
+      Record<BotProfile, number>
+    > = {
+      severe: { aggressive: 0.14, balanced: 0.04, cautious: 0 },
+      high: { aggressive: 0.34, balanced: 0.12, cautious: 0.02 },
+      moderate: { aggressive: 0.58, balanced: 0.25, cautious: 0.06 },
+    };
+
+    const multiplier = profileMultipliers[threat.level][context.profile];
+
+    return threat.isDecisiveRound ? multiplier : Math.min(1, multiplier * 1.8);
+  }
+
+  private resolveEffectiveBluffProbability(
+    context: BotDecisionContext,
+    publicThreatAdjustment: PublicThreatBetAdjustment,
+  ): number {
+    const thresholds = this.resolveBetThresholds(context.profile);
+
+    return thresholds.bluffProbability * publicThreatAdjustment.bluffProbabilityMultiplier;
+  }
+
+  private readCardRank(card: string): string {
+    return card.slice(0, -1);
+  }
+
+  private readCardSuit(card: string): string {
+    return card.slice(-1);
   }
 
   private computeScorePressure(
@@ -1393,13 +1672,19 @@ export class HeuristicBotAdapter implements BotDecisionPort {
             partnerSignalScope: partnerSignal.scope,
             partnerSignalIntent: partnerSignal.intent,
             ...(context.partnerSignals?.handMemory
-              ? { partnerHandMemorySignalKind: context.partnerSignals.handMemory.kind }
+              ? {
+                  partnerHandMemorySignalKind: context.partnerSignals.handMemory.kind,
+                }
               : {}),
             ...(context.partnerSignals?.roundTactic
-              ? { partnerRoundTacticSignalKind: context.partnerSignals.roundTactic.kind }
+              ? {
+                  partnerRoundTacticSignalKind: context.partnerSignals.roundTactic.kind,
+                }
               : {}),
             ...(context.partnerSignals?.betIntent
-              ? { partnerBetIntentSignalKind: context.partnerSignals.betIntent.kind }
+              ? {
+                  partnerBetIntentSignalKind: context.partnerSignals.betIntent.kind,
+                }
               : {}),
           }
         : {}),

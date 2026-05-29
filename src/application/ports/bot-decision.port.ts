@@ -192,6 +192,14 @@ export type BotDecisionBetTelemetry = {
   raiseThreshold?: number;
   initiativeThreshold?: number;
   bluffProbability?: number;
+  effectiveBluffProbability?: number;
+  publicThreatLevel?: 'moderate' | 'high' | 'severe' | 'lethal';
+  publicThreatCard?: string;
+  publicThreatSuit?: 'P' | 'C' | 'E' | 'O';
+  publicThreatIsDecisive?: boolean;
+  publicThreatCanBeat?: boolean;
+  publicThreatPenalty?: number;
+  publicThreatBluffMultiplier?: number;
   declineFloor?: number;
   myPointsToWin?: number;
   opponentPointsToWin?: number;

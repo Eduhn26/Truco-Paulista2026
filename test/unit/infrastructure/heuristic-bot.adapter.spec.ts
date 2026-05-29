@@ -113,15 +113,10 @@ describe('HeuristicBotAdapter', () => {
     );
   }
 
-
   function resolvePartnerSignalScope(
     kind: NonNullable<BotDecisionContext['partnerSignal']>['kind'],
   ): NonNullable<BotDecisionContext['partnerSignal']>['scope'] {
-    if (
-      kind === 'hold' ||
-      kind === 'kill-round' ||
-      kind === 'low-card'
-    ) {
+    if (kind === 'hold' || kind === 'kill-round' || kind === 'low-card') {
       return 'round-tactic';
     }
 
@@ -660,8 +655,6 @@ describe('HeuristicBotAdapter', () => {
     expectPlayCardDecision(decision, 'KO', 'two-versus-two-signal-kill-round-weakest-winner');
   });
 
-
-
   it('saves the weakest card when the partner signals to play low and our team is winning', () => {
     const decision = adapter.decide(
       createContext({
@@ -1021,6 +1014,194 @@ describe('HeuristicBotAdapter', () => {
               partnerSignalStrengthHint: 'strong',
               partnerSignalIntent: 'attack',
               partnerSignalBoost: expect.any(Number),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('does not raise after an opponent Zap is already winning a decisive round', () => {
+    const decision = adapter.decide(
+      createContext({
+        profile: 'aggressive',
+        viraRank: 'Q',
+        player: {
+          playerId: 'P2',
+          hand: ['3C', '2C', 'AE'],
+        },
+        currentRound: {
+          playerOneCard: 'JP',
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        bet: {
+          currentValue: 3,
+          betState: 'idle',
+          pendingValue: null,
+          requestedBy: null,
+          specialState: 'normal',
+          specialDecisionPending: false,
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: true,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: false,
+            canDeclineBet: false,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: true,
+          },
+        },
+        score: {
+          playerOne: 4,
+          playerTwo: 4,
+          pointsToWin: 12,
+        },
+        handProgress: {
+          roundsWonByMe: 1,
+          roundsWonByOpponent: 1,
+          roundsTied: 0,
+          currentRoundIndex: 2,
+        },
+      }),
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        action: 'play-card',
+        card: '3C',
+      }),
+    );
+  });
+
+  it('still allows a rare aggressive bluff against a lower public manilha', () => {
+    const decision = adapter.decide(
+      createContext({
+        matchId: 'match-bluff-5',
+        profile: 'aggressive',
+        viraRank: 'Q',
+        player: {
+          playerId: 'P2',
+          hand: ['5C', '6O', '7E'],
+        },
+        currentRound: {
+          playerOneCard: 'JO',
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        bet: {
+          currentValue: 3,
+          betState: 'idle',
+          pendingValue: null,
+          requestedBy: null,
+          specialState: 'normal',
+          specialDecisionPending: false,
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: true,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: false,
+            canDeclineBet: false,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: true,
+          },
+        },
+        score: {
+          playerOne: 4,
+          playerTwo: 4,
+          pointsToWin: 12,
+        },
+        handProgress: {
+          roundsWonByMe: 1,
+          roundsWonByOpponent: 1,
+          roundsTied: 0,
+          currentRoundIndex: 2,
+        },
+      }),
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        action: 'raise-to-six',
+        metadata: expect.objectContaining({
+          rationale: expect.objectContaining({
+            strategy: 'bet-initiative-bluff',
+            betAudit: expect.objectContaining({
+              publicThreatLevel: 'moderate',
+              publicThreatCard: 'JO',
+              publicThreatCanBeat: false,
+              publicThreatBluffMultiplier: expect.any(Number),
+              effectiveBluffProbability: expect.any(Number),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('can still raise when the bot has a higher manilha response to the public threat', () => {
+    const decision = adapter.decide(
+      createContext({
+        profile: 'aggressive',
+        viraRank: 'Q',
+        player: {
+          playerId: 'P2',
+          hand: ['JC', '3C', '2C'],
+        },
+        currentRound: {
+          playerOneCard: 'JE',
+          playerTwoCard: null,
+          finished: false,
+          result: null,
+        },
+        bet: {
+          currentValue: 3,
+          betState: 'idle',
+          pendingValue: null,
+          requestedBy: null,
+          specialState: 'normal',
+          specialDecisionPending: false,
+          availableActions: {
+            canRequestTruco: false,
+            canRaiseToSix: true,
+            canRaiseToNine: false,
+            canRaiseToTwelve: false,
+            canAcceptBet: false,
+            canDeclineBet: false,
+            canAcceptMaoDeOnze: false,
+            canDeclineMaoDeOnze: false,
+            canAttemptPlayCard: true,
+          },
+        },
+        score: {
+          playerOne: 4,
+          playerTwo: 4,
+          pointsToWin: 12,
+        },
+        handProgress: {
+          roundsWonByMe: 1,
+          roundsWonByOpponent: 1,
+          roundsTied: 0,
+          currentRoundIndex: 2,
+        },
+      }),
+    );
+
+    expect(decision).toEqual(
+      expect.objectContaining({
+        action: 'raise-to-six',
+        metadata: expect.objectContaining({
+          rationale: expect.objectContaining({
+            betAudit: expect.objectContaining({
+              publicThreatLevel: 'high',
+              publicThreatCard: 'JE',
+              publicThreatCanBeat: true,
             }),
           }),
         }),
