@@ -2083,6 +2083,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     }
 
+    if (action === 'decline-bet') {
+      return {
+        action: 'decline',
+        confidence: Math.max(0.76, Math.min(0.9, acceptThreshold - strength + 0.56)),
+      };
+    }
+
     if (betAudit?.acceptRisksMatch && strength < acceptThreshold) {
       return {
         action: 'decline',
@@ -2091,8 +2098,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // NOTE: Partner advice should be less conservative than autonomous bot execution.
-    // T1B is intentionally cautious, but its advice should still tell the human
-    // when a medium hand is playable at 3/6 instead of folding by default.
+    // T1B is intentionally cautious, but its advice must not contradict an explicit
+    // blocked decline. That action is handled above as the single source of truth.
     if (strength >= acceptThreshold) {
       return {
         action: 'accept',

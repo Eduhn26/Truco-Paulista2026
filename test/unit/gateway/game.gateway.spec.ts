@@ -1388,6 +1388,7 @@ describe('GameGateway bot profile flow', () => {
             partnerAdvice: expect.objectContaining({
               seatId: 'T1B',
               action: 'decline',
+              label: 'Corre, tô fraco.',
               reason: 'weak-hand',
             }),
           }),
@@ -1397,6 +1398,171 @@ describe('GameGateway bot profile flow', () => {
       jest.clearAllTimers();
       jest.useRealTimers();
     }
+  });
+
+  it('keeps decline advice consistent when a blocked decline has playable strength', async () => {
+    const { gatewayBotTurnAccess, deps, server } = createGateway();
+    const emitsByTarget = new Map<string, jest.Mock>();
+
+    server.to.mockImplementation((target: string) => {
+      const existingEmit = emitsByTarget.get(target);
+
+      if (existingEmit) {
+        return { emit: existingEmit };
+      }
+
+      const emit = jest.fn();
+      emitsByTarget.set(target, emit);
+
+      return { emit };
+    });
+
+    const roomState = {
+      mode: '2v2',
+      currentTurnSeatId: 'T1A',
+      players: [
+        {
+          seatId: 'T1A',
+          teamId: 'T1',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T1B',
+          teamId: 'T1',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P1',
+        },
+        {
+          seatId: 'T2A',
+          teamId: 'T2',
+          ready: true,
+          isBot: false,
+          domainPlayerId: 'P2',
+        },
+        {
+          seatId: 'T2B',
+          teamId: 'T2',
+          ready: true,
+          isBot: true,
+          domainPlayerId: 'P2',
+        },
+      ],
+    };
+    const state = {
+      matchId: 'match-1',
+      state: 'in_progress',
+      score: {
+        playerOne: 1,
+        playerTwo: 1,
+      },
+      currentHand: {
+        mode: '2v2',
+        viraRank: '3',
+        finished: false,
+        viewerPlayerId: 'P1',
+        currentValue: 1,
+        betState: 'awaiting_response',
+        pendingValue: 3,
+        requestedBy: 'P2',
+        specialState: 'normal',
+        specialDecisionPending: false,
+        nextDecisionType: 'respond-bet',
+        availableActions: {
+          canRequestTruco: false,
+          canRaiseToSix: true,
+          canRaiseToNine: false,
+          canRaiseToTwelve: false,
+          canAcceptBet: true,
+          canDeclineBet: true,
+          canAcceptMaoDeOnze: false,
+          canDeclineMaoDeOnze: false,
+          canAttemptPlayCard: false,
+        },
+        playerOneHand: ['6C', 'QO'],
+        playerTwoHand: ['HIDDEN', 'HIDDEN'],
+        seatHands: {
+          T1B: ['6C', 'QO'],
+        },
+        rounds: [
+          {
+            playerOneCard: null,
+            playerTwoCard: null,
+            result: null,
+            finished: false,
+          },
+        ],
+      },
+    };
+
+    deps.roomManager.getState.mockReturnValue(roomState);
+    deps.roomManager.getHumanSessions.mockReturnValue([
+      {
+        socketId: 'socket-human-partner',
+        matchId: 'match-1',
+        seatId: 'T1A',
+        teamId: 'T1',
+        domainPlayerId: 'P1',
+      },
+    ]);
+    deps.roomManager.getBotProfile.mockReturnValue('cautious');
+    deps.viewMatchStateUseCase.execute.mockResolvedValue(state);
+    deps.botDecisionPort.decide.mockReturnValue({
+      action: 'decline-bet',
+      metadata: {
+        source: 'heuristic',
+        rationale: {
+          strategy: 'bet-decline',
+          handStrength: 0.44,
+          betAudit: {
+            selectedBetAction: 'decline-bet',
+            effectiveStrength: 0.44,
+            pendingValue: 3,
+          },
+        },
+      },
+    });
+
+    await gatewayBotTurnAccess.processBotTurns('match-1');
+
+    expect(deps.declineBetUseCase.execute).not.toHaveBeenCalled();
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-signal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toTeamId: 'T1',
+        kind: 'avoid-bet',
+        scope: 'bet-intent',
+        label: 'Não compra',
+      }),
+    );
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'match-state:private',
+      expect.objectContaining({
+        currentHand: expect.objectContaining({
+          partnerAdvice: expect.objectContaining({
+            seatId: 'T1B',
+            action: 'decline',
+            label: 'Corre, tô fraco.',
+            reason: 'weak-hand',
+          }),
+        }),
+      }),
+    );
+    expect(emitsByTarget.get('socket-human-partner')).not.toHaveBeenCalledWith(
+      'match-state:private',
+      expect.objectContaining({
+        currentHand: expect.objectContaining({
+          partnerAdvice: expect.objectContaining({
+            action: 'accept',
+            label: 'Dá para pagar.',
+          }),
+        }),
+      }),
+    );
   });
 
   it('emits eu-pago advice when a mixed-team bot wants to accept a bet', async () => {
