@@ -8,6 +8,8 @@ import type {
   CardPayload,
   CardPlayedPayload,
   MatchStatePayload,
+  PartnerBetProposalPayload,
+  PartnerBetProposalResolvedPayload,
   PartnerSignalDebugPayload,
   PartnerSignalKind,
   PartnerSignalPayload,
@@ -52,6 +54,8 @@ type UseMatchRealtimeSessionParams = {
   }) => void;
   onPartnerSignal?: (payload: PartnerSignalPayload) => void;
   onPartnerSignalDebug?: (payload: PartnerSignalDebugPayload) => void;
+  onPartnerBetProposal?: (payload: PartnerBetProposalPayload) => void;
+  onPartnerBetProposalResolved?: (payload: PartnerBetProposalResolvedPayload) => void;
   onBotDecision?: (payload: BotDecisionTelemetryPayload) => void;
   onServerError?: (payload: ServerErrorPayload) => void;
 };
@@ -74,6 +78,8 @@ type UseMatchRealtimeSessionResult = {
   emitRaiseToSix: (matchId: string) => void;
   emitRaiseToNine: (matchId: string) => void;
   emitRaiseToTwelve: (matchId: string) => void;
+  emitApprovePartnerBetProposal: (matchId: string, proposalId: string) => void;
+  emitRejectPartnerBetProposal: (matchId: string, proposalId: string) => void;
   emitAcceptMaoDeOnze: (matchId: string) => void;
   emitDeclineMaoDeOnze: (matchId: string) => void;
   emitSendPartnerSignal: (matchId: string, kind: PartnerSignalKind) => void;
@@ -206,6 +212,26 @@ function describePartnerSignalDebugPayload(payload: PartnerSignalDebugPayload): 
   ].join(' | ');
 }
 
+function describePartnerBetProposalPayload(payload: PartnerBetProposalPayload): string {
+  return [
+    'Received partner-bet-proposal',
+    `from=${payload.fromSeatId}`,
+    `action=${payload.action}`,
+    `label=${payload.label}`,
+    `expires=${payload.expiresAt}`,
+  ].join(' | ');
+}
+
+function describePartnerBetProposalResolvedPayload(
+  payload: PartnerBetProposalResolvedPayload,
+): string {
+  return [
+    'Received partner-bet-proposal-resolved',
+    `status=${payload.status}`,
+    `reason=${payload.reason}`,
+  ].join(' | ');
+}
+
 export function useMatchRealtimeSession(
   params: UseMatchRealtimeSessionParams,
 ): UseMatchRealtimeSessionResult {
@@ -217,6 +243,8 @@ export function useMatchRealtimeSession(
     onRoundTransition,
     onPartnerSignal,
     onPartnerSignalDebug,
+    onPartnerBetProposal,
+    onPartnerBetProposalResolved,
     onBotDecision,
     onServerError,
   } = params;
@@ -233,6 +261,8 @@ export function useMatchRealtimeSession(
   const onRoundTransitionRef = useRef(onRoundTransition);
   const onPartnerSignalRef = useRef(onPartnerSignal);
   const onPartnerSignalDebugRef = useRef(onPartnerSignalDebug);
+  const onPartnerBetProposalRef = useRef(onPartnerBetProposal);
+  const onPartnerBetProposalResolvedRef = useRef(onPartnerBetProposalResolved);
   const onBotDecisionRef = useRef(onBotDecision);
   const onServerErrorRef = useRef(onServerError);
 
@@ -281,6 +311,14 @@ export function useMatchRealtimeSession(
   useEffect(() => {
     onPartnerSignalDebugRef.current = onPartnerSignalDebug;
   }, [onPartnerSignalDebug]);
+
+  useEffect(() => {
+    onPartnerBetProposalRef.current = onPartnerBetProposal;
+  }, [onPartnerBetProposal]);
+
+  useEffect(() => {
+    onPartnerBetProposalResolvedRef.current = onPartnerBetProposalResolved;
+  }, [onPartnerBetProposalResolved]);
 
   useEffect(() => {
     onBotDecisionRef.current = onBotDecision;
@@ -598,6 +636,34 @@ export function useMatchRealtimeSession(
           onPartnerSignalDebugRef.current?.(payload);
           appendLog(describePartnerSignalDebugPayload(payload));
         },
+        onPartnerBetProposal: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          onPartnerBetProposalRef.current?.(payload);
+          appendLog(describePartnerBetProposalPayload(payload));
+        },
+        onPartnerBetProposalResolved: (payload) => {
+          if (connectionKeyRef.current !== connectionKey) {
+            return;
+          }
+
+          const sameMatch = !payload.matchId || payload.matchId === effectiveMatchId;
+
+          if (!sameMatch) {
+            return;
+          }
+
+          onPartnerBetProposalResolvedRef.current?.(payload);
+          appendLog(describePartnerBetProposalResolvedPayload(payload));
+        },
         onBotDecision: (payload) => {
           if (connectionKeyRef.current !== connectionKey) {
             return;
@@ -642,6 +708,10 @@ export function useMatchRealtimeSession(
     emitRaiseToSix: (matchId) => clientRef.current?.emitRaiseToSix(matchId),
     emitRaiseToNine: (matchId) => clientRef.current?.emitRaiseToNine(matchId),
     emitRaiseToTwelve: (matchId) => clientRef.current?.emitRaiseToTwelve(matchId),
+    emitApprovePartnerBetProposal: (matchId, proposalId) =>
+      clientRef.current?.emitApprovePartnerBetProposal(matchId, proposalId),
+    emitRejectPartnerBetProposal: (matchId, proposalId) =>
+      clientRef.current?.emitRejectPartnerBetProposal(matchId, proposalId),
     emitAcceptMaoDeOnze: (matchId) => clientRef.current?.emitAcceptMaoDeOnze(matchId),
     emitDeclineMaoDeOnze: (matchId) => clientRef.current?.emitDeclineMaoDeOnze(matchId),
     emitSendPartnerSignal: (matchId, kind) =>

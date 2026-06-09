@@ -39,6 +39,7 @@ import type {
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
+  PartnerBetProposalPayload,
   PartnerSignalKind,
   PartnerSignalPayload,
   Rank,
@@ -141,6 +142,10 @@ type MatchTableShellProps = {
   suppressHandOutcomeModal?: boolean;
   partnerSignal?: PartnerSignalPayload | null;
   sentPartnerSignal?: SentPartnerSignalFeedback | null;
+  partnerBetProposal?: PartnerBetProposalPayload | null;
+  approvedPartnerBetProposal?: PartnerBetProposalPayload | null;
+  onApprovePartnerBetProposal?: () => void;
+  onRejectPartnerBetProposal?: () => void;
   onSendPartnerSignal?: (kind: PartnerSignalKind) => void;
   onHandClimaxDismissed?: () => void;
 };
@@ -437,6 +442,34 @@ function resolveSeatDisplayName(seat: TableSeatView, role: TwoVersusTwoSeatRole)
   }
 
   return seat.publicName ?? seat.displayName ?? (role === 'partner' ? 'Parceiro' : 'Rival');
+}
+
+function resolvePartnerBetProposalValue(action: PartnerBetProposalPayload['action']): number {
+  switch (action) {
+    case 'raise-to-six':
+      return 6;
+    case 'raise-to-nine':
+      return 9;
+    case 'raise-to-twelve':
+      return 12;
+    case 'request-truco':
+    default:
+      return 3;
+  }
+}
+
+function resolveBetRequesterVerb({
+  actorLabel,
+  isRaise,
+}: {
+  actorLabel: string;
+  isRaise: boolean;
+}): string {
+  if (actorLabel === 'Rivais') {
+    return isRaise ? 'aumentaram para' : 'pediram';
+  }
+
+  return isRaise ? 'aumentou para' : 'pediu';
 }
 
 function resolveSeatRoleLabel(seat: TableSeatView, role: TwoVersusTwoSeatRole): string {
@@ -4055,6 +4088,9 @@ function CenterActionBar({
   requestedByMe,
   teamBetDecision = null,
   partnerAdvice = null,
+  partnerBetProposal = null,
+  onApprovePartnerBetProposal,
+  onRejectPartnerBetProposal,
 }: {
   availableActions: NonNullable<MatchStatePayload['currentHand']>['availableActions'];
   onAction: (action: MatchAction) => void;
@@ -4066,6 +4102,9 @@ function CenterActionBar({
   requestedByMe: boolean;
   teamBetDecision?: NonNullable<MatchStatePayload['currentHand']>['teamBetDecision'];
   partnerAdvice?: NonNullable<MatchStatePayload['currentHand']>['partnerAdvice'];
+  partnerBetProposal?: PartnerBetProposalPayload | null;
+  onApprovePartnerBetProposal?: () => void;
+  onRejectPartnerBetProposal?: () => void;
 }) {
   const canAccept = availableActions.canAcceptBet || availableActions.canAcceptMaoDeOnze;
   const canDecline = availableActions.canDeclineBet || availableActions.canDeclineMaoDeOnze;
@@ -4114,8 +4153,11 @@ function CenterActionBar({
   const [confirmingDecline, setConfirmingDecline] = useState(false);
   const declineConfirmationAutoWarnSeconds = 5;
 
+  const activeDecisionExpiresAt =
+    partnerBetProposal?.expiresAt ?? teamBetDecision?.expiresAt ?? null;
+
   useEffect(() => {
-    if (!teamBetDecision?.expiresAt) {
+    if (!activeDecisionExpiresAt) {
       return;
     }
 
@@ -4124,14 +4166,14 @@ function CenterActionBar({
     }, 250);
 
     return () => window.clearInterval(interval);
-  }, [teamBetDecision?.expiresAt]);
+  }, [activeDecisionExpiresAt]);
 
   useEffect(() => {
     setConfirmingDecline(false);
   }, [partnerAdvice?.action, teamBetDecision?.decisionId]);
 
-  const decisionExpiresAtMs = teamBetDecision?.expiresAt
-    ? Date.parse(teamBetDecision.expiresAt)
+  const decisionExpiresAtMs = activeDecisionExpiresAt
+    ? Date.parse(activeDecisionExpiresAt)
     : Number.NaN;
   const remainingSeconds = Number.isFinite(decisionExpiresAtMs)
     ? Math.max(0, Math.ceil((decisionExpiresAtMs - nowMs) / 1000))
@@ -4270,8 +4312,76 @@ function CenterActionBar({
     onAction(action);
   };
 
-  if (!isOpenMode && !isDecideMode && !isWaitingMode) {
+  if (!partnerBetProposal && !isOpenMode && !isDecideMode && !isWaitingMode) {
     return <div aria-hidden style={{ minHeight: 48 }} />;
+  }
+
+  if (partnerBetProposal) {
+    return (
+      <motion.div
+        className="relative z-10 flex items-center justify-center"
+        animate={{
+          opacity: hardInteractionLocked ? 0.72 : 1,
+          y: hardInteractionLocked ? 4 : 0,
+          scale: hardInteractionLocked ? 0.985 : 1,
+        }}
+        transition={{ duration: 0.22 }}
+      >
+        <div
+          className="relative flex w-full max-w-[340px] -translate-y-14 flex-col items-center justify-center gap-2 rounded-[26px] border px-3 py-2.5 text-center backdrop-blur-xl sm:max-w-[520px] sm:flex-row sm:gap-2.5 sm:text-left sm:translate-y-0 xl:-translate-x-[330px]"
+          style={{
+            background:
+              'linear-gradient(135deg, rgba(16,12,8,0.96) 0%, rgba(49,29,16,0.91) 48%, rgba(5,7,8,0.97) 100%)',
+            borderColor: 'rgba(255,223,128,0.34)',
+            boxShadow:
+              '0 18px 34px rgba(0,0,0,0.42), 0 0 28px rgba(201,168,76,0.18), inset 0 1px 0 rgba(255,255,255,0.08)',
+          }}
+        >
+          <div className="flex max-w-[240px] flex-col items-center gap-1 sm:items-start">
+            <span
+              className="text-[8px] font-black uppercase tracking-[0.24em]"
+              style={{ color: 'rgba(255,241,184,0.56)', fontFamily: 'Georgia, serif' }}
+            >
+              Proposta da dupla
+            </span>
+            <span
+              className="text-[12px] font-black uppercase tracking-[0.10em]"
+              style={{
+                color: '#fff1b8',
+                fontFamily: 'Georgia, serif',
+                textShadow: '0 0 12px rgba(242,212,136,0.20)',
+              }}
+            >
+              {partnerBetProposal.label}
+            </span>
+            <span
+              className="text-[9px] font-black uppercase tracking-[0.14em]"
+              style={{
+                color: 'rgba(232,213,160,0.70)',
+                fontFamily: 'Inter, system-ui, sans-serif',
+              }}
+            >
+              {remainingSeconds !== null
+                ? `${remainingSeconds}s para intervir`
+                : partnerBetProposal.detail}
+            </span>
+          </div>
+
+          {renderChip(
+            partnerBetProposal.action === 'request-truco' ? 'Autorizar Truco' : 'Autorizar',
+            onApprovePartnerBetProposal ?? null,
+            raiseStyle,
+            'approve-partner-bet-proposal',
+          )}
+          {renderChip(
+            'Segurar',
+            onRejectPartnerBetProposal ?? null,
+            declineStyle,
+            'reject-partner-bet-proposal',
+          )}
+        </div>
+      </motion.div>
+    );
   }
 
   if (isWaitingMode && !isBetDramaActive) {
@@ -4879,6 +4989,9 @@ type AcceptedValueTensionVisuals = {
   subtitle: string;
   fontSize: string;
   letterSpacing: string;
+  valueLineHeight: number;
+  valueTop: string;
+  subtitleTop: string;
   valueColor: string;
   valueShadow: string;
   frameBorder: string;
@@ -4898,6 +5011,9 @@ function resolveAcceptedValueTensionVisuals(value: number): AcceptedValueTension
       subtitle: 'Vale doze',
       fontSize: '176px',
       letterSpacing: '-0.12em',
+      valueLineHeight: 0.62,
+      valueTop: '40%',
+      subtitleTop: '76%',
       valueColor: 'rgba(255,226,226,0.92)',
       valueShadow:
         '0 0 24px rgba(248,113,113,0.60), 0 0 54px rgba(220,38,38,0.32), 0 0 90px rgba(127,29,29,0.24)',
@@ -4924,8 +5040,11 @@ function resolveAcceptedValueTensionVisuals(value: number): AcceptedValueTension
     return {
       watermark: '9',
       subtitle: 'Vale nove',
-      fontSize: '198px',
+      fontSize: '178px',
       letterSpacing: '-0.08em',
+      valueLineHeight: 0.58,
+      valueTop: '39%',
+      subtitleTop: '78%',
       valueColor: 'rgba(255,210,164,0.90)',
       valueShadow: '0 0 22px rgba(251,146,60,0.54), 0 0 48px rgba(220,38,38,0.24)',
       frameBorder: 'rgba(251,146,60,0.22)',
@@ -4951,8 +5070,11 @@ function resolveAcceptedValueTensionVisuals(value: number): AcceptedValueTension
     return {
       watermark: '6',
       subtitle: 'Vale seis',
-      fontSize: '194px',
-      letterSpacing: '-0.08em',
+      fontSize: '158px',
+      letterSpacing: '-0.06em',
+      valueLineHeight: 0.56,
+      valueTop: '36%',
+      subtitleTop: '82%',
       valueColor: 'rgba(255,223,150,0.90)',
       valueShadow: '0 0 22px rgba(245,158,11,0.48), 0 0 46px rgba(201,168,76,0.22)',
       frameBorder: 'rgba(251,191,36,0.20)',
@@ -4978,8 +5100,11 @@ function resolveAcceptedValueTensionVisuals(value: number): AcceptedValueTension
     return {
       watermark: '3',
       subtitle: 'Vale três',
-      fontSize: '188px',
+      fontSize: '170px',
       letterSpacing: '-0.08em',
+      valueLineHeight: 0.58,
+      valueTop: '39%',
+      subtitleTop: '78%',
       valueColor: 'rgba(236,253,245,0.90)',
       valueShadow: '0 0 20px rgba(74,222,128,0.34), 0 0 44px rgba(45,106,79,0.20)',
       frameBorder: 'rgba(74,222,128,0.18)',
@@ -5097,7 +5222,7 @@ function AcceptedValueTableTension({ isOpen, value }: { isOpen: boolean; value: 
       />
 
       <motion.div
-        className="absolute right-[6.5%] top-[61%] -translate-y-1/2 select-none text-center"
+        className="absolute right-[6.5%] top-[61%] h-[230px] w-[310px] -translate-y-1/2 select-none text-center"
         initial={{ opacity: 0, scale: 0.82 }}
         animate={{
           opacity: visuals.opacity,
@@ -5127,14 +5252,16 @@ function AcceptedValueTableTension({ isOpen, value }: { isOpen: boolean; value: 
         />
 
         <div
-          className="relative"
+          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2"
           style={{
+            top: visuals.valueTop,
             color: visuals.valueColor,
             fontFamily: 'Georgia, serif',
             fontSize: visuals.fontSize,
             fontWeight: 900,
             letterSpacing: visuals.letterSpacing,
-            lineHeight: 0.8,
+            lineHeight: visuals.valueLineHeight,
+            opacity: 0.72,
             textShadow: visuals.valueShadow,
           }}
         >
@@ -5142,19 +5269,20 @@ function AcceptedValueTableTension({ isOpen, value }: { isOpen: boolean; value: 
         </div>
 
         <motion.div
-          className="relative -mt-1 text-center"
-          animate={{ opacity: [0.58, 1, 0.58] }}
+          className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap text-center"
+          animate={{ opacity: [0.62, 1, 0.62] }}
           transition={{
             duration: visuals.pulseDuration,
             repeat: Infinity,
             ease: 'easeInOut',
           }}
           style={{
+            top: visuals.subtitleTop,
             color: visuals.valueColor,
             fontFamily: 'Georgia, serif',
-            fontSize: '16px',
+            fontSize: '15px',
             fontWeight: 900,
-            letterSpacing: '0.24em',
+            letterSpacing: '0.28em',
             textTransform: 'uppercase',
             textShadow: '0 0 14px rgba(255,223,128,0.20), 0 2px 8px rgba(0,0,0,0.34)',
           }}
@@ -5522,10 +5650,16 @@ function BetDecisionCue({
     return null;
   }
 
-  const askLabel =
-    pendingValue !== null && pendingValue >= 6
-      ? `${requestedByLabel} pediu ${pendingValue}`
-      : `${requestedByLabel} pediu truco`;
+  const isRaiseRequest = pendingValue !== null && pendingValue >= 6;
+  const askLabel = isRaiseRequest
+    ? `${requestedByLabel} ${resolveBetRequesterVerb({
+        actorLabel: requestedByLabel,
+        isRaise: true,
+      })} ${pendingValue}`
+    : `${requestedByLabel} ${resolveBetRequesterVerb({
+        actorLabel: requestedByLabel,
+        isRaise: false,
+      })} truco`;
 
   return (
     <motion.div
@@ -6318,16 +6452,30 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
   const viewerOutcomePlayerId = viewerPlayerId ?? 'P1';
   const viewerWonHandOrMatch = Boolean(winner !== null && winner === viewerOutcomePlayerId);
   const requesterIsMine = Boolean(viewerPlayerId !== null && props.requestedBy === viewerPlayerId);
-  const requestedByLabel = requesterIsMine
-    ? props.isOneVsOne
-      ? 'Você pediu'
-      : 'Sua dupla pediu'
-    : props.isOneVsOne
-      ? opponentSeatView?.botIdentity?.displayName
-        ? `${opponentSeatView.botIdentity.displayName} pediu`
-        : 'Adversário pediu'
-      : 'Rivais pediram';
   const pendingBetValue = pendingValue ?? currentValue;
+  const approvedPartnerBetProposal = props.approvedPartnerBetProposal ?? null;
+  const mySeatId = mySeatView?.seatId ?? null;
+  const requesterIsApprovedPartner = Boolean(
+    requesterIsMine &&
+      !props.isOneVsOne &&
+      approvedPartnerBetProposal &&
+      mySeatId &&
+      approvedPartnerBetProposal.toSeatId === mySeatId &&
+      approvedPartnerBetProposal.fromSeatId !== mySeatId &&
+      resolvePartnerBetProposalValue(approvedPartnerBetProposal.action) === pendingBetValue,
+  );
+  const requesterActorLabel = requesterIsMine
+    ? requesterIsApprovedPartner
+      ? 'Seu parceiro'
+      : 'Você'
+    : props.isOneVsOne
+      ? opponentSeatView?.botIdentity?.displayName ?? 'Adversário'
+      : 'Rivais';
+  const isRaisedBetRequest = pendingBetValue >= 6;
+  const requestedByLabel = `${requesterActorLabel} ${resolveBetRequesterVerb({
+    actorLabel: requesterActorLabel,
+    isRaise: isRaisedBetRequest,
+  })}`;
   const pendingBetWord = (() => {
     switch (pendingBetValue) {
       case 3:
@@ -7980,7 +8128,7 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
                 <BetDecisionCue
                   isOpen={canShowBetDecisionCue && !isResolutionPhaseActive}
                   pendingValue={pendingValue}
-                  requestedByLabel={requesterIsMine ? 'Você' : requestedByLabel}
+                  requestedByLabel={requesterActorLabel}
                 />
               ) : null}
 
@@ -7998,6 +8146,13 @@ export function MatchTableShell2v2(props: MatchTableShellProps) {
                   requestedByMe={requesterIsMine}
                   teamBetDecision={currentPrivateHand?.teamBetDecision ?? null}
                   partnerAdvice={currentPrivateHand?.partnerAdvice ?? null}
+                  partnerBetProposal={props.partnerBetProposal ?? null}
+                  {...(props.onApprovePartnerBetProposal
+                    ? { onApprovePartnerBetProposal: props.onApprovePartnerBetProposal }
+                    : {})}
+                  {...(props.onRejectPartnerBetProposal
+                    ? { onRejectPartnerBetProposal: props.onRejectPartnerBetProposal }
+                    : {})}
                 />
               )}
             </div>

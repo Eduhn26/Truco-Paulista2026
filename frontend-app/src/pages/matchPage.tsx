@@ -36,6 +36,8 @@ import type {
   BotIdentityPayload,
   CardPayload,
   MatchStatePayload,
+  PartnerBetProposalPayload,
+  PartnerBetProposalResolvedPayload,
   PartnerSignalDebugPayload,
   PartnerSignalKind,
   PartnerSignalPayload,
@@ -1065,6 +1067,10 @@ export function MatchPage() {
   const handOutcomeRevealHoldKeyRef = useRef<string | null>(null);
   const handOutcomeRevealHoldTimeoutRef = useRef<number | null>(null);
   const [lastPartnerSignal, setLastPartnerSignal] = useState<PartnerSignalPayload | null>(null);
+  const [pendingPartnerBetProposal, setPendingPartnerBetProposal] =
+    useState<PartnerBetProposalPayload | null>(null);
+  const [recentApprovedPartnerBetProposal, setRecentApprovedPartnerBetProposal] =
+    useState<PartnerBetProposalPayload | null>(null);
   const [lastSentPartnerSignal, setLastSentPartnerSignal] =
     useState<LocalPartnerSignalFeedback | null>(null);
 
@@ -1822,6 +1828,27 @@ export function MatchPage() {
     }
   }, []);
 
+  const handleRealtimePartnerBetProposal = useCallback((payload: PartnerBetProposalPayload) => {
+    setPendingPartnerBetProposal(payload);
+
+    if (shouldLogMatchPageDebug()) {
+      console.info('[PARTNER_BET_PROPOSAL]', payload);
+    }
+  }, []);
+
+  const handleRealtimePartnerBetProposalResolved = useCallback(
+    (payload: PartnerBetProposalResolvedPayload) => {
+      setPendingPartnerBetProposal((current) =>
+        current?.proposalId === payload.proposalId ? null : current,
+      );
+
+      if (shouldLogMatchPageDebug()) {
+        console.info('[PARTNER_BET_PROPOSAL]', { phase: 'resolved', ...payload });
+      }
+    },
+    [],
+  );
+
   const handleRealtimeBotDecision = useCallback((decision: BotDecisionTelemetryPayload) => {
     const logKey = buildBotDecisionLogKey(decision);
 
@@ -1849,6 +1876,35 @@ export function MatchPage() {
 
     return () => window.clearTimeout(timeoutId);
   }, [lastPartnerSignal]);
+
+  useEffect(() => {
+    if (!pendingPartnerBetProposal) {
+      return undefined;
+    }
+
+    const expiresAt = Date.parse(pendingPartnerBetProposal.expiresAt);
+    const delayMs = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 9000;
+    const timeoutId = window.setTimeout(() => {
+      setPendingPartnerBetProposal(null);
+    }, delayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pendingPartnerBetProposal]);
+
+  useEffect(() => {
+    if (!recentApprovedPartnerBetProposal) {
+      return undefined;
+    }
+
+    // NOTE: The authoritative match snapshot only identifies the betting team
+    // as P1/P2. Keep the approved partner proposal briefly so the drama copy
+    // can distinguish "Você pediu" from "Seu parceiro pediu".
+    const timeoutId = window.setTimeout(() => {
+      setRecentApprovedPartnerBetProposal(null);
+    }, BET_FEEDBACK_HOLD_MS + 1600);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [recentApprovedPartnerBetProposal]);
 
   useEffect(() => {
     if (!lastSentPartnerSignal) {
@@ -1882,6 +1938,8 @@ export function MatchPage() {
     emitRaiseToSix,
     emitRaiseToNine,
     emitRaiseToTwelve,
+    emitApprovePartnerBetProposal,
+    emitRejectPartnerBetProposal,
     emitAcceptMaoDeOnze,
     emitDeclineMaoDeOnze,
     emitSendPartnerSignal,
@@ -1893,6 +1951,8 @@ export function MatchPage() {
     onRoundTransition: handleRealtimeRoundTransition,
     onPartnerSignal: handleRealtimePartnerSignal,
     onPartnerSignalDebug: handleRealtimePartnerSignalDebug,
+    onPartnerBetProposal: handleRealtimePartnerBetProposal,
+    onPartnerBetProposalResolved: handleRealtimePartnerBetProposalResolved,
     onBotDecision: handleRealtimeBotDecision,
     onServerError: () => {
       setIsStartHandPending(false);
@@ -2704,17 +2764,9 @@ export function MatchPage() {
       ].join(' | '),
     );
 
-    enqueueBetFeedback({
-      kind: 'special',
-      title: 'MÃO DE 11 INICIADA',
-      detail: '11 x 11 · queda ativa.',
-      tone: 'success',
-    });
-
     play('truco-call', 0.35);
   }, [
     appendLog,
-    enqueueBetFeedback,
     play,
     viewModel.currentPrivateHand,
     viewModel.currentPublicHand,
@@ -3023,7 +3075,6 @@ export function MatchPage() {
     }
   }, [
     appendLog,
-    enqueueBetFeedback,
     play,
     viewModel.currentPrivateHand,
     viewModel.currentPublicHand,
@@ -3204,7 +3255,6 @@ export function MatchPage() {
     localMaoDeOnzeDeclineIntentRef.current = null;
   }, [
     appendLog,
-    enqueueBetFeedback,
     play,
     viewModel.currentPrivateHand,
     viewModel.currentPublicHand,
@@ -3476,6 +3526,27 @@ export function MatchPage() {
     viewModel.canPlayCard,
     visualBeat,
   ]);
+
+  const handleApprovePartnerBetProposal = useCallback(() => {
+    if (!effectiveMatchId || !pendingPartnerBetProposal) {
+      return;
+    }
+
+    emitApprovePartnerBetProposal(effectiveMatchId, pendingPartnerBetProposal.proposalId);
+    appendLog(`Emitted approve-partner-bet-proposal (${pendingPartnerBetProposal.proposalId}).`);
+    setRecentApprovedPartnerBetProposal(pendingPartnerBetProposal);
+    setPendingPartnerBetProposal(null);
+  }, [appendLog, effectiveMatchId, emitApprovePartnerBetProposal, pendingPartnerBetProposal]);
+
+  const handleRejectPartnerBetProposal = useCallback(() => {
+    if (!effectiveMatchId || !pendingPartnerBetProposal) {
+      return;
+    }
+
+    emitRejectPartnerBetProposal(effectiveMatchId, pendingPartnerBetProposal.proposalId);
+    appendLog(`Emitted reject-partner-bet-proposal (${pendingPartnerBetProposal.proposalId}).`);
+    setPendingPartnerBetProposal(null);
+  }, [appendLog, effectiveMatchId, emitRejectPartnerBetProposal, pendingPartnerBetProposal]);
 
   const { handleRefreshState, handleStartHand, handlePlayCard, handleMatchAction } =
     useMatchActionBridge({
@@ -4425,6 +4496,10 @@ export function MatchPage() {
                     onHandClimaxDismissed={handleHandClimaxDismissed}
                     partnerSignal={lastPartnerSignal}
                     sentPartnerSignal={lastSentPartnerSignal}
+                    partnerBetProposal={pendingPartnerBetProposal}
+                    approvedPartnerBetProposal={recentApprovedPartnerBetProposal}
+                    onApprovePartnerBetProposal={handleApprovePartnerBetProposal}
+                    onRejectPartnerBetProposal={handleRejectPartnerBetProposal}
                     onSendPartnerSignal={handleSendPartnerSignal}
                   />
                 )}
@@ -4743,4 +4818,3 @@ function isFreshPlayableHandState({
 }): boolean {
   return isFreshPlayableState(privateMatchState) || isFreshPlayableState(publicMatchState);
 }
-

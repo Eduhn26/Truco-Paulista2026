@@ -5,6 +5,8 @@ import {
   normalizeCardPlayedPayload,
   normalizeHandStartedPayload,
   normalizeMatchFoundPayload,
+  normalizePartnerBetProposalPayload,
+  normalizePartnerBetProposalResolvedPayload,
   normalizePartnerSignalDebugPayload,
   normalizePartnerSignalPayload,
   normalizeMatchStatePayload,
@@ -129,6 +131,22 @@ export class GameSocketClient {
       events.onPartnerSignalDebug?.(normalizePartnerSignalDebugPayload(payload));
     });
 
+    socket.on('partner-bet-proposal', (payload: unknown) => {
+      const proposal = normalizePartnerBetProposalPayload(payload);
+
+      if (proposal) {
+        events.onPartnerBetProposal?.(proposal);
+      }
+    });
+
+    socket.on('partner-bet-proposal-resolved', (payload: unknown) => {
+      const resolution = normalizePartnerBetProposalResolvedPayload(payload);
+
+      if (resolution) {
+        events.onPartnerBetProposalResolved?.(resolution);
+      }
+    });
+
     socket.on('bot-decision', (payload: unknown) => {
       const decision = normalizeBotDecisionTelemetryPayload(payload);
 
@@ -239,6 +257,14 @@ export class GameSocketClient {
 
   emitRaiseToTwelve(matchId: string): void {
     this.socket?.emit('raise-to-twelve', { matchId });
+  }
+
+  emitApprovePartnerBetProposal(matchId: string, proposalId: string): void {
+    this.socket?.emit('approve-partner-bet-proposal', { matchId, proposalId });
+  }
+
+  emitRejectPartnerBetProposal(matchId: string, proposalId: string): void {
+    this.socket?.emit('reject-partner-bet-proposal', { matchId, proposalId });
   }
 
   emitAcceptMaoDeOnze(matchId: string): void {

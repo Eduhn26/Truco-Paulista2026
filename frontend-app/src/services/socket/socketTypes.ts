@@ -284,6 +284,34 @@ export type PendingTeamBetDecisionPayload = {
   botAdviceBySeat: Partial<Record<SeatId, PartnerBetAdvicePayload>>;
 };
 
+export type PartnerBetProposalActionPayload =
+  | 'request-truco'
+  | 'raise-to-six'
+  | 'raise-to-nine'
+  | 'raise-to-twelve';
+
+export type PartnerBetProposalPayload = {
+  proposalId: string;
+  matchId: string;
+  fromSeatId: SeatId;
+  toSeatId: SeatId;
+  teamId: 'T1' | 'T2';
+  action: PartnerBetProposalActionPayload;
+  label: string;
+  detail: string;
+  reason: string;
+  confidence: number;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type PartnerBetProposalResolvedPayload = {
+  proposalId: string;
+  matchId: string;
+  status: 'approved' | 'rejected' | 'expired' | string;
+  reason: string;
+};
+
 export type MatchAvailableActionsPayload = {
   canRequestTruco: boolean;
   canRaiseToSix: boolean;
@@ -420,6 +448,8 @@ export type GameSocketEvents = {
   onRoundTransition?: (payload: RoundTransitionPayload) => void;
   onPartnerSignal?: (payload: PartnerSignalPayload) => void;
   onPartnerSignalDebug?: (payload: PartnerSignalDebugPayload) => void;
+  onPartnerBetProposal?: (payload: PartnerBetProposalPayload) => void;
+  onPartnerBetProposalResolved?: (payload: PartnerBetProposalResolvedPayload) => void;
   onBotDecision?: (payload: BotDecisionTelemetryPayload) => void;
 };
 
@@ -660,6 +690,63 @@ function normalizePendingTeamBetDecisionPayload(
     expiresAt: asString(input.expiresAt),
     votesBySeat: normalizeTeamBetVoteMap(input.votesBySeat),
     botAdviceBySeat: normalizePartnerBetAdviceMap(input.botAdviceBySeat),
+  };
+}
+
+function normalizePartnerBetProposalAction(value: unknown): PartnerBetProposalActionPayload | null {
+  return value === 'request-truco' ||
+    value === 'raise-to-six' ||
+    value === 'raise-to-nine' ||
+    value === 'raise-to-twelve'
+    ? value
+    : null;
+}
+
+export function normalizePartnerBetProposalPayload(
+  payload: unknown,
+): PartnerBetProposalPayload | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const input = asObject(payload);
+  const action = normalizePartnerBetProposalAction(input.action);
+  const teamId = input.teamId === 'T1' || input.teamId === 'T2' ? input.teamId : null;
+
+  if (!action || !teamId) {
+    return null;
+  }
+
+  return {
+    proposalId: asString(input.proposalId),
+    matchId: asString(input.matchId),
+    fromSeatId: asString(input.fromSeatId),
+    toSeatId: asString(input.toSeatId),
+    teamId,
+    action,
+    label: asString(input.label),
+    detail: asString(input.detail),
+    reason: asString(input.reason, 'bot-bet-proposal'),
+    confidence: asNumber(input.confidence, 0),
+    createdAt: asString(input.createdAt),
+    expiresAt: asString(input.expiresAt),
+  };
+}
+
+export function normalizePartnerBetProposalResolvedPayload(
+  payload: unknown,
+): PartnerBetProposalResolvedPayload | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const input = asObject(payload);
+
+  return {
+    proposalId: asString(input.proposalId),
+    matchId: asString(input.matchId),
+    status: asString(input.status, 'rejected'),
+    reason: asString(input.reason, 'resolved'),
   };
 }
 
@@ -1141,9 +1228,7 @@ export function normalizePartnerSignalPayload(payload: unknown): PartnerSignalPa
   };
 }
 
-export function normalizePartnerSignalDebugPayload(
-  payload: unknown,
-): PartnerSignalDebugPayload {
+export function normalizePartnerSignalDebugPayload(payload: unknown): PartnerSignalDebugPayload {
   const input = asObject(payload);
   const signalId = asOptionalString(input.signalId);
   const fromSeatId = asOptionalString(input.fromSeatId);

@@ -20,6 +20,11 @@ type GameGatewayBotTurnAccess = {
   processBotTurns(matchId: string): Promise<void>;
 };
 
+type GameGatewayPartnerBetProposalAccess = {
+  handleApprovePartnerBetProposal(socket: TestSocket, payload: unknown): Promise<unknown>;
+  handleRejectPartnerBetProposal(socket: TestSocket, payload: unknown): Promise<unknown>;
+};
+
 type GameGatewayPartnerSignalTelemetryAccess = {
   partnerSignalsByMatch: Map<
     string,
@@ -36,6 +41,13 @@ type GameGatewayPartnerSignalTelemetryAccess = {
       expiresAtMs: number;
     }>
   >;
+};
+
+type GameGatewayScheduledTimerAccess = {
+  scheduledBotTurns: Map<string, ReturnType<typeof setTimeout>>;
+  scheduledTeamBetDecisionTimeouts: Map<string, ReturnType<typeof setTimeout>>;
+  scheduledPartnerBetProposalTimeouts: Map<string, ReturnType<typeof setTimeout>>;
+  activePartnerSignalWindowByMatch: Map<string, unknown>;
 };
 
 type TestSocket = {
@@ -75,6 +87,30 @@ type PendingFallback = {
   rating: number;
   timedOutAt: number;
 };
+
+const createdGatewayScheduledTimerAccesses: GameGatewayScheduledTimerAccess[] = [];
+
+function clearGatewayScheduledTimers(): void {
+  createdGatewayScheduledTimerAccesses.forEach((gateway) => {
+    gateway.scheduledBotTurns.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    gateway.scheduledBotTurns.clear();
+
+    gateway.scheduledTeamBetDecisionTimeouts.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    gateway.scheduledTeamBetDecisionTimeouts.clear();
+
+    gateway.scheduledPartnerBetProposalTimeouts.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    gateway.scheduledPartnerBetProposalTimeouts.clear();
+    gateway.activePartnerSignalWindowByMatch.clear();
+  });
+
+  createdGatewayScheduledTimerAccesses.length = 0;
+}
 
 function createSocket(options?: { id?: string; authToken?: string; token?: string }): TestSocket {
   const auth: Record<string, unknown> = {};
@@ -482,6 +518,10 @@ describe('GameGateway bot profile flow', () => {
       botDecisionPort as never,
     );
 
+    createdGatewayScheduledTimerAccesses.push(
+      gateway as unknown as GameGatewayScheduledTimerAccess,
+    );
+
     const gatewayServerAccess = gateway as unknown as GameGatewayServerAccess;
     const gatewayBotTurnAccess = gateway as unknown as GameGatewayBotTurnAccess;
 
@@ -531,6 +571,7 @@ describe('GameGateway bot profile flow', () => {
   }
 
   afterEach(() => {
+    clearGatewayScheduledTimers();
     jest.restoreAllMocks();
   });
 
@@ -987,12 +1028,18 @@ describe('GameGateway bot profile flow', () => {
     await gatewayBotTurnAccess.processBotTurns('match-1');
 
     expect(deps.requestTrucoUseCase.execute).not.toHaveBeenCalled();
-    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      playerId: 'P1',
-      card: '7O',
-      seatId: 'T1B',
-    });
+    expect(deps.playCardUseCase.execute).not.toHaveBeenCalled();
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-bet-proposal',
+      expect.objectContaining({
+        matchId: 'match-1',
+        fromSeatId: 'T1B',
+        toSeatId: 'T1A',
+        teamId: 'T1',
+        action: 'request-truco',
+        label: 'Parceiro quer pedir Truco',
+      }),
+    );
     expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
       'partner-signal',
       expect.objectContaining({
@@ -1027,10 +1074,9 @@ describe('GameGateway bot profile flow', () => {
       'bot-decision',
       expect.objectContaining({
         action: 'request-truco',
-        executionStatus: 'fallback-card',
-        executedAction: 'play-card',
-        executionReason: 'human_partner_owns_bet',
-        selectedCard: '7O',
+        executionStatus: 'pending',
+        executedAction: 'request-truco',
+        executionReason: 'waiting_human_partner_approval',
         actorHandBefore: ['7O', '4O', 'AO'],
       }),
     );
@@ -1214,25 +1260,21 @@ describe('GameGateway bot profile flow', () => {
       }),
     );
     expect(deps.requestTrucoUseCase.execute).not.toHaveBeenCalled();
-    expect(deps.playCardUseCase.execute).toHaveBeenCalledWith({
-      matchId: 'match-1',
-      playerId: 'P1',
-      card: 'KC',
-      seatId: 'T1B',
-    });
-    expect(deps.playCardUseCase.execute).not.toHaveBeenCalledWith(
+    expect(deps.playCardUseCase.execute).not.toHaveBeenCalled();
+    expect(emitsByTarget.get('socket-human-partner')).toHaveBeenCalledWith(
+      'partner-bet-proposal',
       expect.objectContaining({
-        card: 'JP',
+        action: 'request-truco',
+        label: 'Parceiro quer pedir Truco',
       }),
     );
     expect(emitsByTarget.get('match-1')).toHaveBeenCalledWith(
       'bot-decision',
       expect.objectContaining({
         action: 'request-truco',
-        executionStatus: 'fallback-card',
-        executedAction: 'play-card',
-        executionReason: 'human_partner_owns_bet',
-        selectedCard: 'KC',
+        executionStatus: 'pending',
+        executedAction: 'request-truco',
+        executionReason: 'waiting_human_partner_approval',
         actorHandBefore: ['JP', '3E', 'KC'],
       }),
     );

@@ -128,6 +128,11 @@ type SendPartnerSignalPayload = {
   kind?: unknown;
 };
 
+type PartnerBetProposalPayload = {
+  matchId?: unknown;
+  proposalId?: unknown;
+};
+
 type GetStatePayload = {
   matchId?: unknown;
 };
@@ -301,6 +306,12 @@ type GatewayLogContext = {
     | 'send_partner_signal_requested'
     | 'send_partner_signal_succeeded'
     | 'send_partner_signal_rejected'
+    | 'approve_partner_bet_proposal_requested'
+    | 'approve_partner_bet_proposal_succeeded'
+    | 'approve_partner_bet_proposal_rejected'
+    | 'reject_partner_bet_proposal_requested'
+    | 'reject_partner_bet_proposal_succeeded'
+    | 'reject_partner_bet_proposal_rejected'
     | 'match_finished'
     | 'save_match_record_succeeded'
     | 'save_match_record_rejected'
@@ -492,6 +503,32 @@ type PartnerAdviceSignal = {
   confidence: number;
 };
 
+type PartnerBetProposalAction = Extract<
+  BotBetAction,
+  'request-truco' | 'raise-to-six' | 'raise-to-nine' | 'raise-to-twelve'
+>;
+
+type PendingPartnerBetProposal = {
+  proposalId: string;
+  matchId: string;
+  fromSeatId: SeatId;
+  toSeatId: SeatId;
+  teamId: 'T1' | 'T2';
+  playerId: 'P1' | 'P2';
+  action: PartnerBetProposalAction;
+  label: string;
+  detail: string;
+  reason: string;
+  confidence: number;
+  createdAt: string;
+  expiresAt: string;
+  expiresAtMs: number;
+  fallbackCard: string;
+  actorHandBefore: string[];
+};
+
+type PartnerBetProposalResolutionStatus = 'approved' | 'rejected' | 'expired';
+
 type PendingTeamBetDecision = {
   decisionId: string;
   respondingTeamId: 'T1' | 'T2';
@@ -650,6 +687,7 @@ const INITIAL_BOT_SIGNAL_STRONG_HAND_THRESHOLD = 0.72;
 const INITIAL_BOT_SIGNAL_WEAK_HAND_THRESHOLD = 0.28;
 
 const MIXED_TEAM_BET_DECISION_TIMEOUT_MS = 18000;
+const PARTNER_BET_PROPOSAL_TIMEOUT_MS = 9000;
 
 @WebSocketGateway({
   cors: {
@@ -668,6 +706,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly pendingBetResumeSeatByMatch = new Map<string, SeatId>();
   private readonly pendingTeamBetDecisionByMatch = new Map<string, PendingTeamBetDecision>();
   private readonly scheduledTeamBetDecisionTimeouts = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly pendingPartnerBetProposalByMatch = new Map<string, PendingPartnerBetProposal>();
+  private readonly scheduledPartnerBetProposalTimeouts = new Map<
     string,
     ReturnType<typeof setTimeout>
   >();
@@ -1081,6 +1124,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.partnerSignalsByMatch.delete(matchId);
     this.activePartnerSignalWindowByMatch.delete(matchId);
+    this.clearPartnerBetProposal(matchId, 'rejected', 'new hand started');
 
     for (const cooldownKey of [...this.partnerSignalCooldownBySeat.keys()]) {
       if (cooldownKey.startsWith(`${matchId}:`)) {
@@ -1348,8 +1392,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const roomState = this.roomManager.getState(matchId);
     const partnerSeatId = this.resolveBotPartnerSeatId(botTurnContext.seatId, '2v2');
+
+    if (!partnerSeatId) {
+      return;
+    }
+
+    const roomState = this.roomManager.getState(matchId);
     const humanPartner = roomState.players.find(
       (player) =>
         player.seatId === partnerSeatId && player.teamId === botTurnContext.teamId && !player.isBot,
@@ -1799,6 +1848,217 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.pendingTeamBetDecisionByMatch.delete(matchId);
+  }
+
+  private toPartnerBetProposalDto(proposal: PendingPartnerBetProposal) {
+    return {
+      proposalId: proposal.proposalId,
+      matchId: proposal.matchId,
+      fromSeatId: proposal.fromSeatId,
+      toSeatId: proposal.toSeatId,
+      teamId: proposal.teamId,
+      action: proposal.action,
+      label: proposal.label,
+      detail: proposal.detail,
+      reason: proposal.reason,
+      confidence: proposal.confidence,
+      createdAt: proposal.createdAt,
+      expiresAt: proposal.expiresAt,
+    };
+  }
+
+  private clearPartnerBetProposal(
+    matchId: string,
+    status?: PartnerBetProposalResolutionStatus,
+    reason?: string,
+  ): PendingPartnerBetProposal | null {
+    const timeout = this.scheduledPartnerBetProposalTimeouts.get(matchId);
+
+    if (timeout) {
+      clearTimeout(timeout);
+      this.scheduledPartnerBetProposalTimeouts.delete(matchId);
+    }
+
+    const proposal = this.pendingPartnerBetProposalByMatch.get(matchId) ?? null;
+    this.pendingPartnerBetProposalByMatch.delete(matchId);
+
+    if (proposal && status) {
+      this.emitPartnerBetProposalResolved(proposal, status, reason ?? status);
+    }
+
+    return proposal;
+  }
+
+  private isPartnerBetProposalAction(
+    action: BotDecision['action'] | undefined,
+  ): action is PartnerBetProposalAction {
+    return (
+      action === 'request-truco' ||
+      action === 'raise-to-six' ||
+      action === 'raise-to-nine' ||
+      action === 'raise-to-twelve'
+    );
+  }
+
+  private resolvePartnerBetProposalLabel(action: PartnerBetProposalAction): string {
+    if (action === 'request-truco') {
+      return 'Parceiro quer pedir Truco';
+    }
+
+    if (action === 'raise-to-six') {
+      return 'Parceiro quer aumentar para 6';
+    }
+
+    if (action === 'raise-to-nine') {
+      return 'Parceiro quer aumentar para 9';
+    }
+
+    return 'Parceiro quer aumentar para 12';
+  }
+
+  private resolvePartnerBetProposalDetail(action: PartnerBetProposalAction): string {
+    if (action === 'request-truco') {
+      return 'Ele puxaria a aposta, mas você decide se autoriza.';
+    }
+
+    return 'Ele aumentaria a aposta, mas você pode segurar.';
+  }
+
+  private resolvePartnerBetProposalConfidence(decision: BotDecision): number {
+    const betAudit = decision.metadata?.rationale?.betAudit;
+    const handStrength = decision.metadata?.rationale?.handStrength;
+    const strength = betAudit?.effectiveStrength ?? handStrength ?? 0.64;
+
+    return Math.max(0.58, Math.min(0.94, strength));
+  }
+
+  private emitPartnerBetProposal(proposal: PendingPartnerBetProposal): void {
+    const sessions = this.roomManager.getHumanSessions(proposal.matchId);
+
+    sessions
+      .filter(
+        (session) => session.teamId === proposal.teamId && session.seatId === proposal.toSeatId,
+      )
+      .forEach((session) => {
+        this.server
+          .to(session.socketId)
+          .emit('partner-bet-proposal', this.toPartnerBetProposalDto(proposal));
+      });
+  }
+
+  private emitPartnerBetProposalResolved(
+    proposal: PendingPartnerBetProposal,
+    status: PartnerBetProposalResolutionStatus,
+    reason: string,
+  ): void {
+    const sessions = this.roomManager.getHumanSessions(proposal.matchId);
+
+    sessions
+      .filter((session) => session.teamId === proposal.teamId)
+      .forEach((session) => {
+        this.server.to(session.socketId).emit('partner-bet-proposal-resolved', {
+          proposalId: proposal.proposalId,
+          matchId: proposal.matchId,
+          status,
+          reason,
+        });
+      });
+  }
+
+  private armPartnerBetProposalTimeout(proposal: PendingPartnerBetProposal): void {
+    const existingTimeout = this.scheduledPartnerBetProposalTimeouts.get(proposal.matchId);
+
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    const delayMs = Math.max(0, proposal.expiresAtMs - Date.now());
+    const timeout = setTimeout(() => {
+      this.scheduledPartnerBetProposalTimeouts.delete(proposal.matchId);
+
+      void this.rejectPartnerBetProposalById(
+        proposal.matchId,
+        proposal.proposalId,
+        'expired',
+      ).catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'Unknown partner bet proposal timeout error';
+
+        this.logGateway('warn', {
+          layer: 'gateway',
+          event: 'reject_partner_bet_proposal_rejected',
+          status: 'rejected',
+          matchId: proposal.matchId,
+          errorType: 'unexpected_error',
+          errorMessage: message,
+        });
+      });
+    }, delayMs);
+
+    this.scheduledPartnerBetProposalTimeouts.set(proposal.matchId, timeout);
+  }
+
+  private createPartnerBetProposal({
+    matchId,
+    botTurnContext,
+    action,
+    decision,
+    fallbackCard,
+  }: {
+    matchId: string;
+    botTurnContext: BotTurnDecisionContext;
+    action: PartnerBetProposalAction;
+    decision: BotDecision;
+    fallbackCard: string;
+  }): PendingPartnerBetProposal | null {
+    if (botTurnContext.context.mode !== '2v2') {
+      return null;
+    }
+
+    const roomState = this.roomManager.getState(matchId);
+    const partnerSeatId = this.resolveBotPartnerSeatId(botTurnContext.seatId, '2v2');
+
+    if (!partnerSeatId) {
+      return null;
+    }
+
+    const humanPartner = roomState.players.find(
+      (player) =>
+        player.seatId === partnerSeatId && player.teamId === botTurnContext.teamId && !player.isBot,
+    );
+
+    if (!humanPartner) {
+      return null;
+    }
+
+    this.clearPartnerBetProposal(matchId, 'rejected', 'superseded');
+
+    const now = Date.now();
+    const expiresAtMs = now + PARTNER_BET_PROPOSAL_TIMEOUT_MS;
+    const proposal: PendingPartnerBetProposal = {
+      proposalId: `${matchId}:${botTurnContext.seatId}:${action}:${now}`,
+      matchId,
+      fromSeatId: botTurnContext.seatId,
+      toSeatId: partnerSeatId,
+      teamId: botTurnContext.teamId,
+      playerId: botTurnContext.playerId,
+      action,
+      label: this.resolvePartnerBetProposalLabel(action),
+      detail: this.resolvePartnerBetProposalDetail(action),
+      reason: decision.metadata?.rationale?.strategy ?? 'bot-bet-proposal',
+      confidence: this.resolvePartnerBetProposalConfidence(decision),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      expiresAtMs,
+      fallbackCard,
+      actorHandBefore: [...botTurnContext.context.player.hand],
+    };
+
+    this.pendingPartnerBetProposalByMatch.set(matchId, proposal);
+    this.armPartnerBetProposalTimeout(proposal);
+    this.emitPartnerBetProposal(proposal);
+
+    return proposal;
   }
 
   private toTeamBetDecisionDto(decision: PendingTeamBetDecision) {
@@ -4223,13 +4483,40 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const isMixedTeamBetInitiativeFallback = isInitiativeBet && botTeamHasHumanSeat;
 
-    // Mixed-team bots fall back to a fresh card-only decision after betting is blocked.
+    // Mixed-team bots ask the human partner before opening or raising the bet.
     const resolvedCard =
       decision.action === 'play-card' && decision.card
         ? decision.card
         : isMixedTeamBetInitiativeFallback
           ? this.resolveMixedTeamFallbackCard(botTurnContext)
           : (botTurnContext.context.player.hand[0] ?? null);
+
+    if (
+      isMixedTeamBetInitiativeFallback &&
+      this.isPartnerBetProposalAction(decision.action) &&
+      resolvedCard
+    ) {
+      const proposal = this.createPartnerBetProposal({
+        matchId,
+        botTurnContext,
+        action: decision.action,
+        decision,
+        fallbackCard: resolvedCard,
+      });
+
+      if (proposal) {
+        this.tryEmitBotPartnerBetAdviceSignal(matchId, botTurnContext, decision.action);
+        this.markBotDecisionExecution(matchId, {
+          status: 'pending',
+          executedAction: decision.action,
+          reason: 'waiting_human_partner_approval',
+          actorHandBefore: [...botTurnContext.context.player.hand],
+        });
+        this.emitRoomState(matchId);
+        await this.emitPrivateMatchState(matchId);
+        return false;
+      }
+    }
 
     if (!resolvedCard) {
       this.markBotDecisionExecution(matchId, {
@@ -4353,6 +4640,150 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return true;
+  }
+
+  private async executePartnerBetProposalAction(
+    proposal: PendingPartnerBetProposal,
+  ): Promise<ViewMatchStateResponseDto> {
+    if (proposal.action === 'request-truco') {
+      const dto: RequestTrucoRequestDto = {
+        matchId: proposal.matchId,
+        playerId: proposal.playerId,
+      };
+
+      await this.requestTrucoUseCase.execute(dto);
+    } else if (proposal.action === 'raise-to-six') {
+      const dto: RaiseToSixRequestDto = {
+        matchId: proposal.matchId,
+        playerId: proposal.playerId,
+      };
+
+      await this.raiseToSixUseCase.execute(dto);
+    } else if (proposal.action === 'raise-to-nine') {
+      const dto: RaiseToNineRequestDto = {
+        matchId: proposal.matchId,
+        playerId: proposal.playerId,
+      };
+
+      await this.raiseToNineUseCase.execute(dto);
+    } else {
+      const dto: RaiseToTwelveRequestDto = {
+        matchId: proposal.matchId,
+        playerId: proposal.playerId,
+      };
+
+      await this.raiseToTwelveUseCase.execute(dto);
+    }
+
+    this.rememberBetResumeSeat(proposal.matchId, proposal.fromSeatId);
+    this.clearTeamBetDecision(proposal.matchId);
+    await this.ensureMixedTeamBetDecision(proposal.matchId);
+
+    this.markBotDecisionExecution(proposal.matchId, {
+      status: 'succeeded',
+      executedAction: proposal.action,
+      reason: 'human_partner_approved_bet',
+      actorHandBefore: proposal.actorHandBefore,
+    });
+    this.emitRoomState(proposal.matchId);
+
+    const updatedState = await this.emitSyncedMatchState(proposal.matchId);
+    await this.finalizeMatchIfFinished(proposal.matchId, updatedState);
+
+    return updatedState;
+  }
+
+  private async rejectPartnerBetProposalById(
+    matchId: string,
+    proposalId: string,
+    resolution: Exclude<PartnerBetProposalResolutionStatus, 'approved'>,
+  ): Promise<void> {
+    const proposal = this.pendingPartnerBetProposalByMatch.get(matchId);
+
+    if (!proposal || proposal.proposalId !== proposalId) {
+      return;
+    }
+
+    this.clearPartnerBetProposal(matchId, resolution, resolution);
+
+    const previousState = await this.getAuthoritativeMatchState(matchId);
+    const dto: PlayCardRequestDto = {
+      matchId,
+      playerId: proposal.playerId,
+      card: proposal.fallbackCard,
+      seatId: proposal.fromSeatId,
+    };
+
+    await this.playCardUseCase.execute(dto);
+    this.markBotDecisionExecution(matchId, {
+      status: 'fallback-card',
+      executedAction: 'play-card',
+      reason: `partner_bet_proposal_${resolution}`,
+      selectedCard: proposal.fallbackCard,
+      actorHandBefore: proposal.actorHandBefore,
+    });
+
+    const updatedState = await this.getAuthoritativeMatchState(matchId);
+    const nextRoomState = this.resolveNextTurnRoomStateAfterCardPlay(
+      matchId,
+      previousState,
+      updatedState,
+      proposal.fromSeatId,
+      proposal.playerId,
+    );
+
+    const botCardActor: CardPlayedActor = {
+      seatId: proposal.fromSeatId,
+      teamId: proposal.teamId,
+      playerId: proposal.playerId,
+      isBot: true,
+    };
+
+    this.server.to(matchId).emit('card-played', {
+      matchId,
+      playerId: proposal.playerId,
+      seatId: proposal.fromSeatId,
+      teamId: proposal.teamId,
+      card: proposal.fallbackCard,
+      currentTurnSeatId: nextRoomState.currentTurnSeatId,
+      isBot: true,
+    });
+
+    await this.emitPostCardPlayStateWithPacing(
+      matchId,
+      previousState,
+      updatedState,
+      nextRoomState,
+      botCardActor,
+    );
+
+    this.logGateway('log', {
+      layer: 'gateway',
+      event: 'play_card_succeeded',
+      status: 'succeeded',
+      matchId,
+      seatId: proposal.fromSeatId,
+      teamId: proposal.teamId,
+      playerId: proposal.playerId,
+      card: proposal.fallbackCard,
+    });
+
+    await this.finalizeMatchIfFinished(matchId, updatedState);
+
+    if (
+      updatedState.state === 'in_progress' &&
+      updatedState.currentHand &&
+      !updatedState.currentHand.finished &&
+      updatedState.currentHand.nextDecisionType === 'play-card'
+    ) {
+      const nextBotTurnContext = await this.buildBotDecisionContext(matchId, updatedState, {
+        emitSignalDebug: false,
+      });
+
+      if (nextBotTurnContext) {
+        this.scheduleDeferredBotTurn(matchId);
+      }
+    }
   }
 
   private async tryAutoStartFirstHandOnOpen(matchId: string, socketId: string): Promise<boolean> {
@@ -6062,6 +6493,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.requestTrucoUseCase.execute(dto);
+      this.clearPartnerBetProposal(matchId, 'rejected', 'human bet action');
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
       this.clearTeamBetDecision(matchId);
       await this.ensureMixedTeamBetDecision(matchId);
@@ -6321,6 +6753,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.raiseToSixUseCase.execute(dto);
+      this.clearPartnerBetProposal(matchId, 'rejected', 'human bet action');
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
       this.clearTeamBetDecision(matchId);
       await this.ensureMixedTeamBetDecision(matchId);
@@ -6414,6 +6847,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.raiseToNineUseCase.execute(dto);
+      this.clearPartnerBetProposal(matchId, 'rejected', 'human bet action');
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
       this.clearTeamBetDecision(matchId);
       await this.ensureMixedTeamBetDecision(matchId);
@@ -6507,6 +6941,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
 
       const result = await this.raiseToTwelveUseCase.execute(dto);
+      this.clearPartnerBetProposal(matchId, 'rejected', 'human bet action');
       this.rememberBetResumeSeatFromCurrentTurn(matchId, session.seatId);
       this.clearTeamBetDecision(matchId);
       await this.ensureMixedTeamBetDecision(matchId);
@@ -6532,6 +6967,177 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       };
     } catch (error) {
       return this.rejectFromError('raise_to_twelve_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('approve-partner-bet-proposal')
+  async handleApprovePartnerBetProposal(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: PartnerBetProposalPayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'approve_partner_bet_proposal_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'approve_partner_bet_proposal_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const proposalIdRaw = payload?.proposalId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const proposalId = typeof proposalIdRaw === 'string' ? proposalIdRaw.trim() : '';
+
+      if (!matchId || !proposalId) {
+        return this.reject(
+          'approve_partner_bet_proposal_rejected',
+          'Invalid payload: matchId and proposalId are required.',
+          { socketId: socket.id, matchId: session.matchId },
+          'validation_error',
+        );
+      }
+
+      const proposal = this.pendingPartnerBetProposalByMatch.get(matchId);
+
+      if (!proposal || proposal.proposalId !== proposalId) {
+        return this.reject(
+          'approve_partner_bet_proposal_rejected',
+          'Partner bet proposal is no longer active.',
+          { socketId: socket.id, matchId, seatId: session.seatId, teamId: session.teamId },
+          'transport_error',
+        );
+      }
+
+      if (session.seatId !== proposal.toSeatId || session.teamId !== proposal.teamId) {
+        return this.reject(
+          'approve_partner_bet_proposal_rejected',
+          'Only the human partner can approve this proposal.',
+          { socketId: socket.id, matchId, seatId: session.seatId, teamId: session.teamId },
+          'transport_error',
+        );
+      }
+
+      this.clearPartnerBetProposal(matchId, 'approved', 'human_partner_approved');
+      const updatedState = await this.executePartnerBetProposalAction(proposal);
+
+      await this.continueAutomaticGameFlow(matchId, this.resolveBetPacingDelay('raise'));
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'approve_partner_bet_proposal_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'partner-bet-proposal-approved',
+        data: {
+          matchId: updatedState.matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('approve_partner_bet_proposal_rejected', error, {
+        socketId: socket.id,
+      });
+    }
+  }
+
+  @SubscribeMessage('reject-partner-bet-proposal')
+  async handleRejectPartnerBetProposal(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() payload: PartnerBetProposalPayload,
+  ): Promise<WsResponse<{ matchId: string }> | WsResponse<ErrorResponseDto>> {
+    this.logGateway('debug', {
+      layer: 'gateway',
+      event: 'reject_partner_bet_proposal_requested',
+      status: 'started',
+      socketId: socket.id,
+    });
+
+    try {
+      const session = this.roomManager.getSessionBySocketId(socket.id);
+
+      if (!session) {
+        return this.reject(
+          'reject_partner_bet_proposal_rejected',
+          'Player is not assigned to any room.',
+          { socketId: socket.id },
+          'transport_error',
+        );
+      }
+
+      const matchIdRaw = payload?.matchId;
+      const proposalIdRaw = payload?.proposalId;
+      const matchId = typeof matchIdRaw === 'string' ? matchIdRaw.trim() : '';
+      const proposalId = typeof proposalIdRaw === 'string' ? proposalIdRaw.trim() : '';
+
+      if (!matchId || !proposalId) {
+        return this.reject(
+          'reject_partner_bet_proposal_rejected',
+          'Invalid payload: matchId and proposalId are required.',
+          { socketId: socket.id, matchId: session.matchId },
+          'validation_error',
+        );
+      }
+
+      const proposal = this.pendingPartnerBetProposalByMatch.get(matchId);
+
+      if (!proposal || proposal.proposalId !== proposalId) {
+        return this.reject(
+          'reject_partner_bet_proposal_rejected',
+          'Partner bet proposal is no longer active.',
+          { socketId: socket.id, matchId, seatId: session.seatId, teamId: session.teamId },
+          'transport_error',
+        );
+      }
+
+      if (session.seatId !== proposal.toSeatId || session.teamId !== proposal.teamId) {
+        return this.reject(
+          'reject_partner_bet_proposal_rejected',
+          'Only the human partner can reject this proposal.',
+          { socketId: socket.id, matchId, seatId: session.seatId, teamId: session.teamId },
+          'transport_error',
+        );
+      }
+
+      await this.rejectPartnerBetProposalById(matchId, proposalId, 'rejected');
+
+      this.logGateway('log', {
+        layer: 'gateway',
+        event: 'reject_partner_bet_proposal_succeeded',
+        status: 'succeeded',
+        socketId: socket.id,
+        matchId,
+        seatId: session.seatId,
+        teamId: session.teamId,
+        playerId: session.domainPlayerId,
+      });
+
+      return {
+        event: 'partner-bet-proposal-rejected',
+        data: {
+          matchId,
+        },
+      };
+    } catch (error) {
+      return this.rejectFromError('reject_partner_bet_proposal_rejected', error, {
         socketId: socket.id,
       });
     }
