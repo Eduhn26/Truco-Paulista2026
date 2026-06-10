@@ -25,16 +25,15 @@ function expectValidBotIdentities(players: RoomStatePlayer[]): void {
   }
 }
 
-function identity(
-  userId: string,
-  playerToken?: string,
-): {
-  userId: string;
-  playerToken: string;
-} {
+type JoinIdentity = Parameters<RoomManager['join']>[2];
+
+function identity(userId: string, playerToken?: string): JoinIdentity {
   return {
     userId,
     playerToken: playerToken ?? `auth:${userId}`,
+    displayName: null,
+    publicName: null,
+    publicSlug: null,
   };
 }
 
@@ -389,6 +388,9 @@ describe('RoomManager (1v1)', () => {
         teamId: 'T1',
         playerToken: 'token-1',
         userId: 'user-1',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-1',
         domainPlayerId: 'P1',
@@ -401,6 +403,9 @@ describe('RoomManager (1v1)', () => {
         teamId: 'T2',
         playerToken: 'bot:match-1:T2A',
         userId: null,
+        displayName: expect.any(String),
+        publicName: expect.any(String),
+        publicSlug: null,
         ready: true,
         socketId: null,
         domainPlayerId: 'P2',
@@ -436,6 +441,9 @@ describe('RoomManager (1v1)', () => {
         teamId: 'T1',
         playerToken: 'token-1',
         userId: 'user-1',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-1',
         domainPlayerId: 'P1',
@@ -448,6 +456,9 @@ describe('RoomManager (1v1)', () => {
         teamId: 'T2',
         playerToken: 'token-2',
         userId: 'user-2',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-2',
         domainPlayerId: 'P2',
@@ -552,6 +563,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T1',
         playerToken: 'token-1',
         userId: 'user-1',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-1',
         domainPlayerId: 'P1',
@@ -564,6 +578,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T2',
         playerToken: 'token-2',
         userId: 'user-2',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-2',
         domainPlayerId: 'P2',
@@ -576,6 +593,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T1',
         playerToken: 'bot:match-1:T1B',
         userId: null,
+        displayName: expect.any(String),
+        publicName: expect.any(String),
+        publicSlug: null,
         ready: true,
         socketId: null,
         domainPlayerId: 'P1',
@@ -588,6 +608,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T2',
         playerToken: 'bot:match-1:T2B',
         userId: null,
+        displayName: expect.any(String),
+        publicName: expect.any(String),
+        publicSlug: null,
         ready: true,
         socketId: null,
         domainPlayerId: 'P2',
@@ -640,6 +663,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T1',
         playerToken: 'token-1',
         userId: 'user-1',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-1',
         domainPlayerId: 'P1',
@@ -652,6 +678,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T2',
         playerToken: 'token-2',
         userId: 'user-2',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-2',
         domainPlayerId: 'P2',
@@ -664,6 +693,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T1',
         playerToken: 'token-3',
         userId: 'user-3',
+        displayName: null,
+        publicName: null,
+        publicSlug: null,
         ready: false,
         socketId: 'socket-3',
         domainPlayerId: 'P1',
@@ -676,6 +708,9 @@ describe('RoomManager bot fill (2v2)', () => {
         teamId: 'T2',
         playerToken: 'bot:match-1:T2B',
         userId: null,
+        displayName: expect.any(String),
+        publicName: expect.any(String),
+        publicSlug: null,
         ready: true,
         socketId: null,
         domainPlayerId: 'P2',
@@ -829,3 +864,4 @@ describe('RoomManager beginHand opener', () => {
     expect(started.currentTurnSeatId).toBe('T2A');
   });
 });
+
