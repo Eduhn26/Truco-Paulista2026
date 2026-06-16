@@ -15,7 +15,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Jest](https://img.shields.io/badge/174_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
+[![Jest](https://img.shields.io/badge/231_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
 
 <br/>
 
@@ -27,9 +27,9 @@
 
 ---
 
-Estudo prático de engenharia de software construído em **23 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
+Estudo prático de engenharia de software construído em **24 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
 
-O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: Home mais honesta, Lobby com camada de continuidade, mesa premium, HUD legível, observabilidade lateral, identidade de bots e match surface defensável como hero screen de portfólio.
+O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: Home mais honesta, Lobby com camada de continuidade, mesa premium, HUD legível, observabilidade lateral, identidade de bots, match surface defensável como hero screen de portfólio e uma camada 2v2 mais madura de sinais, conselho e proposta de aposta da dupla.
 
 ---
 
@@ -43,7 +43,7 @@ O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regr
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React · Vite · TypeScript · Tailwind CSS |
 | **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
-| **Testes** | Jest · ts-jest — 32 suites · 174 testes · 0 falhas |
+| **Testes** | Jest · ts-jest — 32 suites · 231 testes · 0 falhas |
 | **Deploy** | Render · Docker multi-stage · GitHub Actions |
 
 ---
@@ -91,44 +91,53 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 21 | Match table productization + HUD / game-feel consolidation | ✅ |
 | 22 | Bot identity productization + match observability / premium surface finalization | ✅ |
 | 23 | Meta layer / retention foundation + Home / Lobby / Match coherence pass | ✅ |
+| 24 | 2v2 partner intelligence + betting flow hardening | ✅ |
 
 ---
 
-## Fase 23 — O que mudou
+## Fase 24 — O que mudou
 
-A Fase 23 fechou a **meta layer / retention foundation** do produto. Depois de a Fase 22 consolidar a identidade dos bots, a observabilidade lateral e a match surface premium, o próximo gap deixou de ser apenas mesa e passou a ser **continuidade de produto**: a entrada pela Home ainda era parcialmente artificial, o Lobby ainda precisava comunicar melhor reconnect / recent-session / active-room, e o fluxo **Home → Lobby → Match** ainda não se sustentava com a mesma coerência de uma aplicação realmente fechada.
+A Fase 24 fortaleceu a **inteligência da dupla 2v2 e o fluxo de aposta com parceiro bot**. Depois de a Fase 23 fechar a camada de produto/meta em Home, Lobby e Match, o próximo gap voltou para o núcleo da mesa: sinais de dupla, conselho de aposta, proposta de Truco / 6 / 9 / 12, autoridade humana e leitura de ameaça pública.
 
-**Home truthfulness pass:**
-- A Home deixou de depender de sinais artificiais ou pseudo-métricas
-- O hero e a supporting strip passaram a refletir capacidades reais do produto
-- A landing ficou mais honesta, mais defensável e mais coerente com o estágio atual do projeto
+**Partner bet proposal flow:**
+- O bot parceiro agora pode propor Truco ou aumento sem executar sozinho a decisão da dupla
+- O humano recebe a proposta na mesa e pode aprovar ou rejeitar
+- O backend valida a autorização e só executa a aposta quando a decisão humana permite
 
-**Lobby continuity foundation:**
-- O Lobby deixou de se comportar como waiting room genérica e passou a atuar como superfície real de continuidade
-- Estados de reconnect, first-session, recent-session e active-room ficaram mais claros
-- O hero passou a assumir o papel de guia principal da próxima ação
+**Sinais de dupla mais táticos:**
+- Sinais como `Tô forte`, `Tô fraco`, `Mata essa`, `Joga baixo`, `Pressiona` e `Não compra` passaram a ter consequência real na leitura do bot parceiro
+- O ciclo de memória, resolução e consumo dos sinais ficou mais claro
+- Sinais inválidos continuam sendo bloqueados quando não condizem com a mão real do jogador
 
-**Retention-oriented meta layer:**
-- `Seu Momento`, `Última Partida` e ranking passaram a funcionar melhor como camada de retenção leve
-- O produto começou a comunicar com mais clareza o que aconteceu recentemente e o que o jogador deve fazer em seguida
-- A fundação da camada meta foi estabelecida sem simular um sistema maior do que o backend realmente suporta hoje
+**Conselho de aposta semântico:**
+- `Pressiona` para pedido de Truco
+- `Eu pago` para aceitar aposta
+- `Não compra` para correr
+- `Dá para aumentar` para escalada
+- A UI agora comunica melhor o que o bot realmente queria fazer
 
-**Reconnect / idle-state cleanup:**
-- Redundâncias de CTA foram removidas
-- O reconnect ficou mais limpo e menos ruidoso
-- Superfícies operacionais passaram a aparecer quando agregam contexto real, e não só por estarem sempre ligadas
+**Fallback tático após aposta bloqueada:**
+- Quando o bot queria apostar mas a decisão pertencia ao humano, o gateway passou a pedir uma decisão card-only
+- Isso evita que o parceiro queime carta forte de forma burra depois de uma aposta bloqueada
 
-**Cross-surface coherence pass:**
-- Home, Lobby e Match foram harmonizados visualmente como partes do mesmo produto
-- O sistema de ouro / verde / dark premium ficou mais consistente
-- A MatchPage foi refinada para conversar melhor com Home e Lobby sem perder protagonismo da mesa
+**Bot com leitura de ameaça pública:**
+- O bot heurístico agora considera manilhas públicas e cartas ameaçadoras já reveladas
+- Situações decisivas com Zap ou manilha forte reduzem raise/bluff indevido
+- A telemetria do bot ganhou campos de ameaça pública para tornar a decisão mais auditável
 
-**Portfolio-grade product continuity:**
-- O projeto agora apresenta uma entrada mais honesta, uma continuidade melhor no Lobby e uma MatchPage mais alinhada ao restante da experiência
-- A fase não mudou a autoridade do backend, mas fortaleceu a forma como o produto é entrado, retomado e percebido
-- O resultado é um fluxo mais coeso, mais maduro e mais defensável como produto real de portfólio
+**Clareza visual do 2v2:**
+- A mesa diferencia melhor quando você pediu Truco, quando o parceiro iniciou o movimento e quando os rivais pressionaram
+- O fluxo visual de proposta do parceiro ficou integrado à MatchPage
+- O watermark de valor aceito em 3 / 6 / 9 / 12 recebeu ajuste fino de legibilidade
 
-→ [`docs/phases/phase-23.md`](docs/phases/phase-23.md)
+**Validação:**
+- 32 suites de teste passando
+- 231 testes passando
+- build backend passando
+- build frontend passando
+- validação manual do fluxo 2v2, sinais, proposta de parceiro e mesa 3 / 6 / 9 / 12
+
+→ [`docs/phases/phase-24.md`](docs/phases/phase-24.md)
 
 ---
 
@@ -175,6 +184,7 @@ curl http://localhost:8000/health/live
 | [`docs/architecture.md`](docs/architecture.md) | Domain-first, camadas, ADRs |
 | [`docs/api.md`](docs/api.md) | Eventos WebSocket Client↔Server |
 | [`docs/technical-debt.md`](docs/technical-debt.md) | DTs rastreadas com status |
+| [`docs/phases/phase-24.md`](docs/phases/phase-24.md) | 2v2 partner intelligence + betting flow hardening |
 | [`docs/phases/phase-23.md`](docs/phases/phase-23.md) | Meta layer / retention foundation + Home / Lobby / Match coherence pass |
 | [`docs/phases/phase-22.md`](docs/phases/phase-22.md) | Bot identity productization + match observability / premium surface finalization |
 | [`docs/phases/phase-21.md`](docs/phases/phase-21.md) | Match table productization + HUD / game-feel consolidation |
