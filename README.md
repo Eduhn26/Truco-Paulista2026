@@ -15,7 +15,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?style=flat-square&logo=socketdotio&logoColor=white)](https://socket.io/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Jest](https://img.shields.io/badge/231_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
+[![Jest](https://img.shields.io/badge/238_testes-passing-2ea44f?style=flat-square&logo=jest&logoColor=white)](https://jestjs.io/)
 
 <br/>
 
@@ -27,7 +27,7 @@
 
 ---
 
-Estudo prático de engenharia de software construído em **24 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
+Estudo prático de engenharia de software construído em **25 fases incrementais**. O objetivo não é só fazer funcionar — é fazer da forma certa: domínio isolado, boundaries explícitas, backend autoritativo, decisões defensáveis e evolução de produto real sobre base arquitetural sólida.
 
 O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regras de mão, hierarquia de cartas, lógica de equipes, transições de estado, aposta progressiva, mão de 11 e mão de ferro tornam o exercício de DDD não trivial. Nas fases finais, o projeto também passou a tratar o frontend como produto de verdade: Home mais honesta, Lobby com camada de continuidade, mesa premium, HUD legível, observabilidade lateral, identidade de bots, match surface defensável como hero screen de portfólio e uma camada 2v2 mais madura de sinais, conselho e proposta de aposta da dupla.
 
@@ -43,7 +43,7 @@ O Truco Paulista foi escolhido por ser genuinamente difícil de modelar — regr
 | **Autenticação** | Google OAuth · GitHub OAuth · auth token próprio |
 | **Frontend** | React · Vite · TypeScript · Tailwind CSS |
 | **Bots** | Adapter heurístico local + Python Bot Service (FastAPI) |
-| **Testes** | Jest · ts-jest — 32 suites · 231 testes · 0 falhas |
+| **Testes** | Jest · ts-jest — 33 suites · 238 testes · 0 falhas |
 | **Deploy** | Render · Docker multi-stage · GitHub Actions |
 
 ---
@@ -92,6 +92,31 @@ Os bots seguem o mesmo princípio: `BotDecisionPort` vive na Application, `Heuri
 | 22 | Bot identity productization + match observability / premium surface finalization | ✅ |
 | 23 | Meta layer / retention foundation + Home / Lobby / Match coherence pass | ✅ |
 | 24 | 2v2 partner intelligence + betting flow hardening | ✅ |
+| 25 | Live Python bot integration — async boundary, HTTP runtime, validation and fallback | ✅ |
+
+---
+
+
+## Fase 25 — Python Bot live no runtime
+
+A Fase 25 transformou o Python Bot Service de uma integração preparada para uma dependência realmente exercitada pelo jogo em runtime, sem acoplar o Gateway ao FastAPI.
+
+**Integração live:**
+- `BotDecisionPort` passou a aceitar decisões assíncronas
+- `PythonBotAdapter` passou a chamar `POST /decide` no fluxo real da partida
+- o contrato TypeScript ↔ Pydantic foi alinhado com contexto de 1v1, 2v2, aposta, sinais, placar e progresso da mão
+- respostas remotas passam por validação estrutural e semântica antes de chegar ao jogo
+- timeout, erro HTTP, payload inválido, ação ilegal, carta fora da mão e estado não suportado preservam o fallback heurístico
+
+**Validação end-to-end:**
+- o backend selecionou o adapter Python com `PYTHON_BOT_ENABLED=true`
+- decisões reais atravessaram NestJS → HTTP → FastAPI → NestJS
+- cartas retornadas pelo Python foram executadas pelo `GameGateway` em partida real
+- a suíte fechou com 33 suites e 238 testes passando
+
+A estratégia Python desta fase continua propositalmente mínima. Personalidades, heurísticas próprias e decisões táticas avançadas ficam para a Fase 26.
+
+→ [`docs/phase-25.md`](docs/phase-25.md)
 
 ---
 

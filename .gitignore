@@ -69,5 +69,10 @@ gerar-txt-tests.js
 gerar1-txt.js
 
 /src/generated/prisma
-d e v . d b  
- 
+d e v . d b
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

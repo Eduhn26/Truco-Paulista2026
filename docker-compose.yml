@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
     ports:
-      - '${POSTGRES_PORT:-51214}:5432'
+      - '${POSTGRES_PORT:-5433}:5432'
     volumes:
       - truco_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,6 +20,35 @@ services:
       timeout: 3s
       retries: 20
       start_period: 15s
+
+
+  python-bot-service:
+    build:
+      context: ./python-bot-service
+      dockerfile: Dockerfile
+    image: truco-paulista-python-bot
+    container_name: truco-python-bot
+    environment:
+      APP_ENV: ${PYTHON_BOT_APP_ENV:-development}
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: ${PYTHON_BOT_LOG_LEVEL:-INFO}
+      EXPOSE_DOCS: ${PYTHON_BOT_EXPOSE_DOCS:-true}
+    ports:
+      - '${PYTHON_BOT_PORT:-8000}:8000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
 
   migrate:
     build:
@@ -44,7 +73,7 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-dummy-github-client-secret}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:3000/auth/github/callback}
       PYTHON_BOT_ENABLED: ${PYTHON_BOT_ENABLED:-false}
-      PYTHON_BOT_BASE_URL: ${PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
+      PYTHON_BOT_BASE_URL: ${DOCKER_PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
       PYTHON_BOT_TIMEOUT_MS: ${PYTHON_BOT_TIMEOUT_MS:-1500}
       RUN_MIGRATIONS_ON_BOOT: 'false'
     command: ['npm', 'run', 'prisma:deploy']
@@ -72,7 +101,7 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-dummy-github-client-secret}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-http://localhost:3000/auth/github/callback}
       PYTHON_BOT_ENABLED: ${PYTHON_BOT_ENABLED:-false}
-      PYTHON_BOT_BASE_URL: ${PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
+      PYTHON_BOT_BASE_URL: ${DOCKER_PYTHON_BOT_BASE_URL:-http://python-bot-service:8000}
       PYTHON_BOT_TIMEOUT_MS: ${PYTHON_BOT_TIMEOUT_MS:-1500}
       RUN_MIGRATIONS_ON_BOOT: 'false'
     ports:

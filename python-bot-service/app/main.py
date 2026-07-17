@@ -14,6 +14,7 @@ from app.schemas import (
     BotDecisionResponse,
     HealthResponse,
     PassDecisionResponse,
+    PlayCardDecisionResponse,
 )
 
 logging.basicConfig(
@@ -264,8 +265,36 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
 
         return response
 
-    # NOTE: Returning an explicit fallback keeps unsupported situations observable
-    # without inventing ad-hoc response shapes outside the agreed contract.
+    can_attempt_play_card = (
+        payload.bet is None or payload.bet.available_actions.can_attempt_play_card
+    )
+
+    if can_attempt_play_card:
+        # NOTE: Phase 25 proves the live HTTP decision path with a deterministic card choice.
+        # Profile-aware strategy and richer heuristics remain intentionally scoped to Phase 26.
+        response = PlayCardDecisionResponse(
+            action='play-card',
+            card=payload.player.hand[0],
+        )
+
+        logger.info(
+            json.dumps(
+                {
+                    'layer': 'service',
+                    'component': 'python_bot_service',
+                    'event': 'decision_completed',
+                    'status': 'succeeded',
+                    'matchId': payload.match_id,
+                    'action': response.action,
+                    'card': response.card,
+                }
+            )
+        )
+
+        return response
+
+    # NOTE: Unsupported betting and special-hand decisions intentionally fall back to the
+    # TypeScript heuristic until the Python strategy engine is implemented in Phase 26.
     response = PassDecisionResponse(
         action='pass',
         reason='unsupported-state',

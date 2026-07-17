@@ -298,5 +298,5 @@ export type BotDecision =
     };
 
 export interface BotDecisionPort {
-  decide(context: BotDecisionContext): BotDecision;
+  decide(context: BotDecisionContext): Promise<BotDecision>;
 }

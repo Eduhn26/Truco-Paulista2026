@@ -106,7 +106,9 @@ const gameModuleLogger = new Logger('GameModule');
           return pythonBotAdapter;
         }
 
-        return heuristicBotAdapter;
+        return {
+          decide: async (context) => heuristicBotAdapter.decide(context),
+        };
       },
       inject: [PYTHON_BOT_CONFIG, HeuristicBotAdapter, PythonBotAdapter],
     },
