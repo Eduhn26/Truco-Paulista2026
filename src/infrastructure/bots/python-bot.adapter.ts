@@ -13,47 +13,24 @@ import { HeuristicBotAdapter } from '@game/infrastructure/bots/heuristic-bot.ada
 
 import { PYTHON_BOT_CONFIG, type PythonBotConfig } from './python-bot.config';
 
-type PythonBotDecisionRequest = {
-  matchId: string;
-  profile: 'balanced' | 'aggressive' | 'cautious';
-  viraRank: string;
-  currentRound: {
-    playerOneCard: string | null;
-    playerTwoCard: string | null;
-    finished: boolean;
-    result: 'P1' | 'P2' | 'TIE' | null;
-  } | null;
-  player: {
-    playerId: 'P1' | 'P2';
-    hand: string[];
-  };
-  partnerSignal?: {
-    fromSeatId: string;
-    kind: BotPartnerSignalKind;
-    strengthHint: 'none' | 'weak' | 'medium' | 'strong';
-    intent: 'save' | 'attack' | 'pressure' | 'neutral';
-    expiresAt: string;
-  };
-  bet?: {
-    currentValue: number;
-    betState: 'idle' | 'awaiting_response';
-    pendingValue: number | null;
-    requestedBy: 'P1' | 'P2' | null;
-    specialState: 'normal' | 'mao_de_onze' | 'mao_de_ferro';
-    specialDecisionPending: boolean;
-    availableActions: {
-      canRequestTruco: boolean;
-      canRaiseToSix: boolean;
-      canRaiseToNine: boolean;
-      canRaiseToTwelve: boolean;
-      canAcceptBet: boolean;
-      canDeclineBet: boolean;
-      canAcceptMaoDeOnze: boolean;
-      canDeclineMaoDeOnze: boolean;
-      canAttemptPlayCard: boolean;
-    };
-  };
-};
+type PythonBotDecisionRequest = Pick<
+  BotDecisionContext,
+  'matchId' | 'profile' | 'viraRank' | 'currentRound' | 'player'
+> &
+  Partial<
+    Pick<
+      BotDecisionContext,
+      | 'mode'
+      | 'actorSeatId'
+      | 'actorTeamId'
+      | 'partnerSeatId'
+      | 'partnerSignal'
+      | 'partnerSignals'
+      | 'bet'
+      | 'score'
+      | 'handProgress'
+    >
+  >;
 
 // Rationale is validated at the adapter boundary so the TypeScript decision contract stays closed.
 type PythonBotRationalePayload = {
@@ -68,7 +45,15 @@ type PythonBotDecisionResponse =
       rationale?: PythonBotRationalePayload;
     }
   | {
-      action: 'accept-bet' | 'decline-bet' | 'raise-to-six' | 'raise-to-nine' | 'raise-to-twelve';
+      action:
+        | 'accept-bet'
+        | 'decline-bet'
+        | 'request-truco'
+        | 'raise-to-six'
+        | 'raise-to-nine'
+        | 'raise-to-twelve'
+        | 'accept-mao-de-onze'
+        | 'decline-mao-de-onze';
       rationale?: PythonBotRationalePayload;
     }
   | {
@@ -259,13 +244,24 @@ export class PythonBotAdapter implements BotDecisionPort {
     return {
       matchId: context.matchId,
       profile: context.profile,
+      ...(context.mode ? { mode: context.mode } : {}),
+      ...(context.actorSeatId ? { actorSeatId: context.actorSeatId } : {}),
+      ...(context.actorTeamId ? { actorTeamId: context.actorTeamId } : {}),
+      ...(context.partnerSeatId !== undefined ? { partnerSeatId: context.partnerSeatId } : {}),
       viraRank: context.viraRank,
       currentRound: context.currentRound
         ? {
-            playerOneCard: context.currentRound.playerOneCard,
-            playerTwoCard: context.currentRound.playerTwoCard,
-            finished: context.currentRound.finished,
-            result: context.currentRound.result,
+            ...context.currentRound,
+            ...(context.currentRound.seatPlays
+              ? { seatPlays: { ...context.currentRound.seatPlays } }
+              : {}),
+            ...(context.currentRound.orderedPlays
+              ? {
+                  orderedPlays: context.currentRound.orderedPlays.map((play) => ({
+                    ...play,
+                  })),
+                }
+              : {}),
           }
         : null,
       player: {
@@ -275,29 +271,37 @@ export class PythonBotAdapter implements BotDecisionPort {
       ...(context.partnerSignal
         ? {
             partnerSignal: {
-              fromSeatId: context.partnerSignal.fromSeatId,
-              kind: context.partnerSignal.kind,
-              strengthHint: context.partnerSignal.strengthHint,
-              intent: context.partnerSignal.intent,
-              expiresAt: context.partnerSignal.expiresAt,
+              ...context.partnerSignal,
+            },
+          }
+        : {}),
+      ...(context.partnerSignals
+        ? {
+            partnerSignals: {
+              ...(context.partnerSignals.handMemory
+                ? { handMemory: { ...context.partnerSignals.handMemory } }
+                : {}),
+              ...(context.partnerSignals.roundTactic
+                ? { roundTactic: { ...context.partnerSignals.roundTactic } }
+                : {}),
+              ...(context.partnerSignals.betIntent
+                ? { betIntent: { ...context.partnerSignals.betIntent } }
+                : {}),
             },
           }
         : {}),
       ...(context.bet
         ? {
             bet: {
-              currentValue: context.bet.currentValue,
-              betState: context.bet.betState,
-              pendingValue: context.bet.pendingValue,
-              requestedBy: context.bet.requestedBy,
-              specialState: context.bet.specialState,
-              specialDecisionPending: context.bet.specialDecisionPending,
+              ...context.bet,
               availableActions: {
                 ...context.bet.availableActions,
               },
             },
           }
         : {}),
+      ...(context.score ? { score: { ...context.score } } : {}),
+      ...(context.handProgress ? { handProgress: { ...context.handProgress } } : {}),
     };
   }
 
@@ -381,9 +385,12 @@ export class PythonBotAdapter implements BotDecisionPort {
     if (
       candidate.action === 'accept-bet' ||
       candidate.action === 'decline-bet' ||
+      candidate.action === 'request-truco' ||
       candidate.action === 'raise-to-six' ||
       candidate.action === 'raise-to-nine' ||
-      candidate.action === 'raise-to-twelve'
+      candidate.action === 'raise-to-twelve' ||
+      candidate.action === 'accept-mao-de-onze' ||
+      candidate.action === 'decline-mao-de-onze'
     ) {
       return true;
     }
