@@ -62,7 +62,12 @@ type PythonBotDecisionResponse =
       rationale?: PythonBotRationalePayload;
     };
 
-type PythonBotFailureType = 'timeout' | 'http_error' | 'invalid_payload' | 'transport_error';
+type PythonBotFailureType =
+  | 'timeout'
+  | 'http_error'
+  | 'invalid_payload'
+  | 'unsupported_state'
+  | 'transport_error';
 
 type PythonBotFailureContext = {
   layer: 'infrastructure';
@@ -133,13 +138,10 @@ export class PythonBotAdapter implements BotDecisionPort {
   ) {}
 
   async decide(context: BotDecisionContext): Promise<BotDecision> {
-    // Synchronous callers receive the heuristic result with fallback provenance for telemetry.
-    const heuristicDecision = this.heuristicBotAdapter.decide(context);
-
-    return this.rebrandAsFallback(heuristicDecision);
+    return this.requestRemoteDecision(context);
   }
 
-  async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision> {
+  private async requestRemoteDecision(context: BotDecisionContext): Promise<BotDecision> {
     const heuristicDecision = this.heuristicBotAdapter.decide(context);
 
     if (!this.config.enabled) {
@@ -193,7 +195,23 @@ export class PythonBotAdapter implements BotDecisionPort {
         });
       }
 
-      const rawResponse = (await response.json()) as unknown;
+      let rawResponse: unknown;
+
+      try {
+        rawResponse = (await response.json()) as unknown;
+      } catch {
+        return this.fallbackFromFailure(context, heuristicDecision, {
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'python_bot_response_invalid',
+          status: 'failed',
+          profile: context.profile,
+          timeoutMs: this.config.timeoutMs,
+          url: requestUrl,
+          errorType: 'invalid_payload',
+          errorMessage: 'Python bot service returned invalid JSON.',
+        });
+      }
 
       if (!this.isValidRemoteResponse(rawResponse)) {
         return this.fallbackFromFailure(context, heuristicDecision, {
@@ -206,6 +224,21 @@ export class PythonBotAdapter implements BotDecisionPort {
           url: requestUrl,
           errorType: 'invalid_payload',
           errorMessage: 'Python bot service returned an invalid decision payload.',
+        });
+      }
+
+      const semanticRejection = this.getRemoteDecisionRejection(context, rawResponse);
+
+      if (semanticRejection) {
+        return this.fallbackFromFailure(context, heuristicDecision, {
+          layer: 'infrastructure',
+          component: 'python_bot_adapter',
+          event: 'python_bot_response_invalid',
+          status: 'failed',
+          profile: context.profile,
+          timeoutMs: this.config.timeoutMs,
+          url: requestUrl,
+          ...semanticRejection,
         });
       }
 
@@ -404,6 +437,82 @@ export class PythonBotAdapter implements BotDecisionPort {
     }
 
     return false;
+  }
+
+  private getRemoteDecisionRejection(
+    context: BotDecisionContext,
+    decision: PythonBotDecisionResponse,
+  ): Pick<PythonBotFailureContext, 'errorType' | 'errorMessage'> | null {
+    if (decision.action === 'pass') {
+      if (decision.reason === 'unsupported-state') {
+        return {
+          errorType: 'unsupported_state',
+          errorMessage: 'Python bot service does not support the current decision state.',
+        };
+      }
+
+      if (decision.reason === 'empty-hand' && context.player.hand.length > 0) {
+        return {
+          errorType: 'invalid_payload',
+          errorMessage: 'Python bot service returned empty-hand for a non-empty hand.',
+        };
+      }
+
+      if (decision.reason === 'missing-round' && context.currentRound !== null) {
+        return {
+          errorType: 'invalid_payload',
+          errorMessage: 'Python bot service returned missing-round while a round exists.',
+        };
+      }
+
+      return null;
+    }
+
+    if (decision.action === 'play-card') {
+      if (!context.player.hand.includes(decision.card)) {
+        return {
+          errorType: 'invalid_payload',
+          errorMessage: `Python bot service selected a card outside the bot hand: ${decision.card}.`,
+        };
+      }
+
+      if (context.bet && !context.bet.availableActions.canAttemptPlayCard) {
+        return {
+          errorType: 'invalid_payload',
+          errorMessage: 'Python bot service attempted to play a card while card play is unavailable.',
+        };
+      }
+
+      return null;
+    }
+
+    const availableActions = context.bet?.availableActions;
+
+    if (!availableActions) {
+      return {
+        errorType: 'invalid_payload',
+        errorMessage: `Python bot service returned ${decision.action} without betting context.`,
+      };
+    }
+
+    const isAvailable =
+      (decision.action === 'request-truco' && availableActions.canRequestTruco) ||
+      (decision.action === 'raise-to-six' && availableActions.canRaiseToSix) ||
+      (decision.action === 'raise-to-nine' && availableActions.canRaiseToNine) ||
+      (decision.action === 'raise-to-twelve' && availableActions.canRaiseToTwelve) ||
+      (decision.action === 'accept-bet' && availableActions.canAcceptBet) ||
+      (decision.action === 'decline-bet' && availableActions.canDeclineBet) ||
+      (decision.action === 'accept-mao-de-onze' && availableActions.canAcceptMaoDeOnze) ||
+      (decision.action === 'decline-mao-de-onze' && availableActions.canDeclineMaoDeOnze);
+
+    if (!isAvailable) {
+      return {
+        errorType: 'invalid_payload',
+        errorMessage: `Python bot service returned an unavailable action: ${decision.action}.`,
+      };
+    }
+
+    return null;
   }
 
   private isValidRationalePayload(value: unknown): boolean {
