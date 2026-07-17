@@ -147,7 +147,7 @@ export class PythonBotAdapter implements BotDecisionPort {
     private readonly heuristicBotAdapter: HeuristicBotAdapter,
   ) {}
 
-  decide(context: BotDecisionContext): BotDecision {
+  async decide(context: BotDecisionContext): Promise<BotDecision> {
     // Synchronous callers receive the heuristic result with fallback provenance for telemetry.
     const heuristicDecision = this.heuristicBotAdapter.decide(context);
 

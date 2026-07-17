@@ -961,8 +961,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
   }
 
-  private resolveMixedTeamFallbackCard(botTurnContext: BotTurnDecisionContext): string | null {
-    const cardOnlyDecision = this.botDecisionPort.decide(
+  private async resolveMixedTeamFallbackCard(
+    botTurnContext: BotTurnDecisionContext,
+  ): Promise<string | null> {
+    const cardOnlyDecision = await this.botDecisionPort.decide(
       this.buildCardOnlyBotDecisionContext(botTurnContext.context),
     );
 
@@ -4364,7 +4366,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return false;
     }
 
-    const decision = this.botDecisionPort.decide(botTurnContext.context);
+    const decision = await this.botDecisionPort.decide(botTurnContext.context);
 
     if (
       currentHand.specialState === 'mao_de_onze' &&
@@ -4488,7 +4490,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       decision.action === 'play-card' && decision.card
         ? decision.card
         : isMixedTeamBetInitiativeFallback
-          ? this.resolveMixedTeamFallbackCard(botTurnContext)
+          ? await this.resolveMixedTeamFallbackCard(botTurnContext)
           : (botTurnContext.context.player.hand[0] ?? null);
 
     if (

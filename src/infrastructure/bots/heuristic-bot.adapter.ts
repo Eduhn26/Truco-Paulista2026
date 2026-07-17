@@ -4,7 +4,6 @@ import type {
   BotDecision,
   BotDecisionContext,
   BotDecisionMetadata,
-  BotDecisionPort,
   BotDecisionStrategy,
   BotDecisionTacticalTelemetry,
   BotDecisionBetTelemetry,
@@ -158,7 +157,7 @@ const PARTNER_SIGNAL_INITIATIVE_EXTRA_BOOST_BY_KIND: Partial<Record<BotPartnerSi
   };
 
 @Injectable()
-export class HeuristicBotAdapter implements BotDecisionPort {
+export class HeuristicBotAdapter {
   decide(context: BotDecisionContext): BotDecision {
     const maoDeOnzeDecision = this.decideMaoDeOnze(context);
     if (maoDeOnzeDecision) {
