@@ -8,6 +8,7 @@ from app.schemas import (
     BotProfile,
 )
 from app.strategy.card_rules import hand_strength_score
+from app.strategy.signals import signal_for_scope
 
 BetAction = Literal[
     'accept-bet',
@@ -57,7 +58,9 @@ class BettingStrategy:
 
         hand_strength = hand_strength_score(payload.player.hand, payload.vira_rank)
         effective_strength = self._clamp(
-            hand_strength + self._progress_adjustment(payload)
+            hand_strength
+            + self._progress_adjustment(payload)
+            + self._partner_signal_adjustment(payload, initiative=False)
         )
         thresholds = THRESHOLDS[payload.profile]
 
@@ -115,8 +118,9 @@ class BettingStrategy:
         hand_strength = hand_strength_score(payload.player.hand, payload.vira_rank)
         progress_adjustment = self._progress_adjustment(payload)
         score_adjustment = self._score_adjustment(payload)
+        signal_adjustment = self._partner_signal_adjustment(payload, initiative=True)
         effective_strength = self._clamp(
-            hand_strength + progress_adjustment + score_adjustment
+            hand_strength + progress_adjustment + score_adjustment + signal_adjustment
         )
         threshold = THRESHOLDS[payload.profile].initiative
 
@@ -188,6 +192,55 @@ class BettingStrategy:
         if progress.rounds_tied > 0:
             return 0.03
         return 0.0
+
+    def _partner_signal_adjustment(
+        self,
+        payload: BotDecisionRequest,
+        *,
+        initiative: bool,
+    ) -> float:
+        if payload.mode != '2v2':
+            return 0.0
+
+        hand_memory = signal_for_scope(payload, 'hand-memory')
+        bet_intent = signal_for_scope(payload, 'bet-intent')
+        signals = [signal for signal in (hand_memory, bet_intent) if signal is not None]
+
+        base_adjustments = {
+            'manilha-zap': 0.34,
+            'manilha-copas': 0.26,
+            'manilha-espadilha': 0.16,
+            'manilha-ouros': 0.08,
+            'strong-manilha': 0.28,
+            'has-manilha': 0.14,
+            'weak-manilha': 0.06,
+            'no-manilha': -0.10,
+            'strong-hand': 0.18,
+            'weak-hand': -0.16,
+            'pressure': 0.10,
+            'avoid-bet': -0.22,
+        }
+
+        initiative_adjustments = {
+            'manilha-zap': 0.06,
+            'manilha-copas': 0.04,
+            'manilha-espadilha': 0.02,
+            'strong-manilha': 0.04,
+            'has-manilha': 0.02,
+            'strong-hand': 0.03,
+            'no-manilha': -0.05,
+            'pressure': 0.05,
+            'avoid-bet': -0.08,
+        }
+
+        adjustment = 0.0
+
+        for signal in signals:
+            adjustment += base_adjustments.get(signal.kind, 0.0)
+            if initiative:
+                adjustment += initiative_adjustments.get(signal.kind, 0.0)
+
+        return adjustment
 
     def _score_adjustment(self, payload: BotDecisionRequest) -> float:
         score = payload.score

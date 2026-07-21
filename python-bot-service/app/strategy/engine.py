@@ -15,6 +15,7 @@ from app.strategy.card_rules import (
     sort_cards,
 )
 from app.strategy.mao_de_onze import MaoDeOnzeStrategy
+from app.strategy.teamwork import TeamworkStrategy
 from app.strategy.profiles import CardSelectionMode, ProfilePolicy, policy_for
 
 
@@ -41,6 +42,7 @@ class StrategyEngine:
     def __init__(self) -> None:
         self.betting = BettingStrategy()
         self.mao_de_onze = MaoDeOnzeStrategy()
+        self.teamwork = TeamworkStrategy()
 
     def decide(self, payload: BotDecisionRequest) -> BotDecisionResponse:
         mao_de_onze_decision = self.mao_de_onze.decide(payload)
@@ -76,27 +78,33 @@ class StrategyEngine:
         hand_strength = hand_strength_score(hand, payload.vira_rank)
         tactical = self._build_tactical_context(payload, hand_strength)
         policy = policy_for(payload.profile)
-        threat_card = self._resolve_public_threat_card(payload)
+        teamwork = self.teamwork.select(payload, ordered_hand, hand_strength)
 
-        if threat_card is None:
-            selection = self._resolve_opening_selection(policy, tactical)
-            card = self._select_card(ordered_hand, selection)
-            strategy = f'opening-{selection}'
+        if teamwork is not None:
+            card = teamwork.card
+            strategy = teamwork.strategy
         else:
-            winning_cards = [
-                card
-                for card in ordered_hand
-                if compare_cards(card, threat_card, payload.vira_rank) > 0
-            ]
+            threat_card = self._resolve_public_threat_card(payload)
 
-            if winning_cards:
-                selection = self._resolve_winning_selection(policy, tactical)
-                card = self._select_card(winning_cards, selection)
-                strategy = f'response-winning-{selection}'
-            else:
-                selection = policy.losing_response
+            if threat_card is None:
+                selection = self._resolve_opening_selection(policy, tactical)
                 card = self._select_card(ordered_hand, selection)
-                strategy = f'response-losing-{selection}'
+                strategy = f'opening-{selection}'
+            else:
+                winning_cards = [
+                    card
+                    for card in ordered_hand
+                    if compare_cards(card, threat_card, payload.vira_rank) > 0
+                ]
+
+                if winning_cards:
+                    selection = self._resolve_winning_selection(policy, tactical)
+                    card = self._select_card(winning_cards, selection)
+                    strategy = f'response-winning-{selection}'
+                else:
+                    selection = policy.losing_response
+                    card = self._select_card(ordered_hand, selection)
+                    strategy = f'response-losing-{selection}'
 
         rationale = BotDecisionRationalePayload.model_validate(
             {
