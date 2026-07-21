@@ -182,8 +182,6 @@ async def unexpected_exception_handler(request: Request, exc: Exception) -> JSON
 
 @app.get('/health/live', response_model=HealthResponse)
 def get_liveness() -> HealthResponse:
-    # NOTE: Liveness must stay dependency-free so process health remains distinct
-    # from any future downstream integration failures.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -193,9 +191,6 @@ def get_liveness() -> HealthResponse:
 
 @app.get('/health/ready', response_model=HealthResponse)
 def get_readiness() -> HealthResponse:
-    # NOTE: Readiness is intentionally identical for now because this auxiliary
-    # service still has no downstream dependency. The endpoint remains stable
-    # for future hardening without breaking callers now.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -265,46 +260,20 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
 
         return response
 
-    can_attempt_play_card = (
-        payload.bet is None or payload.bet.available_actions.can_attempt_play_card
-    )
+    response = strategy_engine.decide(payload)
+    completed_event: dict[str, Any] = {
+        'layer': 'service',
+        'component': 'python_bot_service',
+        'event': 'decision_completed',
+        'status': 'succeeded',
+        'matchId': payload.match_id,
+        'action': response.action,
+    }
 
-    if can_attempt_play_card:
-        response = strategy_engine.decide_card(payload)
+    if response.action == 'play-card':
+        completed_event['card'] = response.card
+    elif response.action == 'pass':
+        completed_event['reason'] = response.reason
 
-        logger.info(
-            json.dumps(
-                {
-                    'layer': 'service',
-                    'component': 'python_bot_service',
-                    'event': 'decision_completed',
-                    'status': 'succeeded',
-                    'matchId': payload.match_id,
-                    'action': response.action,
-                    'card': response.card,
-                }
-            )
-        )
-
-        return response
-
-    response = PassDecisionResponse(
-        action='pass',
-        reason='unsupported-state',
-    )
-
-    logger.info(
-        json.dumps(
-            {
-                'layer': 'service',
-                'component': 'python_bot_service',
-                'event': 'decision_completed',
-                'status': 'succeeded',
-                'matchId': payload.match_id,
-                'action': response.action,
-                'reason': response.reason,
-            }
-        )
-    )
-
+    logger.info(json.dumps(completed_event))
     return response

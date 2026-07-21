@@ -3,14 +3,18 @@ from dataclasses import dataclass
 from app.schemas import (
     BotDecisionRationalePayload,
     BotDecisionRequest,
+    BotDecisionResponse,
+    PassDecisionResponse,
     PlayCardDecisionResponse,
 )
+from app.strategy.betting import BettingStrategy
 from app.strategy.card_rules import (
     card_strength_key,
     compare_cards,
     hand_strength_score,
     sort_cards,
 )
+from app.strategy.mao_de_onze import MaoDeOnzeStrategy
 from app.strategy.profiles import CardSelectionMode, ProfilePolicy, policy_for
 
 
@@ -34,6 +38,32 @@ class TacticalContext:
 
 
 class StrategyEngine:
+    def __init__(self) -> None:
+        self.betting = BettingStrategy()
+        self.mao_de_onze = MaoDeOnzeStrategy()
+
+    def decide(self, payload: BotDecisionRequest) -> BotDecisionResponse:
+        mao_de_onze_decision = self.mao_de_onze.decide(payload)
+        if mao_de_onze_decision is not None:
+            return mao_de_onze_decision
+
+        bet_response = self.betting.decide_response(payload)
+        if bet_response is not None:
+            return bet_response
+
+        bet_initiative = self.betting.decide_initiative(payload)
+        if bet_initiative is not None:
+            return bet_initiative
+
+        can_play = payload.bet is None or payload.bet.available_actions.can_attempt_play_card
+        if can_play:
+            return self.decide_card(payload)
+
+        return PassDecisionResponse(
+            action='pass',
+            reason='unsupported-state',
+        )
+
     def decide_card(self, payload: BotDecisionRequest) -> PlayCardDecisionResponse:
         hand = payload.player.hand
 
