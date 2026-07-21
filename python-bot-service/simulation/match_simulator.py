@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from dataclasses import dataclass
 from random import Random
@@ -458,6 +459,7 @@ class HeadlessMatchSimulator:
             )
         )
         decision = self.engine.decide(payload)
+        selected_card = decision.card if decision.action == 'play-card' else None
         strategy = decision.rationale.strategy if decision.rationale else None
         hand_strength = (
             decision.rationale.hand_strength
@@ -482,10 +484,30 @@ class HeadlessMatchSimulator:
                 round_index=round_index,
                 player_id=player,
                 profile=self._profile(player),
+                vira_rank=vira_rank,
+                player_hand_before=json.dumps(
+                    hands[player],
+                    separators=(',', ':'),
+                ),
+                player_one_round_card=round_cards['P1'],
+                player_two_round_card=round_cards['P2'],
+                rounds_won_by_me=self._round_wins(round_results, player),
+                rounds_won_by_opponent=self._round_wins(
+                    round_results,
+                    self._opponent(player),
+                ),
+                rounds_tied=round_results.count('TIE'),
+                points_to_win=self.points_to_win,
+                current_value=bet.current_value,
+                pending_value=bet.pending_value,
+                bet_state=bet.bet_state,
+                requested_by=bet.requested_by,
+                special_state=special_state,
+                special_decision_pending=special_decision_pending,
                 action=decision.action,
+                selected_card=selected_card,
                 strategy=strategy,
                 hand_strength=hand_strength,
-                current_value=bet.current_value,
                 player_one_score=scores['P1'],
                 player_two_score=scores['P2'],
             )

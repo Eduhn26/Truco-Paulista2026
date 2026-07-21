@@ -46,6 +46,7 @@ class SimulationTelemetryTest(unittest.TestCase):
         second_match_ids = [match.match_id for match in second.matches]
 
         self.assertEqual(first_match_ids, second_match_ids)
+        self.assertEqual(first.decisions, second.decisions)
         self.assertEqual(len(first_match_ids), len(set(first_match_ids)))
 
         match_ids = set(first_match_ids)
@@ -78,6 +79,44 @@ class SimulationTelemetryTest(unittest.TestCase):
             [decision.decision_index for decision in first_match_decisions],
             list(range(len(first_match_decisions))),
         )
+
+    def test_decisions_capture_the_state_before_the_action(self) -> None:
+        result = run_series(
+            'aggressive',
+            'balanced',
+            games=3,
+            seed=61,
+        )
+
+        self.assertGreater(len(result.decisions), 0)
+
+        for decision in result.decisions:
+            hand = json.loads(decision.player_hand_before)
+
+            self.assertGreater(len(hand), 0)
+            self.assertIn(decision.vira_rank, (
+                '4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3',
+            ))
+            self.assertGreaterEqual(decision.rounds_won_by_me, 0)
+            self.assertGreaterEqual(decision.rounds_won_by_opponent, 0)
+            self.assertGreaterEqual(decision.rounds_tied, 0)
+            self.assertLessEqual(
+                decision.rounds_won_by_me
+                + decision.rounds_won_by_opponent
+                + decision.rounds_tied,
+                2,
+            )
+            self.assertEqual(decision.points_to_win, 12)
+
+            if decision.action == 'play-card':
+                self.assertIsNotNone(decision.selected_card)
+                self.assertIn(decision.selected_card, hand)
+            else:
+                self.assertIsNone(decision.selected_card)
+
+            if decision.bet_state == 'awaiting_response':
+                self.assertIsNotNone(decision.pending_value)
+                self.assertIsNotNone(decision.requested_by)
 
     def test_hand_records_rebuild_the_final_match_score(self) -> None:
         result = run_series(
@@ -178,6 +217,10 @@ class SimulationTelemetryTest(unittest.TestCase):
             self.assertIn('points_awarded', hands[0])
             self.assertIn('hand_id', decisions[0])
             self.assertIn('decision_id', decisions[0])
+            self.assertIn('player_hand_before', decisions[0])
+            self.assertIn('selected_card', decisions[0])
+            self.assertIn('pending_value', decisions[0])
+            self.assertIn('special_state', decisions[0])
             self.assertIn('analysis', summary)
             self.assertIn('profiles', summary['analysis'])
 

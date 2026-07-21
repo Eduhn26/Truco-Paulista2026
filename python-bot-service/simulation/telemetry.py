@@ -14,10 +14,24 @@ class DecisionRecord:
     round_index: int
     player_id: str
     profile: str
+    vira_rank: str
+    player_hand_before: str
+    player_one_round_card: str | None
+    player_two_round_card: str | None
+    rounds_won_by_me: int
+    rounds_won_by_opponent: int
+    rounds_tied: int
+    points_to_win: int
+    current_value: int
+    pending_value: int | None
+    bet_state: str
+    requested_by: str | None
+    special_state: str
+    special_decision_pending: bool
     action: str
+    selected_card: str | None
     strategy: str | None
     hand_strength: float | None
-    current_value: int
     player_one_score: int
     player_two_score: int
 
