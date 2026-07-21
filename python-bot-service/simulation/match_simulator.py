@@ -57,15 +57,18 @@ class HeadlessMatchSimulator:
     def simulate(self) -> MatchResult:
         scores = {'P1': 0, 'P2': 0}
         hands_played = 0
+        starter = self.rng.choice(('P1', 'P2'))
 
         while max(scores.values()) < self.points_to_win:
             if hands_played >= 200:
                 raise RuntimeError('Simulation exceeded the hand limit.')
 
-            starter = 'P1' if hands_played % 2 == 0 else 'P2'
             outcome = self._simulate_hand(scores, starter, hands_played)
             scores[outcome.winner] += outcome.points
             hands_played += 1
+
+            if max(scores.values()) < self.points_to_win:
+                starter = resolve_next_hand_starter(outcome.winner)
 
         winner = 'P1' if scores['P1'] >= self.points_to_win else 'P2'
 
@@ -125,13 +128,18 @@ class HeadlessMatchSimulator:
 
             bet.current_value = 3
 
+        round_starter = starter
+
         for round_index in range(3):
             round_cards: dict[PlayerId, str | None] = {
                 'P1': None,
                 'P2': None,
             }
 
-            for player in (starter, self._opponent(starter)):
+            for player in (
+                round_starter,
+                self._opponent(round_starter),
+            ):
                 if special_state == 'normal':
                     bet_outcome = self._play_with_betting(
                         player=player,
@@ -173,6 +181,11 @@ class HeadlessMatchSimulator:
                     winner=winner,
                     points=bet.current_value,
                 )
+
+            round_starter = resolve_next_round_starter(
+                result,
+                round_starter,
+            )
 
         winner = resolve_hand_winner(round_results)
         if winner is None:
@@ -573,6 +586,21 @@ class HeadlessMatchSimulator:
 
     def _opponent(self, player: PlayerId) -> PlayerId:
         return 'P2' if player == 'P1' else 'P1'
+
+
+def resolve_next_hand_starter(hand_winner: PlayerId) -> PlayerId:
+    return 'P2' if hand_winner == 'P1' else 'P1'
+
+
+def resolve_next_round_starter(
+    round_result: str,
+    current_starter: PlayerId,
+) -> PlayerId:
+    if round_result == 'P1':
+        return 'P1'
+    if round_result == 'P2':
+        return 'P2'
+    return current_starter
 
 
 def resolve_hand_winner(round_results: list[str]) -> str | None:

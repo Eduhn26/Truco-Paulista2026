@@ -2,7 +2,12 @@ import unittest
 from random import Random
 
 from simulation.deck import FULL_DECK, deal
-from simulation.match_simulator import HeadlessMatchSimulator, resolve_hand_winner
+from simulation.match_simulator import (
+    HeadlessMatchSimulator,
+    resolve_hand_winner,
+    resolve_next_hand_starter,
+    resolve_next_round_starter,
+)
 from simulation.runner import run_series
 
 
@@ -25,6 +30,30 @@ class SimulationTest(unittest.TestCase):
         self.assertEqual(resolve_hand_winner(['P1', 'P2', 'TIE']), 'P1')
         self.assertEqual(resolve_hand_winner(['P1', 'P2', 'P2']), 'P2')
         self.assertEqual(resolve_hand_winner(['TIE', 'TIE', 'TIE']), 'P1')
+
+    def test_round_winner_opens_the_next_round(self) -> None:
+        self.assertEqual(
+            resolve_next_round_starter('P1', 'P2'),
+            'P1',
+        )
+        self.assertEqual(
+            resolve_next_round_starter('P2', 'P1'),
+            'P2',
+        )
+
+    def test_tied_round_keeps_the_same_opener(self) -> None:
+        self.assertEqual(
+            resolve_next_round_starter('TIE', 'P1'),
+            'P1',
+        )
+        self.assertEqual(
+            resolve_next_round_starter('TIE', 'P2'),
+            'P2',
+        )
+
+    def test_hand_loser_opens_the_next_hand(self) -> None:
+        self.assertEqual(resolve_next_hand_starter('P1'), 'P2')
+        self.assertEqual(resolve_next_hand_starter('P2'), 'P1')
 
     def test_match_is_reproducible_with_the_same_seed(self) -> None:
         first = HeadlessMatchSimulator(

@@ -143,6 +143,34 @@ class BettingStrategyTest(unittest.TestCase):
         self.assertEqual(response.action, 'request-truco')
         self.assertEqual(response.rationale.strategy, 'bet-initiative-value')
 
+    def test_aggressive_profile_holds_truco_with_a_marginal_hand(self) -> None:
+        response = self.engine.decide(
+            build_request(
+                profile='aggressive',
+                hand=['3O', '7O', '4O'],
+                bet_state='idle',
+                can_request_truco=True,
+                can_accept_bet=False,
+                can_decline_bet=False,
+                can_attempt_play_card=True,
+                rounds_won_by_me=1,
+                current_round_index=1,
+            )
+        )
+
+        self.assertEqual(response.action, 'play-card')
+
+    def test_aggressive_profile_declines_a_marginal_bet(self) -> None:
+        response = self.engine.decide(
+            build_request(
+                profile='aggressive',
+                hand=['AO', '7O', '4O'],
+            )
+        )
+
+        self.assertEqual(response.action, 'decline-bet')
+        self.assertEqual(response.rationale.strategy, 'bet-decline')
+
     def test_does_not_request_truco_before_any_round_information(self) -> None:
         response = self.engine.decide(
             build_request(

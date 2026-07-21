@@ -29,7 +29,7 @@ class BetThresholds:
 
 
 THRESHOLDS: dict[BotProfile, BetThresholds] = {
-    'aggressive': BetThresholds(0.28, 0.65, 0.60, 0.38),
+    'aggressive': BetThresholds(0.36, 0.74, 0.68, 0.46),
     'balanced': BetThresholds(0.50, 0.84, 0.72, 0.55),
     'cautious': BetThresholds(0.70, 0.97, 0.85, 0.72),
 }

@@ -27,7 +27,7 @@ PROFILE_POLICIES: dict[BotProfile, ProfilePolicy] = {
         neutral_opening='middle',
         pressure_opening='strongest',
         neutral_winning_response='weakest',
-        pressure_winning_response='strongest',
+        pressure_winning_response='weakest',
         losing_response='middle',
     ),
     'cautious': ProfilePolicy(

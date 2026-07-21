@@ -114,7 +114,7 @@ class StrategyEngineTest(unittest.TestCase):
         self.assertEqual(response.card, 'AO')
         self.assertEqual(response.rationale.strategy, 'response-winning-weakest')
 
-    def test_aggressive_profile_uses_strongest_winner_when_behind(self) -> None:
+    def test_aggressive_profile_preserves_extra_strength_when_behind(self) -> None:
         response = self.engine.decide_card(
             build_request(
                 profile='aggressive',
@@ -124,8 +124,8 @@ class StrategyEngineTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(response.card, '3O')
-        self.assertEqual(response.rationale.strategy, 'response-winning-strongest')
+        self.assertEqual(response.card, 'AO')
+        self.assertEqual(response.rationale.strategy, 'response-winning-weakest')
 
     def test_balanced_profile_preserves_manilha_when_regular_card_can_win(self) -> None:
         response = self.engine.decide_card(
