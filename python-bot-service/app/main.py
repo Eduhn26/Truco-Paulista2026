@@ -14,8 +14,8 @@ from app.schemas import (
     BotDecisionResponse,
     HealthResponse,
     PassDecisionResponse,
-    PlayCardDecisionResponse,
 )
+from app.strategy.engine import StrategyEngine
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -73,6 +73,8 @@ app = FastAPI(
     openapi_url='/openapi.json' if settings.docs_enabled else None,
     lifespan=lifespan,
 )
+
+strategy_engine = StrategyEngine()
 
 
 @app.middleware('http')
@@ -219,8 +221,8 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
         )
     )
 
-    # NOTE: Phase 15.B locks the external contract first.
-    # Real strategy comes later, after the HTTP boundary is stable enough for the adapter.
+    # Keep transport-level pass reasons explicit before delegating card choice
+    # to the strategy engine.
     if len(payload.player.hand) == 0:
         response = PassDecisionResponse(
             action='pass',
@@ -270,12 +272,7 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
     )
 
     if can_attempt_play_card:
-        # NOTE: Phase 25 proves the live HTTP decision path with a deterministic card choice.
-        # Profile-aware strategy and richer heuristics remain intentionally scoped to Phase 26.
-        response = PlayCardDecisionResponse(
-            action='play-card',
-            card=payload.player.hand[0],
-        )
+        response = strategy_engine.decide_card(payload)
 
         logger.info(
             json.dumps(
