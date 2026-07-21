@@ -2,11 +2,21 @@ import csv
 import json
 import tempfile
 import unittest
+from dataclasses import fields
 from pathlib import Path
 
 from simulation.analytics import analyze_series
-from simulation.exporter import export_series
-from simulation.runner import run_series
+from simulation.exporter import (
+    DATASET_SCHEMA_VERSION,
+    DECISION_COLUMNS,
+    HAND_COLUMNS,
+    MATCH_COLUMNS,
+    export_round_robin,
+    export_series,
+)
+from simulation.results import SeriesResult
+from simulation.runner import run_round_robin, run_series
+from simulation.telemetry import DecisionRecord, HandRecord, MatchRecord
 
 
 class SimulationTelemetryTest(unittest.TestCase):
@@ -223,6 +233,113 @@ class SimulationTelemetryTest(unittest.TestCase):
             self.assertIn('special_state', decisions[0])
             self.assertIn('analysis', summary)
             self.assertIn('profiles', summary['analysis'])
+            self.assertEqual(
+                summary['schemaVersion'],
+                DATASET_SCHEMA_VERSION,
+            )
+            self.assertEqual(
+                summary['rowCounts'],
+                {
+                    'matches': len(result.matches),
+                    'hands': len(result.hands),
+                    'decisions': len(result.decisions),
+                },
+            )
+            self.assertEqual(
+                summary['simulationConfig'],
+                {
+                    'simulationRunId': result.simulation_run_id,
+                    'profileOne': result.profile_one,
+                    'profileTwo': result.profile_two,
+                    'games': result.games,
+                    'seed': result.seed,
+                },
+            )
+
+    def test_empty_export_keeps_the_dataset_schema(self) -> None:
+        result = SeriesResult(
+            simulation_run_id='empty-series',
+            profile_one='aggressive',
+            profile_two='balanced',
+            games=0,
+            seed=1,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = export_series(result, directory)
+
+            expected_columns = {
+                'matches': list(MATCH_COLUMNS),
+                'hands': list(HAND_COLUMNS),
+                'decisions': list(DECISION_COLUMNS),
+            }
+
+            for name, columns in expected_columns.items():
+                with paths[name].open(
+                    newline='',
+                    encoding='utf-8',
+                ) as file:
+                    reader = csv.DictReader(file)
+                    self.assertEqual(reader.fieldnames, columns)
+                    self.assertEqual(list(reader), [])
+
+            summary = json.loads(
+                Path(paths['summary']).read_text(encoding='utf-8')
+            )
+
+            self.assertEqual(
+                summary['rowCounts'],
+                {
+                    'matches': 0,
+                    'hands': 0,
+                    'decisions': 0,
+                },
+            )
+
+    def test_export_columns_match_the_telemetry_records(self) -> None:
+        self.assertEqual(
+            MATCH_COLUMNS,
+            tuple(field.name for field in fields(MatchRecord)),
+        )
+        self.assertEqual(
+            HAND_COLUMNS,
+            tuple(field.name for field in fields(HandRecord)),
+        )
+        self.assertEqual(
+            DECISION_COLUMNS,
+            tuple(field.name for field in fields(DecisionRecord)),
+        )
+
+    def test_round_robin_summary_reports_export_row_counts(self) -> None:
+        results = run_round_robin(games=1, seed=91)
+
+        with tempfile.TemporaryDirectory() as directory:
+            summary_path = export_round_robin(results, directory)
+            summary = json.loads(
+                Path(summary_path).read_text(encoding='utf-8')
+            )
+
+            self.assertEqual(
+                summary['schemaVersion'],
+                DATASET_SCHEMA_VERSION,
+            )
+            self.assertEqual(
+                summary['rowCounts'],
+                {
+                    'series': len(results),
+                    'matches': sum(len(result.matches) for result in results),
+                    'hands': sum(len(result.hands) for result in results),
+                    'decisions': sum(
+                        len(result.decisions) for result in results
+                    ),
+                },
+            )
+            self.assertTrue(
+                all(
+                    series['schemaVersion'] == DATASET_SCHEMA_VERSION
+                    for series in summary['series']
+                )
+            )
 
 
 if __name__ == '__main__':
