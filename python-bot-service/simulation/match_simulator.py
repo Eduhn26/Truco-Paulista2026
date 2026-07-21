@@ -43,6 +43,8 @@ class HeadlessMatchSimulator:
         seed: int = 1,
         points_to_win: int = 12,
         match_index: int = 0,
+        simulation_run_id: str | None = None,
+        match_id: str | None = None,
     ) -> None:
         self.profile_one = profile_one
         self.profile_two = profile_two
@@ -50,6 +52,10 @@ class HeadlessMatchSimulator:
         self.rng = Random(seed)
         self.seed = seed
         self.match_index = match_index
+        self.simulation_run_id = simulation_run_id or f'simulation-seed-{seed}'
+        self.match_id = match_id or (
+            f'{self.simulation_run_id}-match-{match_index:06d}'
+        )
         self.engine = StrategyEngine()
         self.metrics = DecisionMetrics()
         self.decisions: list[DecisionRecord] = []
@@ -73,6 +79,8 @@ class HeadlessMatchSimulator:
         winner = 'P1' if scores['P1'] >= self.points_to_win else 'P2'
 
         return MatchResult(
+            simulation_run_id=self.simulation_run_id,
+            match_id=self.match_id,
             winner=winner,
             player_one_score=scores['P1'],
             player_two_score=scores['P2'],
@@ -381,9 +389,18 @@ class HeadlessMatchSimulator:
             if decision.rationale
             else None
         )
+        decision_index = len(self.decisions)
+        hand_id = f'{self.match_id}-hand-{hand_index:03d}'
+        decision_id = f'{self.match_id}-decision-{decision_index:06d}'
+
         self.metrics.record(decision.action, strategy)
         self.decisions.append(
             DecisionRecord(
+                simulation_run_id=self.simulation_run_id,
+                match_id=self.match_id,
+                hand_id=hand_id,
+                decision_id=decision_id,
+                decision_index=decision_index,
                 match_index=self.match_index,
                 match_seed=self.seed,
                 hand_index=hand_index,
@@ -425,7 +442,7 @@ class HeadlessMatchSimulator:
         )
 
         return {
-            'matchId': f'simulation-{self.seed}-{hand_index}',
+            'matchId': self.match_id,
             'profile': self._profile(player),
             'mode': '1v1',
             'actorSeatId': 'T1A' if player == 'P1' else 'T2A',

@@ -3,6 +3,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DecisionRecord:
+    simulation_run_id: str
+    match_id: str
+    hand_id: str
+    decision_id: str
+    decision_index: int
     match_index: int
     match_seed: int
     hand_index: int
@@ -19,6 +24,8 @@ class DecisionRecord:
 
 @dataclass(frozen=True)
 class MatchRecord:
+    simulation_run_id: str
+    match_id: str
     match_index: int
     seed: int
     player_one_profile: str
