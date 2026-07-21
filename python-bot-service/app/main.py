@@ -14,8 +14,8 @@ from app.schemas import (
     BotDecisionResponse,
     HealthResponse,
     PassDecisionResponse,
-    PlayCardDecisionResponse,
 )
+from app.strategy.engine import StrategyEngine
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -73,6 +73,8 @@ app = FastAPI(
     openapi_url='/openapi.json' if settings.docs_enabled else None,
     lifespan=lifespan,
 )
+
+strategy_engine = StrategyEngine()
 
 
 @app.middleware('http')
@@ -180,8 +182,6 @@ async def unexpected_exception_handler(request: Request, exc: Exception) -> JSON
 
 @app.get('/health/live', response_model=HealthResponse)
 def get_liveness() -> HealthResponse:
-    # NOTE: Liveness must stay dependency-free so process health remains distinct
-    # from any future downstream integration failures.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -191,9 +191,6 @@ def get_liveness() -> HealthResponse:
 
 @app.get('/health/ready', response_model=HealthResponse)
 def get_readiness() -> HealthResponse:
-    # NOTE: Readiness is intentionally identical for now because this auxiliary
-    # service still has no downstream dependency. The endpoint remains stable
-    # for future hardening without breaking callers now.
     return HealthResponse(
         status='ok',
         service=settings.service_name,
@@ -219,8 +216,6 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
         )
     )
 
-    # NOTE: Phase 15.B locks the external contract first.
-    # Real strategy comes later, after the HTTP boundary is stable enough for the adapter.
     if len(payload.player.hand) == 0:
         response = PassDecisionResponse(
             action='pass',
@@ -265,53 +260,20 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
 
         return response
 
-    can_attempt_play_card = (
-        payload.bet is None or payload.bet.available_actions.can_attempt_play_card
-    )
+    response = strategy_engine.decide(payload)
+    completed_event: dict[str, Any] = {
+        'layer': 'service',
+        'component': 'python_bot_service',
+        'event': 'decision_completed',
+        'status': 'succeeded',
+        'matchId': payload.match_id,
+        'action': response.action,
+    }
 
-    if can_attempt_play_card:
-        # NOTE: Phase 25 proves the live HTTP decision path with a deterministic card choice.
-        # Profile-aware strategy and richer heuristics remain intentionally scoped to Phase 26.
-        response = PlayCardDecisionResponse(
-            action='play-card',
-            card=payload.player.hand[0],
-        )
+    if response.action == 'play-card':
+        completed_event['card'] = response.card
+    elif response.action == 'pass':
+        completed_event['reason'] = response.reason
 
-        logger.info(
-            json.dumps(
-                {
-                    'layer': 'service',
-                    'component': 'python_bot_service',
-                    'event': 'decision_completed',
-                    'status': 'succeeded',
-                    'matchId': payload.match_id,
-                    'action': response.action,
-                    'card': response.card,
-                }
-            )
-        )
-
-        return response
-
-    # NOTE: Unsupported betting and special-hand decisions intentionally fall back to the
-    # TypeScript heuristic until the Python strategy engine is implemented in Phase 26.
-    response = PassDecisionResponse(
-        action='pass',
-        reason='unsupported-state',
-    )
-
-    logger.info(
-        json.dumps(
-            {
-                'layer': 'service',
-                'component': 'python_bot_service',
-                'event': 'decision_completed',
-                'status': 'succeeded',
-                'matchId': payload.match_id,
-                'action': response.action,
-                'reason': response.reason,
-            }
-        )
-    )
-
+    logger.info(json.dumps(completed_event))
     return response
