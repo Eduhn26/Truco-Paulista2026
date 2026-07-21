@@ -1,7 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass, field
 
-from simulation.telemetry import DecisionRecord, MatchRecord
+from simulation.telemetry import DecisionRecord, HandRecord, MatchRecord
 
 
 @dataclass
@@ -30,6 +30,7 @@ class MatchResult:
     match_index: int
     seed: int
     metrics: DecisionMetrics
+    hands: list[HandRecord]
     decisions: list[DecisionRecord]
 
 
@@ -44,6 +45,7 @@ class SeriesResult:
     total_hands: int = 0
     metrics: DecisionMetrics = field(default_factory=DecisionMetrics)
     matches: list[MatchRecord] = field(default_factory=list)
+    hands: list[HandRecord] = field(default_factory=list)
     decisions: list[DecisionRecord] = field(default_factory=list)
 
     def add_match(
@@ -75,6 +77,7 @@ class SeriesResult:
                 hands_played=result.hands_played,
             )
         )
+        self.hands.extend(result.hands)
         self.decisions.extend(result.decisions)
 
     def to_dict(self) -> dict:

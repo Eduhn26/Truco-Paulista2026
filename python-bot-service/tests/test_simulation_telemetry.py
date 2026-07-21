@@ -19,6 +19,7 @@ class SimulationTelemetryTest(unittest.TestCase):
         )
 
         self.assertEqual(len(result.matches), 2)
+        self.assertEqual(len(result.hands), result.total_hands)
         self.assertGreater(len(result.decisions), 0)
         self.assertEqual(
             {match.match_index for match in result.matches},
@@ -54,6 +55,14 @@ class SimulationTelemetryTest(unittest.TestCase):
         self.assertTrue(
             all(decision.match_id in match_ids for decision in first.decisions)
         )
+        hand_ids = {hand.hand_id for hand in first.hands}
+        self.assertEqual(len(hand_ids), len(first.hands))
+        self.assertTrue(
+            all(hand.match_id in match_ids for hand in first.hands)
+        )
+        self.assertTrue(
+            all(decision.hand_id in hand_ids for decision in first.decisions)
+        )
         self.assertTrue(
             all(
                 decision.hand_id.startswith(f'{decision.match_id}-hand-')
@@ -69,6 +78,36 @@ class SimulationTelemetryTest(unittest.TestCase):
             [decision.decision_index for decision in first_match_decisions],
             list(range(len(first_match_decisions))),
         )
+
+    def test_hand_records_rebuild_the_final_match_score(self) -> None:
+        result = run_series(
+            'balanced',
+            'aggressive',
+            games=3,
+            seed=71,
+        )
+
+        for match in result.matches:
+            scores = {'P1': 0, 'P2': 0}
+            hands = [
+                hand
+                for hand in result.hands
+                if hand.match_id == match.match_id
+            ]
+
+            self.assertEqual(len(hands), match.hands_played)
+
+            for hand_index, hand in enumerate(hands):
+                self.assertEqual(hand.hand_index, hand_index)
+                self.assertEqual(hand.player_one_score_before, scores['P1'])
+                self.assertEqual(hand.player_two_score_before, scores['P2'])
+                self.assertGreaterEqual(hand.rounds_played, 0)
+                self.assertLessEqual(hand.rounds_played, 3)
+
+                scores[hand.winner_player] += hand.points_awarded
+
+            self.assertEqual(scores['P1'], match.player_one_score)
+            self.assertEqual(scores['P2'], match.player_two_score)
 
     def test_analysis_reports_profile_and_seat_metrics(self) -> None:
         result = run_series(
@@ -89,7 +128,7 @@ class SimulationTelemetryTest(unittest.TestCase):
             2,
         )
 
-    def test_exporter_writes_matches_decisions_and_summary(self) -> None:
+    def test_exporter_writes_matches_hands_decisions_and_summary(self) -> None:
         result = run_series(
             'aggressive',
             'cautious',
@@ -109,6 +148,12 @@ class SimulationTelemetryTest(unittest.TestCase):
             ) as file:
                 matches = list(csv.DictReader(file))
 
+            with paths['hands'].open(
+                newline='',
+                encoding='utf-8',
+            ) as file:
+                hands = list(csv.DictReader(file))
+
             with paths['decisions'].open(
                 newline='',
                 encoding='utf-8',
@@ -120,6 +165,7 @@ class SimulationTelemetryTest(unittest.TestCase):
             )
 
             self.assertEqual(len(matches), 2)
+            self.assertEqual(len(hands), result.total_hands)
             self.assertGreater(len(decisions), 0)
             self.assertEqual(
                 summary['simulationRunId'],
@@ -127,6 +173,9 @@ class SimulationTelemetryTest(unittest.TestCase):
             )
             self.assertIn('simulation_run_id', matches[0])
             self.assertIn('match_id', matches[0])
+            self.assertIn('hand_id', hands[0])
+            self.assertIn('winner_player', hands[0])
+            self.assertIn('points_awarded', hands[0])
             self.assertIn('hand_id', decisions[0])
             self.assertIn('decision_id', decisions[0])
             self.assertIn('analysis', summary)

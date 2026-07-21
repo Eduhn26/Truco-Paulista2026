@@ -15,12 +15,17 @@ def export_series(
     directory.mkdir(parents=True, exist_ok=True)
 
     matches_path = directory / 'matches.csv'
+    hands_path = directory / 'hands.csv'
     decisions_path = directory / 'decisions.csv'
     summary_path = directory / 'summary.json'
 
     _write_csv(
         matches_path,
         [asdict(match) for match in result.matches],
+    )
+    _write_csv(
+        hands_path,
+        [asdict(hand) for hand in result.hands],
     )
     _write_csv(
         decisions_path,
@@ -36,6 +41,7 @@ def export_series(
 
     return {
         'matches': matches_path,
+        'hands': hands_path,
         'decisions': decisions_path,
         'summary': summary_path,
     }

@@ -23,6 +23,25 @@ class DecisionRecord:
 
 
 @dataclass(frozen=True)
+class HandRecord:
+    simulation_run_id: str
+    match_id: str
+    hand_id: str
+    match_index: int
+    match_seed: int
+    hand_index: int
+    starter_player: str
+    player_one_score_before: int
+    player_two_score_before: int
+    vira_rank: str
+    special_state: str
+    winner_player: str
+    points_awarded: int
+    final_hand_value: int
+    rounds_played: int
+
+
+@dataclass(frozen=True)
 class MatchRecord:
     simulation_run_id: str
     match_id: str

@@ -7,7 +7,7 @@ from app.strategy.card_rules import compare_cards
 from app.strategy.engine import StrategyEngine
 from simulation.deck import deal
 from simulation.results import DecisionMetrics, MatchResult
-from simulation.telemetry import DecisionRecord
+from simulation.telemetry import DecisionRecord, HandRecord
 
 PlayerId = str
 
@@ -58,6 +58,7 @@ class HeadlessMatchSimulator:
         )
         self.engine = StrategyEngine()
         self.metrics = DecisionMetrics()
+        self.hands: list[HandRecord] = []
         self.decisions: list[DecisionRecord] = []
 
     def simulate(self) -> MatchResult:
@@ -88,6 +89,7 @@ class HeadlessMatchSimulator:
             match_index=self.match_index,
             seed=self.seed,
             metrics=self.metrics,
+            hands=list(self.hands),
             decisions=list(self.decisions),
         )
 
@@ -124,9 +126,18 @@ class HeadlessMatchSimulator:
             )
 
             if decision.action == 'decline-mao-de-onze':
-                return HandOutcome(
-                    winner=self._opponent(decision_player),
-                    points=1,
+                return self._complete_hand(
+                    hand_index=hand_index,
+                    starter=starter,
+                    scores=scores,
+                    vira_rank=dealt.vira_rank,
+                    special_state=special_state,
+                    round_results=round_results,
+                    final_hand_value=bet.current_value,
+                    outcome=HandOutcome(
+                        winner=self._opponent(decision_player),
+                        points=1,
+                    ),
                 )
 
             if decision.action != 'accept-mao-de-onze':
@@ -161,7 +172,16 @@ class HeadlessMatchSimulator:
                         hand_index=hand_index,
                     )
                     if bet_outcome is not None:
-                        return bet_outcome
+                        return self._complete_hand(
+                            hand_index=hand_index,
+                            starter=starter,
+                            scores=scores,
+                            vira_rank=dealt.vira_rank,
+                            special_state=special_state,
+                            round_results=round_results,
+                            final_hand_value=bet.current_value,
+                            outcome=bet_outcome,
+                        )
                 else:
                     self._play_card(
                         player=player,
@@ -185,9 +205,18 @@ class HeadlessMatchSimulator:
 
             winner = resolve_hand_winner(round_results)
             if winner is not None:
-                return HandOutcome(
-                    winner=winner,
-                    points=bet.current_value,
+                return self._complete_hand(
+                    hand_index=hand_index,
+                    starter=starter,
+                    scores=scores,
+                    vira_rank=dealt.vira_rank,
+                    special_state=special_state,
+                    round_results=round_results,
+                    final_hand_value=bet.current_value,
+                    outcome=HandOutcome(
+                        winner=winner,
+                        points=bet.current_value,
+                    ),
                 )
 
             round_starter = resolve_next_round_starter(
@@ -199,7 +228,53 @@ class HeadlessMatchSimulator:
         if winner is None:
             raise RuntimeError('Hand finished without a winner.')
 
-        return HandOutcome(winner=winner, points=bet.current_value)
+        return self._complete_hand(
+            hand_index=hand_index,
+            starter=starter,
+            scores=scores,
+            vira_rank=dealt.vira_rank,
+            special_state=special_state,
+            round_results=round_results,
+            final_hand_value=bet.current_value,
+            outcome=HandOutcome(
+                winner=winner,
+                points=bet.current_value,
+            ),
+        )
+
+    def _complete_hand(
+        self,
+        *,
+        hand_index: int,
+        starter: PlayerId,
+        scores: dict[PlayerId, int],
+        vira_rank: str,
+        special_state: str,
+        round_results: list[str],
+        final_hand_value: int,
+        outcome: HandOutcome,
+    ) -> HandOutcome:
+        hand_id = f'{self.match_id}-hand-{hand_index:03d}'
+        self.hands.append(
+            HandRecord(
+                simulation_run_id=self.simulation_run_id,
+                match_id=self.match_id,
+                hand_id=hand_id,
+                match_index=self.match_index,
+                match_seed=self.seed,
+                hand_index=hand_index,
+                starter_player=starter,
+                player_one_score_before=scores['P1'],
+                player_two_score_before=scores['P2'],
+                vira_rank=vira_rank,
+                special_state=special_state,
+                winner_player=outcome.winner,
+                points_awarded=outcome.points,
+                final_hand_value=final_hand_value,
+                rounds_played=len(round_results),
+            )
+        )
+        return outcome
 
     def _play_with_betting(
         self,
