@@ -7,6 +7,7 @@ from app.strategy.card_rules import compare_cards
 from app.strategy.engine import StrategyEngine
 from simulation.deck import deal
 from simulation.results import DecisionMetrics, MatchResult
+from simulation.telemetry import DecisionRecord
 
 PlayerId = str
 
@@ -41,14 +42,17 @@ class HeadlessMatchSimulator:
         *,
         seed: int = 1,
         points_to_win: int = 12,
+        match_index: int = 0,
     ) -> None:
         self.profile_one = profile_one
         self.profile_two = profile_two
         self.points_to_win = points_to_win
         self.rng = Random(seed)
         self.seed = seed
+        self.match_index = match_index
         self.engine = StrategyEngine()
         self.metrics = DecisionMetrics()
+        self.decisions: list[DecisionRecord] = []
 
     def simulate(self) -> MatchResult:
         scores = {'P1': 0, 'P2': 0}
@@ -70,7 +74,10 @@ class HeadlessMatchSimulator:
             player_one_score=scores['P1'],
             player_two_score=scores['P2'],
             hands_played=hands_played,
+            match_index=self.match_index,
+            seed=self.seed,
             metrics=self.metrics,
+            decisions=list(self.decisions),
         )
 
     def _simulate_hand(
@@ -356,7 +363,28 @@ class HeadlessMatchSimulator:
         )
         decision = self.engine.decide(payload)
         strategy = decision.rationale.strategy if decision.rationale else None
+        hand_strength = (
+            decision.rationale.hand_strength
+            if decision.rationale
+            else None
+        )
         self.metrics.record(decision.action, strategy)
+        self.decisions.append(
+            DecisionRecord(
+                match_index=self.match_index,
+                match_seed=self.seed,
+                hand_index=hand_index,
+                round_index=round_index,
+                player_id=player,
+                profile=self._profile(player),
+                action=decision.action,
+                strategy=strategy,
+                hand_strength=hand_strength,
+                current_value=bet.current_value,
+                player_one_score=scores['P1'],
+                player_two_score=scores['P2'],
+            )
+        )
         return decision
 
     def _payload(

@@ -1,8 +1,11 @@
 import argparse
 import json
+from pathlib import Path
 from random import Random
 
 from app.schemas import BotProfile
+from simulation.analytics import analyze_series
+from simulation.exporter import export_round_robin, export_series
 from simulation.match_simulator import HeadlessMatchSimulator
 from simulation.results import SeriesResult
 from simulation.strategies import PROFILES, round_robin_pairs
@@ -38,6 +41,7 @@ def run_series(
             player_one_profile,
             player_two_profile,
             seed=seed_rng.randrange(1, 2**31),
+            match_index=game_index,
         )
         match = simulator.simulate()
         result.add_match(
@@ -49,14 +53,18 @@ def run_series(
     return result
 
 
-def run_round_robin(*, games: int, seed: int) -> list[dict]:
+def run_round_robin(
+    *,
+    games: int,
+    seed: int,
+) -> list[SeriesResult]:
     return [
         run_series(
             pair.first,
             pair.second,
             games=games,
             seed=seed + index,
-        ).to_dict()
+        )
         for index, pair in enumerate(round_robin_pairs())
     ]
 
@@ -68,6 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--p1', choices=PROFILES, default='aggressive')
     parser.add_argument('--p2', choices=PROFILES, default='balanced')
     parser.add_argument('--round-robin', action='store_true')
+    parser.add_argument('--output', type=Path)
     return parser.parse_args()
 
 
@@ -75,14 +84,31 @@ def main() -> None:
     args = parse_args()
 
     if args.round_robin:
-        payload = run_round_robin(games=args.games, seed=args.seed)
+        results = run_round_robin(
+            games=args.games,
+            seed=args.seed,
+        )
+        payload = []
+
+        for result in results:
+            summary = result.to_dict()
+            summary['analysis'] = analyze_series(result)
+            payload.append(summary)
+
+        if args.output is not None:
+            export_round_robin(results, args.output)
     else:
-        payload = run_series(
+        result = run_series(
             args.p1,
             args.p2,
             games=args.games,
             seed=args.seed,
-        ).to_dict()
+        )
+        payload = result.to_dict()
+        payload['analysis'] = analyze_series(result)
+
+        if args.output is not None:
+            export_series(result, args.output)
 
     print(json.dumps(payload, indent=2, sort_keys=True))
 
