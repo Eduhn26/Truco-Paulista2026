@@ -10,7 +10,7 @@ MANILHA_SUIT_STRENGTH = {
 
 
 class InvalidCardError(ValueError):
-    """Raised when a card or vira rank does not match the backend card contract."""
+    pass
 
 
 def next_rank(rank: str) -> str:
@@ -68,10 +68,8 @@ def card_strength_score(card: str, vira_rank: str) -> float:
     manilha_rank = manilha_rank_from_vira(vira_rank)
 
     if rank == manilha_rank:
-        # Reserve the top quarter of the scale for the four ordered manilhas.
         return round(0.76 + MANILHA_SUIT_STRENGTH[suit] * 0.08, 4)
 
-    # Normal cards retain the same rank hierarchy used by the TypeScript Domain.
     return round((RANKS.index(rank) / (len(RANKS) - 1)) * 0.72, 4)
 
 

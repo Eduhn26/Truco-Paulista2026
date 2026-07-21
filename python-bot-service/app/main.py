@@ -221,8 +221,6 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
         )
     )
 
-    # Keep transport-level pass reasons explicit before delegating card choice
-    # to the strategy engine.
     if len(payload.player.hand) == 0:
         response = PassDecisionResponse(
             action='pass',
@@ -290,8 +288,6 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
 
         return response
 
-    # NOTE: Unsupported betting and special-hand decisions intentionally fall back to the
-    # TypeScript heuristic until the Python strategy engine is implemented in Phase 26.
     response = PassDecisionResponse(
         action='pass',
         reason='unsupported-state',

@@ -4,30 +4,37 @@ from typing import Literal
 from app.schemas import BotProfile
 
 CardSelectionMode = Literal['weakest', 'middle', 'strongest']
-WinningSelectionMode = Literal['weakest', 'strongest']
 
 
 @dataclass(frozen=True)
 class ProfilePolicy:
-    opening: CardSelectionMode
-    winning_response: WinningSelectionMode
+    neutral_opening: CardSelectionMode
+    pressure_opening: CardSelectionMode
+    neutral_winning_response: CardSelectionMode
+    pressure_winning_response: CardSelectionMode
     losing_response: CardSelectionMode
 
 
 PROFILE_POLICIES: dict[BotProfile, ProfilePolicy] = {
     'balanced': ProfilePolicy(
-        opening='middle',
-        winning_response='weakest',
+        neutral_opening='middle',
+        pressure_opening='middle',
+        neutral_winning_response='weakest',
+        pressure_winning_response='weakest',
         losing_response='weakest',
     ),
     'aggressive': ProfilePolicy(
-        opening='strongest',
-        winning_response='strongest',
+        neutral_opening='middle',
+        pressure_opening='strongest',
+        neutral_winning_response='weakest',
+        pressure_winning_response='strongest',
         losing_response='middle',
     ),
     'cautious': ProfilePolicy(
-        opening='weakest',
-        winning_response='weakest',
+        neutral_opening='weakest',
+        pressure_opening='middle',
+        neutral_winning_response='weakest',
+        pressure_winning_response='weakest',
         losing_response='weakest',
     ),
 }

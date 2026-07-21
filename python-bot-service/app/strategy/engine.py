@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from app.schemas import (
     BotDecisionRationalePayload,
     BotDecisionRequest,
@@ -9,7 +11,26 @@ from app.strategy.card_rules import (
     hand_strength_score,
     sort_cards,
 )
-from app.strategy.profiles import CardSelectionMode, policy_for
+from app.strategy.profiles import CardSelectionMode, ProfilePolicy, policy_for
+
+
+@dataclass(frozen=True)
+class TacticalContext:
+    hand_strength: float
+    current_round_index: int
+    rounds_won_by_me: int
+    rounds_won_by_opponent: int
+
+    @property
+    def behind(self) -> bool:
+        return self.rounds_won_by_opponent > self.rounds_won_by_me
+
+    @property
+    def decisive(self) -> bool:
+        return self.current_round_index >= 2 or max(
+            self.rounds_won_by_me,
+            self.rounds_won_by_opponent,
+        ) >= 1
 
 
 class StrategyEngine:
@@ -22,12 +43,15 @@ class StrategyEngine:
             raise ValueError('Cannot choose a card without a current round.')
 
         ordered_hand = sort_cards(hand, payload.vira_rank)
+        hand_strength = hand_strength_score(hand, payload.vira_rank)
+        tactical = self._build_tactical_context(payload, hand_strength)
         policy = policy_for(payload.profile)
         threat_card = self._resolve_public_threat_card(payload)
 
         if threat_card is None:
-            card = self._select_card(ordered_hand, policy.opening)
-            strategy = f'opening-{policy.opening}'
+            selection = self._resolve_opening_selection(policy, tactical)
+            card = self._select_card(ordered_hand, selection)
+            strategy = f'opening-{selection}'
         else:
             winning_cards = [
                 card
@@ -36,15 +60,17 @@ class StrategyEngine:
             ]
 
             if winning_cards:
-                card = self._select_card(winning_cards, policy.winning_response)
-                strategy = f'response-winning-{policy.winning_response}'
+                selection = self._resolve_winning_selection(policy, tactical)
+                card = self._select_card(winning_cards, selection)
+                strategy = f'response-winning-{selection}'
             else:
-                card = self._select_card(ordered_hand, policy.losing_response)
-                strategy = f'response-losing-{policy.losing_response}'
+                selection = policy.losing_response
+                card = self._select_card(ordered_hand, selection)
+                strategy = f'response-losing-{selection}'
 
         rationale = BotDecisionRationalePayload.model_validate(
             {
-                'handStrength': hand_strength_score(hand, payload.vira_rank),
+                'handStrength': hand_strength,
                 'strategy': strategy,
             }
         )
@@ -54,6 +80,53 @@ class StrategyEngine:
             card=card,
             rationale=rationale,
         )
+
+    def _build_tactical_context(
+        self,
+        payload: BotDecisionRequest,
+        hand_strength: float,
+    ) -> TacticalContext:
+        progress = payload.hand_progress
+
+        if progress is None:
+            return TacticalContext(
+                hand_strength=hand_strength,
+                current_round_index=0,
+                rounds_won_by_me=0,
+                rounds_won_by_opponent=0,
+            )
+
+        return TacticalContext(
+            hand_strength=hand_strength,
+            current_round_index=progress.current_round_index,
+            rounds_won_by_me=progress.rounds_won_by_me,
+            rounds_won_by_opponent=progress.rounds_won_by_opponent,
+        )
+
+    def _resolve_opening_selection(
+        self,
+        policy: ProfilePolicy,
+        tactical: TacticalContext,
+    ) -> CardSelectionMode:
+        under_pressure = tactical.behind and tactical.decisive
+
+        if not under_pressure:
+            return policy.neutral_opening
+
+        if tactical.hand_strength < 0.35:
+            return policy.neutral_opening
+
+        return policy.pressure_opening
+
+    def _resolve_winning_selection(
+        self,
+        policy: ProfilePolicy,
+        tactical: TacticalContext,
+    ) -> CardSelectionMode:
+        if tactical.behind and tactical.decisive:
+            return policy.pressure_winning_response
+
+        return policy.neutral_winning_response
 
     def _resolve_public_threat_card(self, payload: BotDecisionRequest) -> str | None:
         current_round = payload.current_round
