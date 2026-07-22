@@ -46,6 +46,8 @@ class HeadlessMatchSimulator:
         match_index: int = 0,
         simulation_run_id: str | None = None,
         match_id: str | None = None,
+        engine_one=None,
+        engine_two=None,
     ) -> None:
         self.profile_one = profile_one
         self.profile_two = profile_two
@@ -57,7 +59,16 @@ class HeadlessMatchSimulator:
         self.match_id = match_id or (
             f'{self.simulation_run_id}-match-{match_index:06d}'
         )
-        self.engine = StrategyEngine()
+        self.engines = {
+            'P1': (
+                engine_one
+                or StrategyEngine()
+            ),
+            'P2': (
+                engine_two
+                or StrategyEngine()
+            ),
+        }
         self.metrics = DecisionMetrics()
         self.hands: list[HandRecord] = []
         self.decisions: list[DecisionRecord] = []
@@ -458,7 +469,14 @@ class HeadlessMatchSimulator:
                 hand_index=hand_index,
             )
         )
-        decision = self.engine.decide(payload)
+        decision = (
+            self.engines[
+                player
+            ]
+            .decide(
+                payload
+            )
+        )
         selected_card = decision.card if decision.action == 'play-card' else None
         strategy = decision.rationale.strategy if decision.rationale else None
         hand_strength = (

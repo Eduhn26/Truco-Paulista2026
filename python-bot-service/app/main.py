@@ -16,6 +16,9 @@ from app.schemas import (
     PassDecisionResponse,
 )
 from app.strategy.engine import StrategyEngine
+from app.strategy.ml_assisted import (
+    MlAssistedStrategyEngine,
+)
 from app.strategy.ml_shadow_runtime import (
     MlShadowRuntime,
 )
@@ -33,7 +36,7 @@ logger = logging.getLogger('python-bot-service')
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global ml_shadow_runtime, ml_shadow_telemetry_writer
+    global strategy_engine, ml_shadow_runtime, ml_shadow_telemetry_writer
     logger.info(
         json.dumps(
             {
@@ -50,6 +53,63 @@ async def lifespan(_: FastAPI):
             }
         )
     )
+
+    strategy_engine = StrategyEngine()
+
+    if settings.ml_assisted_enabled:
+        try:
+            strategy_engine = (
+                MlAssistedStrategyEngine
+                .from_model_path(
+                    settings.ml_model_path
+                )
+            )
+
+            logger.info(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_assisted_strategy'
+                        ),
+                        'event': (
+                            'ml_assisted_enabled'
+                        ),
+                        'status': 'ready',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                    }
+                )
+            )
+
+        except Exception as error:
+            strategy_engine = (
+                StrategyEngine()
+            )
+
+            logger.warning(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_assisted_strategy'
+                        ),
+                        'event': (
+                            'ml_assisted_load_failed'
+                        ),
+                        'status': 'fallback',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                        'errorType': (
+                            type(
+                                error
+                            ).__name__
+                        ),
+                    }
+                )
+            )
 
     if settings.ml_shadow_enabled:
         try:

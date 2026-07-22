@@ -41,6 +41,10 @@ class Settings(BaseSettings):
         min_length=1,
     )
 
+    ml_assisted_enabled: bool = Field(
+        default=False
+    )
+
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
