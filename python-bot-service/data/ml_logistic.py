@@ -251,11 +251,14 @@ def _prepare_features(frame):
         )
 
         if prepared[column].isna().any():
+            median = prepared[column].median()
+
+            if pd.isna(median):
+                median = 0.0
+
             prepared[column] = (
                 prepared[column]
-                .fillna(
-                    prepared[column].median()
-                )
+                .fillna(median)
             )
 
     for column in (
@@ -333,3 +336,4 @@ def _round(value):
         float(value),
         6,
     )
+

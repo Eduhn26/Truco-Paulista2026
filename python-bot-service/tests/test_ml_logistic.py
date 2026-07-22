@@ -115,6 +115,32 @@ class MlLogisticTest(unittest.TestCase):
                 report['metrics'],
             )
 
+    def test_logistic_handles_fully_missing_numeric_feature(self):
+        _, frame = self.build_frame(
+            'balanced',
+            'aggressive',
+            20,
+            306,
+        )
+
+        frame = frame.copy()
+        frame['pending_value'] = None
+
+        report = run_logistic_regression(
+            frame,
+            random_state=39,
+        )
+
+        self.assertEqual(
+            report['model'],
+            'LogisticRegression',
+        )
+
+        self.assertIn(
+            'balancedAccuracy',
+            report['metrics'],
+        )
+
     def test_comparison_matches_split_configuration(self):
         _, frame = self.build_frame(
             'aggressive',
@@ -193,3 +219,4 @@ class MlLogisticTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
