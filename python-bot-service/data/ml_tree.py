@@ -280,10 +280,13 @@ def _prepare_features(frame):
         ).astype('float64')
 
         if prepared[column].isna().any():
-            median = prepared[column].median()
+            valid = prepared[column].dropna()
 
-            if pd.isna(median):
-                median = 0.0
+            median = (
+                float(valid.median())
+                if not valid.empty
+                else 0.0
+            )
 
             prepared[column] = (
                 prepared[column]
