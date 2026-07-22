@@ -29,6 +29,18 @@ class Settings(BaseSettings):
         min_length=1,
     )
 
+    ml_shadow_telemetry_enabled: bool = Field(
+        default=False
+    )
+    ml_shadow_telemetry_path: str = Field(
+        default=(
+            'ml-artifacts/'
+            'shadow-telemetry/'
+            'shadow-observations.jsonl'
+        ),
+        min_length=1,
+    )
+
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',

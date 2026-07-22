@@ -19,6 +19,9 @@ from app.strategy.engine import StrategyEngine
 from app.strategy.ml_shadow_runtime import (
     MlShadowRuntime,
 )
+from app.strategy.ml_shadow_telemetry import (
+    MlShadowTelemetryWriter,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -136,6 +139,14 @@ app = FastAPI(
 
 strategy_engine = StrategyEngine()
 ml_shadow_runtime: MlShadowRuntime | None = None
+
+ml_shadow_telemetry_writer = (
+    MlShadowTelemetryWriter(
+        settings.ml_shadow_telemetry_path
+    )
+    if settings.ml_shadow_telemetry_enabled
+    else None
+)
 
 
 @app.middleware('http')
@@ -348,6 +359,48 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
                     shadow_event
                 )
             )
+
+            if (
+                shadow_event[
+                    'status'
+                ]
+                == 'observed'
+                and
+                ml_shadow_telemetry_writer
+                is not None
+            ):
+                try:
+                    (
+                        ml_shadow_telemetry_writer
+                        .write(
+                            payload,
+                            response,
+                            shadow_event,
+                        )
+                    )
+                except Exception as error:
+                    logger.warning(
+                        json.dumps(
+                            {
+                                'layer': 'ml',
+                                'component': (
+                                    'ml_shadow_telemetry'
+                                ),
+                                'event': (
+                                    'shadow_telemetry_write_failed'
+                                ),
+                                'status': 'failed',
+                                'matchId': (
+                                    payload.match_id
+                                ),
+                                'errorType': (
+                                    type(
+                                        error
+                                    ).__name__
+                                ),
+                            }
+                        )
+                    )
 
     completed_event: dict[str, Any] = {
         'layer': 'service',
