@@ -17,6 +17,34 @@ class Settings(BaseSettings):
     log_level: Literal['DEBUG', 'INFO', 'WARNING', 'ERROR'] = Field(default='INFO')
     expose_docs: bool = Field(default=True)
 
+    ml_shadow_enabled: bool = Field(
+        default=False
+    )
+    ml_model_path: str = Field(
+        default=(
+            'ml-artifacts/'
+            'candidate-v1/'
+            'truco-hand-win-random-forest.joblib'
+        ),
+        min_length=1,
+    )
+
+    ml_shadow_telemetry_enabled: bool = Field(
+        default=False
+    )
+    ml_shadow_telemetry_path: str = Field(
+        default=(
+            'ml-artifacts/'
+            'shadow-telemetry/'
+            'shadow-observations.jsonl'
+        ),
+        min_length=1,
+    )
+
+    ml_assisted_enabled: bool = Field(
+        default=False
+    )
+
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',

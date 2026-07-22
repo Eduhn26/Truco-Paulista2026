@@ -1,7 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass, field
 
-from simulation.telemetry import DecisionRecord, MatchRecord
+from simulation.telemetry import DecisionRecord, HandRecord, MatchRecord
 
 
 @dataclass
@@ -21,6 +21,8 @@ class DecisionMetrics:
 
 @dataclass(frozen=True)
 class MatchResult:
+    simulation_run_id: str
+    match_id: str
     winner: str
     player_one_score: int
     player_two_score: int
@@ -28,11 +30,13 @@ class MatchResult:
     match_index: int
     seed: int
     metrics: DecisionMetrics
+    hands: list[HandRecord]
     decisions: list[DecisionRecord]
 
 
 @dataclass
 class SeriesResult:
+    simulation_run_id: str
     profile_one: str
     profile_two: str
     games: int
@@ -41,6 +45,7 @@ class SeriesResult:
     total_hands: int = 0
     metrics: DecisionMetrics = field(default_factory=DecisionMetrics)
     matches: list[MatchRecord] = field(default_factory=list)
+    hands: list[HandRecord] = field(default_factory=list)
     decisions: list[DecisionRecord] = field(default_factory=list)
 
     def add_match(
@@ -59,6 +64,8 @@ class SeriesResult:
         self.metrics.merge(result.metrics)
         self.matches.append(
             MatchRecord(
+                simulation_run_id=result.simulation_run_id,
+                match_id=result.match_id,
                 match_index=result.match_index,
                 seed=result.seed,
                 player_one_profile=player_one_profile,
@@ -70,6 +77,7 @@ class SeriesResult:
                 hands_played=result.hands_played,
             )
         )
+        self.hands.extend(result.hands)
         self.decisions.extend(result.decisions)
 
     def to_dict(self) -> dict:
@@ -81,6 +89,7 @@ class SeriesResult:
         }
 
         return {
+            'simulationRunId': self.simulation_run_id,
             'profiles': list(profiles),
             'games': self.games,
             'seed': self.seed,

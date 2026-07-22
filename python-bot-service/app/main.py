@@ -16,6 +16,15 @@ from app.schemas import (
     PassDecisionResponse,
 )
 from app.strategy.engine import StrategyEngine
+from app.strategy.ml_assisted import (
+    MlAssistedStrategyEngine,
+)
+from app.strategy.ml_shadow_runtime import (
+    MlShadowRuntime,
+)
+from app.strategy.ml_shadow_telemetry import (
+    MlShadowTelemetryWriter,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -27,6 +36,7 @@ logger = logging.getLogger('python-bot-service')
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global strategy_engine, ml_shadow_runtime, ml_shadow_telemetry_writer
     logger.info(
         json.dumps(
             {
@@ -44,7 +54,120 @@ async def lifespan(_: FastAPI):
         )
     )
 
+    strategy_engine = StrategyEngine()
+
+    if settings.ml_assisted_enabled:
+        try:
+            strategy_engine = (
+                MlAssistedStrategyEngine
+                .from_model_path(
+                    settings.ml_model_path
+                )
+            )
+
+            logger.info(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_assisted_strategy'
+                        ),
+                        'event': (
+                            'ml_assisted_enabled'
+                        ),
+                        'status': 'ready',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                    }
+                )
+            )
+
+        except Exception as error:
+            strategy_engine = (
+                StrategyEngine()
+            )
+
+            logger.warning(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_assisted_strategy'
+                        ),
+                        'event': (
+                            'ml_assisted_load_failed'
+                        ),
+                        'status': 'fallback',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                        'errorType': (
+                            type(
+                                error
+                            ).__name__
+                        ),
+                    }
+                )
+            )
+
+    if settings.ml_shadow_enabled:
+        try:
+            ml_shadow_runtime = (
+                MlShadowRuntime
+                .from_model_path(
+                    settings.ml_model_path
+                )
+            )
+
+            logger.info(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_shadow_runtime'
+                        ),
+                        'event': (
+                            'shadow_model_loaded'
+                        ),
+                        'status': 'ready',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                    }
+                )
+            )
+        except Exception as error:
+            ml_shadow_runtime = None
+
+            logger.error(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_shadow_runtime'
+                        ),
+                        'event': (
+                            'shadow_model_load_failed'
+                        ),
+                        'status': 'failed',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                        'errorType': (
+                            type(
+                                error
+                            ).__name__
+                        ),
+                    }
+                )
+            )
+    else:
+        ml_shadow_runtime = None
+
     yield
+
+    ml_shadow_runtime = None
 
     logger.info(
         json.dumps(
@@ -75,6 +198,16 @@ app = FastAPI(
 )
 
 strategy_engine = StrategyEngine()
+ml_shadow_runtime: MlShadowRuntime | None = None
+ml_shadow_telemetry_writer: MlShadowTelemetryWriter | None = None
+
+ml_shadow_telemetry_writer = (
+    MlShadowTelemetryWriter(
+        settings.ml_shadow_telemetry_path
+    )
+    if settings.ml_shadow_telemetry_enabled
+    else None
+)
 
 
 @app.middleware('http')
@@ -261,6 +394,75 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
         return response
 
     response = strategy_engine.decide(payload)
+
+    if ml_shadow_runtime is not None:
+        shadow_event = (
+            ml_shadow_runtime.observe(
+                payload,
+                response,
+            )
+        )
+
+        if shadow_event is not None:
+            shadow_logger = (
+                logger.warning
+                if (
+                    shadow_event[
+                        'status'
+                    ]
+                    == 'failed'
+                )
+                else logger.info
+            )
+
+            shadow_logger(
+                json.dumps(
+                    shadow_event
+                )
+            )
+
+            if (
+                shadow_event[
+                    'status'
+                ]
+                == 'observed'
+                and
+                ml_shadow_telemetry_writer
+                is not None
+            ):
+                try:
+                    (
+                        ml_shadow_telemetry_writer
+                        .write(
+                            payload,
+                            response,
+                            shadow_event,
+                        )
+                    )
+                except Exception as error:
+                    logger.warning(
+                        json.dumps(
+                            {
+                                'layer': 'ml',
+                                'component': (
+                                    'ml_shadow_telemetry'
+                                ),
+                                'event': (
+                                    'shadow_telemetry_write_failed'
+                                ),
+                                'status': 'failed',
+                                'matchId': (
+                                    payload.match_id
+                                ),
+                                'errorType': (
+                                    type(
+                                        error
+                                    ).__name__
+                                ),
+                            }
+                        )
+                    )
+
     completed_event: dict[str, Any] = {
         'layer': 'service',
         'component': 'python_bot_service',

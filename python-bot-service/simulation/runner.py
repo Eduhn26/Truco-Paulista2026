@@ -17,11 +17,17 @@ def run_series(
     *,
     games: int = 100,
     seed: int = 1,
+    simulation_run_id: str | None = None,
 ) -> SeriesResult:
     if games < 1:
         raise ValueError('games must be at least 1')
 
+    run_id = simulation_run_id or (
+        f'series-{profile_one}-vs-{profile_two}-games-{games}-seed-{seed}'
+    )
+
     result = SeriesResult(
+        simulation_run_id=run_id,
         profile_one=profile_one,
         profile_two=profile_two,
         games=games,
@@ -37,11 +43,16 @@ def run_series(
             player_one_profile = profile_two
             player_two_profile = profile_one
 
+        match_id = (
+            f'{run_id}-{profile_one}-vs-{profile_two}-match-{game_index:06d}'
+        )
         simulator = HeadlessMatchSimulator(
             player_one_profile,
             player_two_profile,
             seed=seed_rng.randrange(1, 2**31),
             match_index=game_index,
+            simulation_run_id=run_id,
+            match_id=match_id,
         )
         match = simulator.simulate()
         result.add_match(
@@ -58,12 +69,15 @@ def run_round_robin(
     games: int,
     seed: int,
 ) -> list[SeriesResult]:
+    run_id = f'round-robin-games-{games}-seed-{seed}'
+
     return [
         run_series(
             pair.first,
             pair.second,
             games=games,
             seed=seed + index,
+            simulation_run_id=run_id,
         )
         for index, pair in enumerate(round_robin_pairs())
     ]
