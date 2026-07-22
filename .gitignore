@@ -76,3 +76,6 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+
+# Machine learning generated artifacts
+/python-bot-service/ml-artifacts/
