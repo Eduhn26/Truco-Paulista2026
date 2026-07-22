@@ -1,9 +1,6 @@
 ﻿import hashlib
 import json
-from datetime import (
-    datetime,
-    timezone,
-)
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -24,7 +21,6 @@ class MlShadowTelemetryWriter:
         self._output_path = Path(
             output_path
         )
-
         self._lock = Lock()
 
     @property
@@ -69,7 +65,6 @@ class MlShadowTelemetryWriter:
                 stream.write(
                     serialized
                 )
-
                 stream.write(
                     '\n'
                 )
@@ -104,6 +99,16 @@ def build_shadow_observation_record(
         'scoreDifference': (
             runtime_state[
                 'score_difference'
+            ]
+        ),
+        'currentValue': (
+            runtime_state[
+                'current_value'
+            ]
+        ),
+        'specialState': (
+            runtime_state[
+                'special_state'
             ]
         ),
     }

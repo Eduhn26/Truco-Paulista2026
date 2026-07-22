@@ -33,7 +33,7 @@ logger = logging.getLogger('python-bot-service')
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global ml_shadow_runtime
+    global ml_shadow_runtime, ml_shadow_telemetry_writer
     logger.info(
         json.dumps(
             {
@@ -139,6 +139,7 @@ app = FastAPI(
 
 strategy_engine = StrategyEngine()
 ml_shadow_runtime: MlShadowRuntime | None = None
+ml_shadow_telemetry_writer: MlShadowTelemetryWriter | None = None
 
 ml_shadow_telemetry_writer = (
     MlShadowTelemetryWriter(
