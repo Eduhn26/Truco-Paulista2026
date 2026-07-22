@@ -16,6 +16,9 @@ from app.schemas import (
     PassDecisionResponse,
 )
 from app.strategy.engine import StrategyEngine
+from app.strategy.ml_shadow_runtime import (
+    MlShadowRuntime,
+)
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -27,6 +30,7 @@ logger = logging.getLogger('python-bot-service')
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global ml_shadow_runtime
     logger.info(
         json.dumps(
             {
@@ -44,7 +48,63 @@ async def lifespan(_: FastAPI):
         )
     )
 
+    if settings.ml_shadow_enabled:
+        try:
+            ml_shadow_runtime = (
+                MlShadowRuntime
+                .from_model_path(
+                    settings.ml_model_path
+                )
+            )
+
+            logger.info(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_shadow_runtime'
+                        ),
+                        'event': (
+                            'shadow_model_loaded'
+                        ),
+                        'status': 'ready',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                    }
+                )
+            )
+        except Exception as error:
+            ml_shadow_runtime = None
+
+            logger.error(
+                json.dumps(
+                    {
+                        'layer': 'ml',
+                        'component': (
+                            'ml_shadow_runtime'
+                        ),
+                        'event': (
+                            'shadow_model_load_failed'
+                        ),
+                        'status': 'failed',
+                        'modelPath': (
+                            settings.ml_model_path
+                        ),
+                        'errorType': (
+                            type(
+                                error
+                            ).__name__
+                        ),
+                    }
+                )
+            )
+    else:
+        ml_shadow_runtime = None
+
     yield
+
+    ml_shadow_runtime = None
 
     logger.info(
         json.dumps(
@@ -75,6 +135,7 @@ app = FastAPI(
 )
 
 strategy_engine = StrategyEngine()
+ml_shadow_runtime: MlShadowRuntime | None = None
 
 
 @app.middleware('http')
@@ -261,6 +322,33 @@ def decide(payload: BotDecisionRequest) -> BotDecisionResponse:
         return response
 
     response = strategy_engine.decide(payload)
+
+    if ml_shadow_runtime is not None:
+        shadow_event = (
+            ml_shadow_runtime.observe(
+                payload,
+                response,
+            )
+        )
+
+        if shadow_event is not None:
+            shadow_logger = (
+                logger.warning
+                if (
+                    shadow_event[
+                        'status'
+                    ]
+                    == 'failed'
+                )
+                else logger.info
+            )
+
+            shadow_logger(
+                json.dumps(
+                    shadow_event
+                )
+            )
+
     completed_event: dict[str, Any] = {
         'layer': 'service',
         'component': 'python_bot_service',
