@@ -108,6 +108,7 @@ type MatchTableShellProps = {
   isResolvingRound: boolean;
   closingTableCards: { mine: string | null; opponent: string | null };
   suppressHandOutcomeModal?: boolean;
+  roundVerdictPlacement?: 'default' | 'inset';
   onHandClimaxDismissed?: () => void;
 };
 
@@ -1702,7 +1703,7 @@ function RightScoreColumn({
   const t2Leading = scoreT2 > scoreT1;
 
   return (
-    <div className="hidden w-[124px] shrink-0 flex-col items-end gap-3 self-center lg:flex">
+    <div className="hidden w-[142px] shrink-0 flex-col items-end gap-3 self-center lg:flex">
       <div
         className="relative flex items-center gap-3 rounded-[16px] px-4 py-2.5"
         style={{
@@ -1771,15 +1772,47 @@ function RightScoreColumn({
         </div>
       </div>
 
-      <div className="flex flex-col items-end gap-1.5">
-        <div className="flex items-center gap-2.5">
+      <div className="flex w-full flex-col items-end gap-2">
+        <div className="flex w-[106px] items-center justify-between px-0.5">
+          <span
+            className="text-[9px] font-black uppercase tracking-[0.22em]"
+            style={{ color: 'rgba(232,213,160,0.56)' }}
+          >
+            Vazas
+          </span>
+
+          <span
+            className="text-[11px] font-black tracking-[0.08em]"
+            style={{
+              color: 'rgba(242,212,136,0.72)',
+              fontFamily: 'Georgia, serif',
+            }}
+          >
+            {playedCount}/{maxChips}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
           {chips.map((round, index) => {
             const result = round?.result ?? null;
             const finished = round?.finished ?? false;
+            const isCurrent =
+              !finished &&
+              playedCount < maxChips &&
+              index === Math.min(playedCount, maxChips - 1);
 
-            let background = 'rgba(255,255,255,0.06)';
-            let border = '1px solid rgba(255,255,255,0.10)';
-            let innerGlow = '';
+            let background = isCurrent
+              ? 'linear-gradient(180deg, rgba(201,168,76,0.16), rgba(201,168,76,0.06))'
+              : 'rgba(255,255,255,0.045)';
+            let border = isCurrent
+              ? '1px solid rgba(232,199,106,0.44)'
+              : '1px solid rgba(255,255,255,0.10)';
+            let innerGlow = isCurrent
+              ? '0 0 14px rgba(201,168,76,0.16), inset 0 1px 0 rgba(255,255,255,0.06)'
+              : '';
+            let labelColor = isCurrent
+              ? '#f2d488'
+              : 'rgba(232,213,160,0.38)';
 
             if (finished) {
               if (result === 'P1') {
@@ -1788,43 +1821,55 @@ function RightScoreColumn({
                 border = '1px solid rgba(255,223,128,0.84)';
                 innerGlow =
                   '0 0 14px rgba(201,168,76,0.52), inset 0 1px 2px rgba(255,255,255,0.38)';
+                labelColor = '#1a1204';
               } else if (result === 'P2') {
                 background =
                   'radial-gradient(circle at 40% 35%, #fca5a5 0%, #b91c1c 60%, #450a0a 100%)';
                 border = '1px solid rgba(254,202,202,0.74)';
-                innerGlow = '0 0 14px rgba(220,38,38,0.48), inset 0 1px 2px rgba(255,255,255,0.28)';
+                innerGlow =
+                  '0 0 14px rgba(220,38,38,0.48), inset 0 1px 2px rgba(255,255,255,0.28)';
+                labelColor = '#fff1f2';
               } else if (result === 'TIE') {
                 background =
                   'radial-gradient(circle at 40% 35%, #cbd5e1 0%, #64748b 60%, #1e293b 100%)';
                 border = '1px solid rgba(203,213,225,0.64)';
                 innerGlow =
                   '0 0 10px rgba(148,163,184,0.42), inset 0 1px 2px rgba(255,255,255,0.32)';
+                labelColor = '#f8fafc';
               }
             }
 
             return (
               <motion.div
                 key={index}
+                aria-label={`Vaza ${index + 1}${finished ? ' concluída' : isCurrent ? ' atual' : ' pendente'}`}
                 initial={false}
-                animate={{ scale: finished ? 1 : 0.88 }}
+                animate={{
+                  scale: finished ? 1 : isCurrent ? 1.04 : 0.94,
+                  opacity: isCurrent || finished ? 1 : 0.72,
+                }}
                 transition={{ type: 'spring', stiffness: 320, damping: 22 }}
-                className="h-[22px] w-[22px] rounded-full"
+                className="flex h-[30px] w-[30px] items-center justify-center rounded-[11px]"
                 style={{
                   background,
                   border,
-                  boxShadow: innerGlow || '0 2px 4px rgba(0,0,0,0.30)',
+                  boxShadow: innerGlow || '0 2px 5px rgba(0,0,0,0.30)',
                 }}
-              />
+              >
+                <span
+                  className="text-[11px] font-black leading-none"
+                  style={{
+                    color: labelColor,
+                    fontFamily: 'Georgia, serif',
+                    textShadow: finished ? '0 1px 2px rgba(0,0,0,0.24)' : 'none',
+                  }}
+                >
+                  {index + 1}
+                </span>
+              </motion.div>
             );
           })}
         </div>
-
-        <span
-          className="text-[9px] font-bold uppercase tracking-[0.22em]"
-          style={{ color: 'rgba(232,213,160,0.42)' }}
-        >
-          {playedCount}/{maxChips}
-        </span>
       </div>
     </div>
   );
@@ -1885,10 +1930,12 @@ function RoundClashVerdict({
   outcome,
   myCard,
   opponentCard,
+  placement = 'default',
 }: {
   outcome: SlotRoundOutcome;
   myCard: { rank: string; suit: string } | null;
   opponentCard: { rank: string; suit: string } | null;
+  placement?: 'default' | 'inset';
 }) {
   if (!outcome || !myCard || !opponentCard) {
     return null;
@@ -1915,11 +1962,19 @@ function RoundClashVerdict({
       tone={tone}
       title={title}
       detail={detail}
-      style={{
-        left: -386,
-        bottom: -212,
-        width: 292,
-      }}
+      style={
+        placement === 'inset'
+          ? {
+              left: 18,
+              bottom: 18,
+              width: 'min(292px, calc(100% - 36px))',
+            }
+          : {
+              left: -386,
+              bottom: -212,
+              width: 292,
+            }
+      }
     />
   );
 }
@@ -4583,6 +4638,10 @@ export function MatchTableShell(props: MatchTableShellProps) {
     label: string;
     accent: 'neutral' | 'pressure' | 'escalate' | 'win' | 'loss';
   }>(() => {
+    if (props.handStatusLabel === 'Analisando') {
+      return { label: 'Analisando', accent: 'neutral' };
+    }
+
     if (isMatchFinished) {
       return { label: 'Partida encerrada', accent: viewerWonCurrentHand ? 'win' : 'loss' };
     }
@@ -4635,6 +4694,7 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
     return { label: 'Aguardando', accent: 'neutral' };
   }, [
+    props.handStatusLabel,
     canPlayCard,
     canShowResolutionBadges,
     currentValue,
@@ -4964,6 +5024,21 @@ export function MatchTableShell(props: MatchTableShellProps) {
       </div>
 
       <AnimatePresence>
+        {props.roundVerdictPlacement === 'inset' &&
+        shouldHideActionSurfaceForRoundHold &&
+        myResolvedOutcome !== null &&
+        myCard !== null &&
+        opponentCard !== null ? (
+          <RoundClashVerdict
+            outcome={myResolvedOutcome}
+            myCard={myCard}
+            opponentCard={opponentCard}
+            placement="inset"
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isMaoDeOnzeTensionOpen ? (
           <MaoDeOnzeTableTension
             isOpen={isMaoDeOnzeTensionOpen}
@@ -5023,7 +5098,8 @@ export function MatchTableShell(props: MatchTableShellProps) {
 
               <div className="relative grid w-[268px] grid-cols-[116px_36px_116px] items-center justify-items-center rounded-[28px] px-0 py-0 sm:w-[456px] sm:grid-cols-[188px_80px_188px] sm:rounded-[34px] sm:px-2 sm:py-1">
                 <AnimatePresence>
-                  {shouldHideActionSurfaceForRoundHold &&
+                  {props.roundVerdictPlacement !== 'inset' &&
+                  shouldHideActionSurfaceForRoundHold &&
                   myResolvedOutcome !== null &&
                   myCard !== null &&
                   opponentCard !== null ? (

@@ -9,6 +9,7 @@ import './styles/globals.css';
 import './styles/premium-patch.css';
 import './styles/premium-patch-2.css';
 import './styles/premium-patch-3.css';
+import './styles/ai-lab.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
