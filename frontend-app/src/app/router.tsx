@@ -6,6 +6,9 @@ import { ProtectedLobbyRoute, ProtectedMatchRoute } from './authRouteBoundary';
 const HomePage = lazy(async () =>
   import('../pages/homePage').then((module) => ({ default: module.HomePage })),
 );
+const AiLabPage = lazy(async () =>
+  import('../pages/aiLabPage').then((module) => ({ default: module.AiLabPage })),
+);
 const AuthCallbackPage = lazy(async () =>
   import('../pages/authCallbackPage').then((module) => ({ default: module.AuthCallbackPage })),
 );
@@ -53,6 +56,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: withRouteSuspense(<HomePage />) },
+      { path: 'ai-lab', element: withRouteSuspense(<AiLabPage />) },
       { path: 'auth/callback', element: withRouteSuspense(<AuthCallbackPage />) },
       {
         element: <ProtectedLobbyRoute />,

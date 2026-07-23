@@ -146,6 +146,34 @@ class MlAssistedStrategyEngine:
         except Exception:
             return baseline
 
+        return self.resolve_with_probability(
+            payload,
+            baseline,
+            probability,
+        )
+
+    def resolve_with_probability(
+        self,
+        payload: BotDecisionRequest,
+        baseline: BotDecisionResponse,
+        probability: float,
+    ) -> BotDecisionResponse:
+        """
+        Resolve the assisted policy from an already-computed probability.
+
+        Runtime decision-making and observability tools can therefore share
+        the exact same policy without triggering a second model inference.
+        """
+        if not self._can_use_ml(
+            payload
+        ):
+            return baseline
+
+        if self._is_score_sensitive(
+            baseline
+        ):
+            return baseline
+
         return self._resolve_decision(
             payload,
             baseline,

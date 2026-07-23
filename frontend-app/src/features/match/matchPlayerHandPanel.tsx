@@ -14,6 +14,7 @@ type MatchPlayerHandPanelProps = {
   viraRank?: Rank;
   isDecisionFocus?: boolean;
   isCompactTable?: boolean;
+  fanSpreadMultiplier?: number;
   onCardElementChange?: ((cardKey: string, element: HTMLButtonElement | null) => void) | undefined;
 };
 
@@ -63,7 +64,12 @@ function getCardStrength(card: CardPayload, viraRank: Rank): number {
   return rankIndex;
 }
 
-function getFanMetrics(cardCount: number, index: number, compact = false): FanMetrics {
+function getFanMetrics(
+  cardCount: number,
+  index: number,
+  compact = false,
+  spreadMultiplier = 1,
+): FanMetrics {
   if (cardCount <= 1) {
     return { rotate: 0, x: 0, y: 0 };
   }
@@ -74,7 +80,7 @@ function getFanMetrics(cardCount: number, index: number, compact = false): FanMe
   const verticalDepth = compact ? (cardCount <= 3 ? 5 : 7) : cardCount <= 3 ? 7 : 10;
   return {
     rotate: offsetFromCenter * maxSpread * 0.24,
-    x: offsetFromCenter * horizontalStep,
+    x: offsetFromCenter * horizontalStep * spreadMultiplier,
     y: Math.abs(offsetFromCenter) * verticalDepth,
   };
 }
@@ -146,6 +152,7 @@ export function MatchPlayerHandPanel({
   viraRank = '4',
   isDecisionFocus = false,
   isCompactTable = false,
+  fanSpreadMultiplier = 1,
   onCardElementChange,
 }: MatchPlayerHandPanelProps) {
   const cardCount = myCards.length;
@@ -277,7 +284,12 @@ export function MatchPlayerHandPanel({
           const suitData = getSuitDisplay(card.suit);
           const isRed = isSuitRed(card.suit);
           const textColor = isRed ? '#c0392b' : '#1a1a2e';
-          const fan = getFanMetrics(cardCount, index, isCompactTable);
+          const fan = getFanMetrics(
+            cardCount,
+            index,
+            isCompactTable,
+            fanSpreadMultiplier,
+          );
           const isBestCard = cardKey === bestCardKey && !isLaunching;
           const centerDistance = Math.abs(index - (cardCount - 1) / 2);
           const isDecisionHeroCard = isDecisionFocus && centerDistance <= 0.5;

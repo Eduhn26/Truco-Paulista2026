@@ -8,6 +8,10 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.ai_lab_simulation import (
+    AiLabSimulationRequest,
+    run_ai_lab_simulation,
+)
 from app.config import settings
 from app.schemas import (
     BotDecisionRequest,
@@ -328,6 +332,15 @@ def get_readiness() -> HealthResponse:
         status='ok',
         service=settings.service_name,
         environment=settings.app_env,
+    )
+
+
+@app.post('/ai-lab/simulate')
+def simulate_ai_lab(
+    payload: AiLabSimulationRequest,
+) -> dict[str, Any]:
+    return run_ai_lab_simulation(
+        payload
     )
 
 

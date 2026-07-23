@@ -1,10 +1,13 @@
 import { MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
+import { AiLabSimulationController } from './ai-lab/ai-lab-simulation.controller';
+import { AiLabSimulationService } from './ai-lab/ai-lab-simulation.service';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
 import { AuthModule } from '@game/auth/auth.module';
+import { PythonBotConfigService } from '@game/infrastructure/bots/python-bot.config';
 import { GameModule } from '@game/modules/game.module';
 import { RequestLoggingInterceptor } from './application/http/interceptors/request-logging.interceptor';
 import { RequestMetricsInterceptor } from './application/http/interceptors/request-metrics.interceptor';
@@ -14,9 +17,11 @@ import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [GameModule, HealthModule, AuthModule],
-  controllers: [AppController],
+  controllers: [AppController, AiLabSimulationController],
   providers: [
     AppService,
+    AiLabSimulationService,
+    PythonBotConfigService,
     {
       provide: APP_GUARD,
       useClass: SocketRateLimitGuard,

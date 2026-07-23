@@ -7,6 +7,7 @@ export function AppShell() {
   const displayName = session?.user?.displayName ?? session?.user?.email ?? 'Convidado';
   const isAuthenticated = Boolean(session?.authToken);
   const isMatchRoute = pathname.startsWith('/match/');
+  const isAiLabRoute = pathname.startsWith('/ai-lab');
 
   return (
     <div className="relative min-h-screen bg-[#050810] text-slate-100 selection:bg-amber-500/30 selection:text-white">
@@ -43,33 +44,46 @@ export function AppShell() {
               </NavLink>
 
               {isAuthenticated ? (
-                <>
-                  <NavLink
-                    to="/lobby"
-                    className={({ isActive }) =>
-                      `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        isActive
-                          ? 'bg-amber-500/15 text-amber-300'
-                          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                      }`
-                    }
-                  >
-                    Lobby
-                  </NavLink>
+                <NavLink
+                  to="/lobby"
+                  className={({ isActive }) =>
+                    `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      isActive
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                    }`
+                  }
+                >
+                  Lobby
+                </NavLink>
+              ) : null}
 
-                  <NavLink
-                    to="/profile"
-                    className={({ isActive }) =>
-                      `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                        isActive
-                          ? 'bg-amber-500/15 text-amber-300'
-                          : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                      }`
-                    }
-                  >
-                    Perfil
-                  </NavLink>
-                </>
+              <NavLink
+                to="/ai-lab"
+                className={({ isActive }) =>
+                  `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    isActive
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`
+                }
+              >
+                AI Lab
+              </NavLink>
+
+              {isAuthenticated ? (
+                <NavLink
+                  to="/profile"
+                  className={({ isActive }) =>
+                    `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      isActive
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                    }`
+                  }
+                >
+                  Perfil
+                </NavLink>
               ) : null}
             </nav>
 
@@ -101,7 +115,9 @@ export function AppShell() {
         className={
           isMatchRoute
             ? 'relative z-10 w-full overflow-hidden px-0 py-0'
-            : 'relative z-10 mx-auto w-full max-w-7xl px-3 py-2 lg:px-4 lg:py-3'
+            : isAiLabRoute
+              ? 'relative z-10 mx-auto w-full max-w-[1600px] px-3 py-3 lg:px-6 lg:py-5'
+              : 'relative z-10 mx-auto w-full max-w-7xl px-3 py-2 lg:px-4 lg:py-3'
         }
       >
         <Outlet />
