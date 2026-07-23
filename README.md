@@ -19,7 +19,7 @@
 
 <br/>
 
-[🌐 Produção](https://truco-paulista-backend.onrender.com) · [❤️ Liveness](https://truco-paulista-backend.onrender.com/health/live) · [🗄️ Readiness](https://truco-paulista-backend.onrender.com/health/ready)
+[🌐 Produção]([https://truco-paulista-backend.onrender.com](https://truco-paulista2026.vercel.app/)) · [❤️ Liveness](https://truco-paulista-backend.onrender.com/health/live) · [🗄️ Readiness](https://truco-paulista-backend.onrender.com/health/ready)
 
 <br/>
 
